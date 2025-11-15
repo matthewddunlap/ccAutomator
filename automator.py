@@ -35,6 +35,24 @@ class CardConjurerAutomator:
         self.wait = WebDriverWait(self.driver, 15)
         self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
 
+        # Set 'All Art Version' on initialization by clicking its label
+        try:
+            import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
+            import_save_tab.click()
+            
+            # Locate the checkbox input element first to check its state
+            all_art_checkbox_input = self.wait.until(EC.presence_of_element_located((By.ID, 'importAllPrints')))
+            
+            if not all_art_checkbox_input.is_selected():
+                # Find the parent <label> of the checkbox and click it
+                label_for_checkbox = self.driver.find_element(By.XPATH, "//label[.//input[@id='importAllPrints']]")
+                label_for_checkbox.click()
+                print("Set 'All Art Version' checkbox to ON.")
+
+        except (TimeoutException, NoSuchElementException) as e:
+            print(f"Error setting 'All Art Version' on init: {e}", file=sys.stderr)
+            raise
+
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
         self.STABILITY_CHECKS = 3
