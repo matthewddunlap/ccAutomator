@@ -43,11 +43,15 @@ def main():
     )
     parser.add_argument(
         'input_file',
-        help="A plain text file with a list of card names.\n" 
-             "Format: <number> <Card Name>\n" 
-             "Example:\n" 
-             "1 Hidden Necropolis\n" 
+        help="A plain text file with a list of card names to process and capture.\n"
+             "Format: <number> <Card Name>\n"
+             "Example:\n"
+             "1 Hidden Necropolis\n"
              "1 Star Charter"
+    )
+    parser.add_argument(
+        '--prime-file',
+        help="Optional: A plain text file with card names to prime the renderer before capture."
     )
     parser.add_argument(
         '--output-dir',
@@ -62,12 +66,12 @@ def main():
 
     args = parser.parse_args()
 
-    card_names = parse_card_file(args.input_file)
-    if not card_names:
-        print("No valid card names found in the input file. Exiting.", file=sys.stderr)
+    card_names_to_process = parse_card_file(args.input_file)
+    if not card_names_to_process:
+        print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(card_names)} cards to process.")
+    print(f"Found {len(card_names_to_process)} cards to process for capture.")
 
     try:
         # Use a context manager to ensure the browser is closed properly
@@ -75,9 +79,18 @@ def main():
             # 1. Set the desired frame style
             automator.set_frame(args.frame)
 
-            # 2. Process each card from the input file
-            for i, card_name in enumerate(card_names, 1):
-                print(f"--- Processing card {i}/{len(card_names)} ---")
+            # 2. (New) Run the priming step if a prime file is provided
+            if args.prime_file:
+                prime_card_names = parse_card_file(args.prime_file)
+                if prime_card_names:
+                    automator.prime_renderer(prime_card_names)
+                else:
+                    print(f"Warning: Prime file '{args.prime_file}' was provided but contained no valid card names.", file=sys.stderr)
+
+            # 3. Process each card from the main input file
+            print("\n--- Starting Main Card Processing ---")
+            for i, card_name in enumerate(card_names_to_process, 1):
+                print(f"--- Processing card {i}/{len(card_names_to_process)} ---")
                 automator.import_and_save_card(card_name)
 
     except Exception as e:
