@@ -107,29 +107,69 @@ class CardConjurerAutomator:
         return None
 
     def _import_and_stabilize(self, card_name):
-        """Private method to import a card and wait for stabilization."""
-        try:
-            import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
-            import_save_tab.click()
-            import_input = self.wait.until(EC.presence_of_element_located((By.ID, 'import-name')))
-            import_input.clear()
-            import_input.send_keys(card_name)
-            import_button = self.wait.until(EC.element_to_be_clickable((By.ID, 'import-index')))
-            import_button.click()
-            print(f"Importing '{card_name}' and waiting for canvas to stabilize...")
-            new_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
-            if not new_hash or new_hash == self.current_canvas_hash:
-                print(f"Error: Canvas did not change or stabilize for '{card_name}'.", file=sys.stderr)
+            """
+            Private method to import a card, select its last available print,
+            and wait for the canvas to stabilize.
+            """
+            # We need to import the 'Keys' class to send special characters
+            from selenium.webdriver.common.keys import Keys
+    
+            try:
+                import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
+                import_save_tab.click()
+    
+                import_input = self.wait.until(EC.presence_of_element_located((By.ID, 'import-name')))
+                import_input.clear()
+    
+                dropdown_locator = (By.ID, 'import-index')
+                try:
+                    # Get a reference to the first option to watch for staleness
+                    first_option = self.driver.find_element(*dropdown_locator).find_element(By.TAG_NAME, 'option')
+                except NoSuchElementException:
+                    first_option = None # Dropdown is currently empty
+    
+                # --- START OF REVISED LOGIC ---
+                # Type the card name and then simulate pressing the 'Enter' key
+                # to more reliably trigger the application's search function.
+                import_input.send_keys(card_name)
+                import_input.send_keys(Keys.RETURN)
+                print(f"Searching for '{card_name}' (and pressing Enter)...")
+                # --- END OF REVISED LOGIC ---
+    
+                if first_option:
+                    print("Waiting for old print list to clear...")
+                    self.wait.until(EC.staleness_of(first_option))
+    
+                print("Waiting for new print list to populate...")
+                self.wait.until(
+                    lambda driver: len(driver.find_element(*dropdown_locator).find_elements(By.TAG_NAME, 'option')) > 0
+                )
+    
+                # Select the last option from the now correctly-populated dropdown
+                dropdown = Select(self.driver.find_element(*dropdown_locator))
+                last_option_index = len(dropdown.options) - 1
+                if last_option_index >= 0:
+                    selected_option_text = dropdown.options[last_option_index].text
+                    dropdown.select_by_index(last_option_index)
+                    print(f"Found {last_option_index + 1} prints. Selecting last: '{selected_option_text}'")
+                else:
+                    print(f"Warning: No prints found for '{card_name}'.", file=sys.stderr)
+    
+                print("Waiting for canvas to stabilize...")
+                new_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+                if not new_hash or new_hash == self.current_canvas_hash:
+                    print(f"Error: Canvas did not change or stabilize for '{card_name}'.", file=sys.stderr)
+                    self.current_canvas_hash = new_hash
+                    return False
+                
                 self.current_canvas_hash = new_hash
+                return True
+            except TimeoutException:
+                print(f"Error: Timed out waiting for print list for '{card_name}'. Search may not have been triggered.", file=sys.stderr)
                 return False
-            self.current_canvas_hash = new_hash
-            return True
-        except TimeoutException:
-            print(f"Error: Timed out while trying to import '{card_name}'.", file=sys.stderr)
-            return False
-        except Exception as e:
-            print(f"An unexpected error occurred importing '{card_name}': {e}", file=sys.stderr)
-            return False
+            except Exception as e:
+                print(f"An unexpected error occurred importing '{card_name}': {e}", file=sys.stderr)
+                return False
 
     def set_frame(self, frame_value):
         try:
