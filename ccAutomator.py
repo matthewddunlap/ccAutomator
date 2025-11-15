@@ -41,6 +41,18 @@ def main():
         required=True,
         help="The name of the frame to select from the dropdown (e.g., 'Seventh')."
     )
+
+    parser.add_argument(
+        '--print-selection',
+        default='earliest',
+        choices=['latest', 'earliest', 'random'],
+        help="Which print to select for a card:\n"
+             "'latest': First print in the list (most recent).\n"
+             "'earliest': Last print in the list (oldest).\n"
+             "'random': A random print from the matching list.\n"
+             "(defaults to 'earliest')"
+    )
+
     parser.add_argument(
         'input_file',
         help="A plain text file with a list of card names to process and capture.\n"
@@ -75,7 +87,7 @@ def main():
 
     try:
         # Use a context manager to ensure the browser is closed properly
-        with CardConjurerAutomator(url=args.url, download_dir=args.output_dir, headless=not args.no_headless) as automator:
+        with CardConjurerAutomator(url=args.url, download_dir=args.output_dir, headless=not args.no_headless, print_selection_strategy=args.print_selection) as automator:
             # 1. Set the desired frame style
             automator.set_frame(args.frame)
 

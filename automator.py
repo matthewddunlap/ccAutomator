@@ -1,3 +1,4 @@
+import random
 import time
 import re
 import os
@@ -15,48 +16,50 @@ class CardConjurerAutomator:
     """
     A class to automate interactions with the Card Conjurer web application.
     """
-    def __init__(self, url, download_dir='.', headless=True):
-        """
-        Initializes the WebDriver and navigates to the URL.
-        """
-        self.download_dir = download_dir
-        if not os.path.exists(self.download_dir):
-            os.makedirs(self.download_dir)
 
-        chrome_options = Options()
-        if headless:
-            chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1200,900")
-
-        self.driver = webdriver.Chrome(options=chrome_options)
-        self.driver.get(url)
-        self.wait = WebDriverWait(self.driver, 15)
-        self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
-
-        # Set 'All Art Version' on initialization by clicking its label
-        try:
-            import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
-            import_save_tab.click()
-            
-            # Locate the checkbox input element first to check its state
-            all_art_checkbox_input = self.wait.until(EC.presence_of_element_located((By.ID, 'importAllPrints')))
-            
-            if not all_art_checkbox_input.is_selected():
-                # Find the parent <label> of the checkbox and click it
-                label_for_checkbox = self.driver.find_element(By.XPATH, "//label[.//input[@id='importAllPrints']]")
-                label_for_checkbox.click()
-                print("Set 'All Art Version' checkbox to ON.")
-
-        except (TimeoutException, NoSuchElementException) as e:
-            print(f"Error setting 'All Art Version' on init: {e}", file=sys.stderr)
-            raise
-
-        self.current_canvas_hash = None
-        self.STABILIZE_TIMEOUT = 10
-        self.STABILITY_CHECKS = 3
-        self.STABILITY_INTERVAL = 0.3
+    def __init__(self, url, download_dir='.', headless=True, print_selection_strategy='earliest'):
+            """
+            Initializes the WebDriver, navigates to the URL, and sets initial state.
+            """
+            self.download_dir = download_dir
+            if not os.path.exists(self.download_dir):
+                os.makedirs(self.download_dir)
+    
+            chrome_options = Options()
+            if headless:
+                chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1200,900")
+    
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.get(url)
+            self.wait = WebDriverWait(self.driver, 15)
+            self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
+    
+            # Store the print selection strategy
+            self.print_selection_strategy = print_selection_strategy
+    
+            # Set 'All Art Version' on initialization by clicking its label
+            try:
+                import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
+                import_save_tab.click()
+                
+                all_art_checkbox_input = self.wait.until(EC.presence_of_element_located((By.ID, 'importAllPrints')))
+                
+                if not all_art_checkbox_input.is_selected():
+                    label_for_checkbox = self.driver.find_element(By.XPATH, "//label[.//input[@id='importAllPrints']]")
+                    label_for_checkbox.click()
+                    print("Set 'All Art Version' checkbox to ON.")
+    
+            except (TimeoutException, NoSuchElementException) as e:
+                print(f"Error setting 'All Art Version' on init: {e}", file=sys.stderr)
+                raise
+    
+            self.current_canvas_hash = None
+            self.STABILIZE_TIMEOUT = 10
+            self.STABILITY_CHECKS = 3
+            self.STABILITY_INTERVAL = 0.3
 
     def __enter__(self):
         return self
@@ -162,16 +165,25 @@ class CardConjurerAutomator:
                                 match_data['collector_number'] = set_info.group(2).strip()
                             
                             exact_matches.append(match_data)
-    
+
+                # --- START OF MODIFIED SELECTION LOGIC ---
                 if not exact_matches:
                     print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr)
                     return False
     
-                # Select the last valid print from our filtered list
-                target_print = exact_matches[-1]
-                print(f"Found {len(exact_matches)} exact match(es). Selecting last: '{target_print['text']}'")
+                # Select a print based on the strategy provided during initialization
+                if self.print_selection_strategy == 'latest':
+                    target_print = exact_matches[0]
+                    selection_descriptor = "latest (first)"
+                elif self.print_selection_strategy == 'random':
+                    target_print = random.choice(exact_matches)
+                    selection_descriptor = "random"
+                else:  # Default to 'earliest'
+                    target_print = exact_matches[-1]
+                    selection_descriptor = "earliest (last)"
+    
+                print(f"Found {len(exact_matches)} exact match(es). Selecting {selection_descriptor}: '{target_print['text']}'")
                 dropdown.select_by_value(target_print['index'])
-                # --- END OF NEW FILTERING LOGIC ---
     
                 print("Waiting for canvas to stabilize...")
                 new_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
