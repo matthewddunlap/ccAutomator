@@ -108,10 +108,9 @@ class CardConjurerAutomator:
 
     def _import_and_stabilize(self, card_name):
             """
-            Private method to import a card, select its last available print,
-            and wait for the canvas to stabilize.
+            Private method to import a card, find an exact name match, select its 
+            last available print, and wait for the canvas to stabilize.
             """
-            # We need to import the 'Keys' class to send special characters
             from selenium.webdriver.common.keys import Keys
     
             try:
@@ -123,37 +122,56 @@ class CardConjurerAutomator:
     
                 dropdown_locator = (By.ID, 'import-index')
                 try:
-                    # Get a reference to the first option to watch for staleness
                     first_option = self.driver.find_element(*dropdown_locator).find_element(By.TAG_NAME, 'option')
                 except NoSuchElementException:
-                    first_option = None # Dropdown is currently empty
+                    first_option = None
     
-                # --- START OF REVISED LOGIC ---
-                # Type the card name and then simulate pressing the 'Enter' key
-                # to more reliably trigger the application's search function.
                 import_input.send_keys(card_name)
                 import_input.send_keys(Keys.RETURN)
-                print(f"Searching for '{card_name}' (and pressing Enter)...")
-                # --- END OF REVISED LOGIC ---
+                print(f"Searching for '{card_name}'...")
     
                 if first_option:
-                    print("Waiting for old print list to clear...")
                     self.wait.until(EC.staleness_of(first_option))
     
-                print("Waiting for new print list to populate...")
                 self.wait.until(
                     lambda driver: len(driver.find_element(*dropdown_locator).find_elements(By.TAG_NAME, 'option')) > 0
                 )
     
-                # Select the last option from the now correctly-populated dropdown
+                # --- START OF NEW FILTERING LOGIC ---
                 dropdown = Select(self.driver.find_element(*dropdown_locator))
-                last_option_index = len(dropdown.options) - 1
-                if last_option_index >= 0:
-                    selected_option_text = dropdown.options[last_option_index].text
-                    dropdown.select_by_index(last_option_index)
-                    print(f"Found {last_option_index + 1} prints. Selecting last: '{selected_option_text}'")
-                else:
-                    print(f"Warning: No prints found for '{card_name}'.", file=sys.stderr)
+                
+                exact_matches = []
+                for option in dropdown.options:
+                    option_text = option.text
+                    # Perform a case-insensitive exact match on the card name part
+                    if option_text.lower().startswith(card_name.lower()):
+                        # Check what comes after the name to ensure it's not a different card
+                        # e.g. "Sol Ring" vs "Sol Ring Fragment"
+                        end_of_name_index = len(card_name)
+                        if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
+                            match_data = {
+                                'index': option.get_attribute('value'),
+                                'text': option_text,
+                                'set_name': None,
+                                'collector_number': None
+                            }
+                            # Use regex to extract set and collector number if they exist
+                            set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
+                            if set_info:
+                                match_data['set_name'] = set_info.group(1).strip()
+                                match_data['collector_number'] = set_info.group(2).strip()
+                            
+                            exact_matches.append(match_data)
+    
+                if not exact_matches:
+                    print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr)
+                    return False
+    
+                # Select the last valid print from our filtered list
+                target_print = exact_matches[-1]
+                print(f"Found {len(exact_matches)} exact match(es). Selecting last: '{target_print['text']}'")
+                dropdown.select_by_value(target_print['index'])
+                # --- END OF NEW FILTERING LOGIC ---
     
                 print("Waiting for canvas to stabilize...")
                 new_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
@@ -165,7 +183,7 @@ class CardConjurerAutomator:
                 self.current_canvas_hash = new_hash
                 return True
             except TimeoutException:
-                print(f"Error: Timed out waiting for print list for '{card_name}'. Search may not have been triggered.", file=sys.stderr)
+                print(f"Error: Timed out waiting for print list for '{card_name}'.", file=sys.stderr)
                 return False
             except Exception as e:
                 print(f"An unexpected error occurred importing '{card_name}': {e}", file=sys.stderr)
