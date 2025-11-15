@@ -93,6 +93,12 @@ def main():
         help="Run the browser in non-headless mode for debugging purposes."
     )
 
+    parser.add_argument(
+        '--white-border',
+        action='store_true',
+        help="Apply the white border to the card frame."
+    )
+
     args = parser.parse_args()
 
     card_names_to_process = parse_card_file(args.input_file)
@@ -115,6 +121,9 @@ def main():
         ) as automator:
             
             automator.set_frame(args.frame)
+
+            if args.white_border:
+                automator.apply_white_border()
 
             if args.prime_file:
                 prime_card_names = parse_card_file(args.prime_file)

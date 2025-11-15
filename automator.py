@@ -8,6 +8,7 @@ import random
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
@@ -241,6 +242,55 @@ class CardConjurerAutomator:
             self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
         except (TimeoutException, NoSuchElementException) as e:
             print(f"Error setting frame: {e}", file=sys.stderr)
+            raise
+
+    def apply_white_border(self):
+        """
+        Applies the white border by finding the correct thumbnail and double-clicking
+        it using a more robust JavaScript-based approach.
+        """
+        print("Applying white border...")
+        try:
+            # 1. Navigate to the Frame tab
+            frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
+            frame_tab.click()
+
+            # 2. Define the reliable selector for the white border thumbnail
+            white_border_selector = "//div[@id='frame-picker']//img[contains(@src, '/whiteThumb.png')]"
+            
+            print("Searching for the white border thumbnail...")
+            
+            # 3. Wait for the element to be clickable, not just present. This is a stronger check.
+            white_border_thumb = self.wait.until(
+                EC.element_to_be_clickable((By.XPATH, white_border_selector))
+            )
+
+            # 4. Use JavaScript to scroll the element into view. This prevents issues where the element is off-screen.
+            print("Scrolling thumbnail into view...")
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", white_border_thumb)
+            time.sleep(0.5) # A brief pause to ensure scrolling is complete
+
+            # 5. Use two consecutive JavaScript clicks to simulate a double-click.
+            #    This is often more reliable than ActionChains for triggering JS event listeners.
+            print("Found thumbnail. Attempting double JavaScript click...")
+            self.driver.execute_script("arguments[0].click();", white_border_thumb)
+            self.driver.execute_script("arguments[0].click();", white_border_thumb)
+
+            # 6. Wait for the canvas to stabilize to confirm the change
+            print("Waiting for white border to apply to the canvas...")
+            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+            
+            if self.current_canvas_hash is None:
+                 print("Warning: Canvas did not stabilize after applying white border. The change may not have registered.", file=sys.stderr)
+            else:
+                 print("Successfully applied white border.")
+
+        except TimeoutException:
+            print("Error: Timed out trying to find or apply the white border.", file=sys.stderr)
+            print("The thumbnail with src '/whiteThumb.png' may not be present for this frame.", file=sys.stderr)
+            raise
+        except Exception as e:
+            print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
 
     def close(self):
