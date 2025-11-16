@@ -117,13 +117,11 @@ def main():
             exclude_sets=args.exclude_set,
             set_selection_strategy=args.set_selection,
             no_match_skip=args.no_match_skip,
-            render_delay=args.render_delay
+            render_delay=args.render_delay,
+            white_border=args.white_border
         ) as automator:
             
             automator.set_frame(args.frame)
-
-            if args.white_border:
-                automator.apply_white_border()
 
             if args.prime_file:
                 prime_card_names = parse_card_file(args.prime_file)

@@ -20,7 +20,7 @@ class CardConjurerAutomator:
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
-                 no_match_skip=False, render_delay=1.5):
+                 no_match_skip=False, render_delay=1.5, white_border=False):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -44,11 +44,14 @@ class CardConjurerAutomator:
         self.set_selection_strategy = set_selection_strategy
         self.no_match_skip = no_match_skip
         self.render_delay = render_delay
+        self.apply_white_border_on_capture = white_border
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
         self.STABILITY_CHECKS = 3
         self.STABILITY_INTERVAL = 0.3
+
+        self.import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -217,8 +220,16 @@ class CardConjurerAutomator:
         dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
         for i, print_data in enumerate(prints_to_capture, 1):
             print(f"-> Capturing {i}/{len(prints_to_capture)}: '{print_data['text']}'")
+            self.import_save_tab.click()
             dropdown.select_by_value(print_data['index'])
-            time.sleep(self.render_delay)
+
+            # If the white border is requested, apply it NOW, after the card is loaded.
+            if self.apply_white_border_on_capture:
+                self.apply_white_border()
+            else:
+                # If not applying a border, we still need a delay for rendering.
+                time.sleep(self.render_delay)
+
             data_url = self._get_canvas_data_url()
             if not data_url or not data_url.startswith('data:image/png;base64,'):
                 print(f"   Error: Could not capture canvas.", file=sys.stderr); continue
@@ -276,19 +287,24 @@ class CardConjurerAutomator:
             self.driver.execute_script("arguments[0].click();", white_border_thumb)
             self.driver.execute_script("arguments[0].click();", white_border_thumb)
 
-            # 6. Wait for the canvas to stabilize to confirm the change
-            print("Waiting for white border to apply to the canvas...")
-            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
-            
-            if self.current_canvas_hash is None:
-                 print("Warning: Canvas did not stabilize after applying white border. The change may not have registered.", file=sys.stderr)
-            else:
-                 print("Successfully applied white border.")
+            # --- THE FIX: Use a fixed delay, not stabilization ---
+            print(f"   Waiting {self.render_delay}s for border to render...")
+            time.sleep(self.render_delay)
+            print("   White border applied.")
 
-        except TimeoutException:
-            print("Error: Timed out trying to find or apply the white border.", file=sys.stderr)
-            print("The thumbnail with src '/whiteThumb.png' may not be present for this frame.", file=sys.stderr)
-            raise
+#            # 6. Wait for the canvas to stabilize to confirm the change
+#            print("Waiting for white border to apply to the canvas...")
+#            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+#            
+#            if self.current_canvas_hash is None:
+#                 print("Warning: Canvas did not stabilize after applying white border. The change may not have registered.", file=sys.stderr)
+#            else:
+#                 print("Successfully applied white border.")
+#
+#        except TimeoutException:
+#            print("Error: Timed out trying to find or apply the white border.", file=sys.stderr)
+#            print("The thumbnail with src '/whiteThumb.png' may not be present for this frame.", file=sys.stderr)
+#            raise
         except Exception as e:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
