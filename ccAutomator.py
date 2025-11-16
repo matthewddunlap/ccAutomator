@@ -99,6 +99,19 @@ def main():
         help="Apply the white border to the card frame."
     )
 
+    parser.add_argument(
+        '--pt-bold',
+        action='store_true',
+        help="Wrap the Power/Toughness text in {bold} tags."
+    )
+
+    parser.add_argument(
+        '--pt-shadow',
+        type=int,
+        metavar='NUM',
+        help="Add a {shadow#} tag to the Power/Toughness text."
+    )
+
     args = parser.parse_args()
 
     card_names_to_process = parse_card_file(args.input_file)
@@ -118,7 +131,9 @@ def main():
             set_selection_strategy=args.set_selection,
             no_match_skip=args.no_match_skip,
             render_delay=args.render_delay,
-            white_border=args.white_border
+            white_border=args.white_border,
+            pt_bold=args.pt_bold,
+            pt_shadow=args.pt_shadow
         ) as automator:
             
             automator.set_frame(args.frame)

@@ -20,7 +20,7 @@ class CardConjurerAutomator:
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
-                 no_match_skip=False, render_delay=1.5, white_border=False):
+                 no_match_skip=False, render_delay=1.5, white_border=False, pt_bold=False, pt_shadow=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -45,6 +45,9 @@ class CardConjurerAutomator:
         self.no_match_skip = no_match_skip
         self.render_delay = render_delay
         self.apply_white_border_on_capture = white_border
+
+        self.pt_bold = pt_bold
+        self.pt_shadow = pt_shadow
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
@@ -52,6 +55,7 @@ class CardConjurerAutomator:
         self.STABILITY_INTERVAL = 0.3
 
         self.import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
+        self.text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -191,6 +195,52 @@ class CardConjurerAutomator:
         except Exception as e:
             print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr); return []
 
+    def _apply_pt_mods(self):
+        """
+        If requested, navigates to the text tab, selects the P/T field,
+        and applies bold/shadow tags to its content.
+        """
+        if not self.pt_bold and self.pt_shadow is None:
+            return
+
+        print("   Applying Power/Toughness modifications...")
+        try:
+            self.text_tab.click()
+            
+            # --- CORRECTED SELECTORS ---
+            pt_button_selector = "//h4[text()='Power/Toughness']"
+            text_editor_id = "text-editor"
+            # --- END CORRECTED SELECTORS ---
+
+            pt_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, pt_button_selector)))
+            pt_button.click()
+            
+            # Brief pause to let the textarea populate with the P/T value
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            current_text = text_input.get_attribute('value')
+
+            shadow_tag = f"{{shadow{self.pt_shadow}}}" if self.pt_shadow is not None else ""
+            bold_tag = "{bold}" if self.pt_bold else ""
+            bold_close_tag = "{/bold}" if self.pt_bold else ""
+            
+            if current_text and current_text.strip():
+                new_text = f"{shadow_tag}{bold_tag}{current_text}{bold_close_tag}"
+                
+                # Using JavaScript to set the value can be more reliable than send_keys
+                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                # Manually trigger the 'oninput' event so the website recognizes the change
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+
+                print(f"   P/T changed from '{current_text}' to '{new_text}'.")
+
+            # Wait for the change to render on the canvas
+            time.sleep(self.render_delay)
+
+        except Exception as e:
+            print(f"   An error occurred while applying P/T mods: {e}", file=sys.stderr)
+
     def process_and_capture_card(self, card_name, is_priming=False):
         candidate_prints = self._get_and_filter_prints(card_name)
         if not candidate_prints:
@@ -223,11 +273,20 @@ class CardConjurerAutomator:
             self.import_save_tab.click()
             dropdown.select_by_value(print_data['index'])
 
-            # If the white border is requested, apply it NOW, after the card is loaded.
+            # Set a flag to see if we need an extra delay at the end
+            mods_applied = False
+
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
-            else:
-                # If not applying a border, we still need a delay for rendering.
+                mods_applied = True
+            
+            if self.pt_bold or self.pt_shadow is not None:
+                self._apply_pt_mods()
+                mods_applied = True
+
+            # If no modifications were made that include their own delays,
+            # we must add the default render delay here.
+            if not mods_applied:
                 time.sleep(self.render_delay)
 
             data_url = self._get_canvas_data_url()
