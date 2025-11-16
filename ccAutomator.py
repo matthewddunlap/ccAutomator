@@ -119,6 +119,21 @@ def main():
         help="Add a {fontsize#} tag to the Power/Toughness text."
     )
 
+    parser.add_argument(
+        '--image-server',
+        help="The base URL of the web server where custom art is stored (e.g., 'http://mtgproxy:4242')."
+    )
+    parser.add_argument(
+        '--image-server-path',
+        help="The path on the image server where the art files are located (e.g., '/local_art/upscaled/')."
+    )
+
+    parser.add_argument(
+        '--autofit-art',
+        action='store_true',
+        help="Check the 'Autofit when setting art' checkbox before applying custom art."
+    )
+
     args = parser.parse_args()
 
     card_names_to_process = parse_card_file(args.input_file)
@@ -141,7 +156,10 @@ def main():
             white_border=args.white_border,
             pt_bold=args.pt_bold,
             pt_shadow=args.pt_shadow,
-            pt_font_size=args.pt_font_size 
+            pt_font_size=args.pt_font_size,
+            image_server=args.image_server,
+            image_server_path=args.image_server_path,
+            autofit_art=args.autofit_art
         ) as automator:
             
             automator.set_frame(args.frame)

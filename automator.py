@@ -5,6 +5,8 @@ import base64
 import sys
 import hashlib
 import random
+import requests
+from urllib.parse import urljoin
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -20,7 +22,9 @@ class CardConjurerAutomator:
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
-                 no_match_skip=False, render_delay=1.5, white_border=False, pt_bold=False, pt_shadow=None, pt_font_size=None):
+                 no_match_skip=False, render_delay=1.5, white_border=False,
+                 pt_bold=False, pt_shadow=None, pt_font_size=None,
+                 image_server=None, image_server_path=None, autofit_art=False):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -49,6 +53,11 @@ class CardConjurerAutomator:
         self.pt_bold = pt_bold
         self.pt_shadow = pt_shadow
         self.pt_font_size = pt_font_size
+
+        self.app_url = url 
+        self.image_server_url = image_server
+        self.image_server_path = image_server_path if image_server_path else ''
+        self.autofit_art = autofit_art
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
@@ -57,6 +66,7 @@ class CardConjurerAutomator:
 
         self.import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
         self.text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
+        self.art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Art']")))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -244,6 +254,71 @@ class CardConjurerAutomator:
         except Exception as e:
             print(f"   An error occurred while applying P/T mods: {e}", file=sys.stderr)
 
+    # --- 3. ADD THE NEW _apply_custom_art METHOD ---
+    def _apply_custom_art(self, card_name, set_name, collector_number):
+        """
+        Checks for custom art on a web server and, if found, applies it to the card.
+        """
+        if not self.image_server_url:
+            return
+
+        # Generate the expected filename for the art file
+        image_filename = self._generate_safe_filename(card_name, set_name, collector_number)
+        
+        # Construct the full URL to check for the art's existence
+        full_art_url = urljoin(urljoin(self.image_server_url, self.image_server_path), image_filename)
+
+        try:
+            # Use a HEAD request to efficiently check for the file's existence without downloading it
+            response = requests.head(full_art_url, timeout=5)
+            if response.status_code == 200:
+                print(f"   Found custom art at: {full_art_url}")
+
+                # Determine the final URL to paste based on the special trimming logic
+                url_to_paste = ""
+                if self.image_server_url in self.app_url and self.image_server_path.startswith('/local_art/'):
+                    prefix_to_trim = '/local_art/'
+                    trimmed_path = self.image_server_path[len(prefix_to_trim):]
+                    url_to_paste = urljoin(trimmed_path, image_filename)
+                    print(f"   Trimming URL for local server. Pasting: {url_to_paste}")
+                else:
+                    url_to_paste = full_art_url
+
+                # Navigate to the art tab and paste the URL
+                self.art_tab.click()
+
+                # --- NEW: Handle Autofit Checkbox ---
+                if self.autofit_art:
+                    print("   Ensuring Autofit is enabled...")
+                    try:
+                        autofit_checkbox = self.wait.until(EC.presence_of_element_located((By.ID, 'art-update-autofit')))
+                        if not autofit_checkbox.is_selected():
+                            # Click the parent label, which is more reliable for custom checkboxes
+                            label_for_autofit = self.driver.find_element(By.XPATH, "//label[.//input[@id='art-update-autofit']]")
+                            label_for_autofit.click()
+                            print("   'Autofit when setting art' checkbox enabled.")
+                    except Exception as e:
+                        print(f"   Warning: Could not set the autofit checkbox. {e}", file=sys.stderr)
+                # --- END OF NEW LOGIC ---
+                
+                art_url_input_selector = "//h5[contains(text(), 'Choose/upload your art')]/following-sibling::div//input[@type='url']"
+                art_url_input = self.wait.until(EC.presence_of_element_located((By.XPATH, art_url_input_selector)))
+                
+                art_url_input.clear()
+                art_url_input.send_keys(url_to_paste)
+
+                # Press Enter to submit the URL and trigger the art load.
+                art_url_input.send_keys(Keys.RETURN)
+
+                # Wait for the new art to load and the canvas to stabilize
+                print("   Waiting for custom art to apply...")
+                self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+            else:
+                print(f"   Custom art not found at {full_art_url} (Status: {response.status_code}). Using default art.")
+
+        except requests.exceptions.RequestException as e:
+            print(f"   Network error checking for custom art '{full_art_url}': {e}", file=sys.stderr)
+
     def process_and_capture_card(self, card_name, is_priming=False):
         candidate_prints = self._get_and_filter_prints(card_name)
         if not candidate_prints:
@@ -275,6 +350,9 @@ class CardConjurerAutomator:
             print(f"-> Capturing {i}/{len(prints_to_capture)}: '{print_data['text']}'")
             self.import_save_tab.click()
             dropdown.select_by_value(print_data['index'])
+
+            # --- NEW: APPLY CUSTOM ART RIGHT AFTER IMPORT ---
+            self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'])
 
             # Set a flag to see if we need an extra delay at the end
             mods_applied = False
