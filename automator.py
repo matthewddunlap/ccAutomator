@@ -24,12 +24,14 @@ class CardConjurerAutomator:
                  exclude_sets=None, set_selection_strategy='earliest',
                  no_match_skip=False, render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None,
-                 image_server=None, image_server_path=None, autofit_art=False):
+                 image_server=None, image_server_path=None, autofit_art=False,
+                 upload_path=None, upload_secret=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
         self.download_dir = download_dir
-        if not os.path.exists(self.download_dir):
+        # Only create the directory if a path was actually provided
+        if self.download_dir and not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
 
         chrome_options = Options()
@@ -58,6 +60,8 @@ class CardConjurerAutomator:
         self.image_server_url = image_server
         self.image_server_path = image_server_path if image_server_path else ''
         self.autofit_art = autofit_art
+        self.upload_path = upload_path
+        self.upload_secret = upload_secret # This can be None, which is fine
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
@@ -319,6 +323,45 @@ class CardConjurerAutomator:
         except requests.exceptions.RequestException as e:
             print(f"   Network error checking for custom art '{full_art_url}': {e}", file=sys.stderr)
 
+    # --- 2. ADD THE NEW _upload_image METHOD ---
+    def _upload_image(self, image_data, filename):
+        """
+        Uploads the given image data to the configured server endpoint
+        using the HTTP PUT method.
+        """
+        # --- THE FIX: Use requests.put and send raw data ---
+        
+        # 1. Construct the full, final URL for the file, including the filename.
+        #    A PUT request needs the complete destination URL.
+        full_upload_url = os.path.join(self.image_server_url, self.upload_path.lstrip('/'), filename)
+        
+        print(f"   Uploading to {full_upload_url} (using PUT)...")
+        
+        # 2. Set the Content-Type header so the server knows it's a PNG image.
+        headers = {'Content-Type': 'image/png'}
+        
+        # 3. Add the optional security secret if provided.
+        if self.upload_secret:
+            headers['X-Upload-Secret'] = self.upload_secret
+
+        try:
+            # 4. Use requests.put() and send the image_data directly in the 'data' parameter.
+            #    We also use raise_for_status() to automatically catch bad responses (like 403 Forbidden).
+            response = requests.put(full_upload_url, data=image_data, headers=headers, timeout=60)
+            response.raise_for_status()  # This will raise an HTTPError for 4xx or 5xx responses.
+
+            # If raise_for_status() doesn't raise an error, the upload was successful.
+            print(f"   Upload successful.")
+
+        except requests.exceptions.HTTPError as e:
+            # This catches specific HTTP errors like 403 Forbidden, 405 Method Not Allowed, 500 Server Error, etc.
+            print(f"   Error: Upload failed with status {e.response.status_code}.", file=sys.stderr)
+            print(f"   Server Response: {e.response.text}", file=sys.stderr)
+        except requests.exceptions.RequestException as e:
+            # This catches network-level errors (e.g., DNS failure, connection refused).
+            print(f"   Error: A network error occurred during upload: {e}", file=sys.stderr)
+
+
     def process_and_capture_card(self, card_name, is_priming=False):
         candidate_prints = self._get_and_filter_prints(card_name)
         if not candidate_prints:
@@ -376,11 +419,20 @@ class CardConjurerAutomator:
             try:
                 img_data = base64.b64decode(data_url.split(',', 1)[1])
                 filename = self._generate_safe_filename(card_name, print_data['set_name'], print_data['collector_number'])
-                output_path = os.path.join(self.download_dir, filename)
-                with open(output_path, 'wb') as f: f.write(img_data)
-                print(f"   Saved to '{output_path}'.")
+                # --- REVISED, CLEANER LOGIC ---
+                if self.upload_path:
+                    # Upload mode is active
+                    self._upload_image(img_data, filename)
+                else:
+                    # Local save mode is active
+                    output_path = os.path.join(self.download_dir, filename)
+                    with open(output_path, 'wb') as f:
+                        f.write(img_data)
+                    print(f"   Saved locally to '{output_path}'.")
+                # --- END OF REVISED LOGIC ---
+
             except Exception as e:
-                print(f"   Error saving image: {e}", file=sys.stderr)
+                print(f"   Error processing or saving/uploading image data: {e}", file=sys.stderr)
 
     def set_frame(self, frame_value):
         try:

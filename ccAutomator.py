@@ -83,11 +83,6 @@ def main():
         help="Optional: A plain text file with card names to prime the renderer before capture."
     )
     parser.add_argument(
-        '--output-dir',
-        default='output_images',
-        help="Directory to save the card images. Defaults to 'output_images'."
-    )
-    parser.add_argument(
         '--no-headless',
         action='store_true',
         help="Run the browser in non-headless mode for debugging purposes."
@@ -134,7 +129,36 @@ def main():
         help="Check the 'Autofit when setting art' checkbox before applying custom art."
     )
 
+    # --- START OF MODIFIED ARGUMENTS ---
+    # Create a mutually exclusive group for the output destination
+    output_group = parser.add_mutually_exclusive_group(required=True)
+    
+    output_group.add_argument(
+        '--output-dir',
+        help="Directory to save the card images locally."
+    )
+    output_group.add_argument(
+        '--upload-path',
+        help="If specified, uploads the final PNG to this path on the --image-server (e.g., '/upload')."
+    )
+    
+    parser.add_argument(
+        '--upload-secret',
+        help="Optional: A secret key sent in the 'X-Upload-Secret' header for authentication."
+    )
+    # --- END OF MODIFIED ARGUMENTS ---
+
     args = parser.parse_args()
+
+    # --- Validation ---
+    if args.upload_path and not args.image_server:
+        parser.error("--upload-path requires --image-server to be set.")
+
+    if args.upload_secret and not args.upload_path:
+        parser.error("--upload-secret is only valid when using --upload-path.")
+
+    # Determine if we are in local save mode or upload mode
+    save_locally = True if args.output_dir else False
 
     card_names_to_process = parse_card_file(args.input_file)
     if not card_names_to_process:
@@ -146,6 +170,7 @@ def main():
     try:
         with CardConjurerAutomator(
             url=args.url,
+            # Pass the output directory, which might be None if uploading
             download_dir=args.output_dir,
             headless=not args.no_headless,
             include_sets=args.include_set,
@@ -159,7 +184,9 @@ def main():
             pt_font_size=args.pt_font_size,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
-            autofit_art=args.autofit_art
+            autofit_art=args.autofit_art,
+            upload_path=args.upload_path,
+            upload_secret=args.upload_secret
         ) as automator:
             
             automator.set_frame(args.frame)
