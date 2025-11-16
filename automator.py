@@ -20,7 +20,7 @@ class CardConjurerAutomator:
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
-                 no_match_skip=False, render_delay=1.5, white_border=False, pt_bold=False, pt_shadow=None):
+                 no_match_skip=False, render_delay=1.5, white_border=False, pt_bold=False, pt_shadow=None, pt_font_size=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -48,6 +48,7 @@ class CardConjurerAutomator:
 
         self.pt_bold = pt_bold
         self.pt_shadow = pt_shadow
+        self.pt_font_size = pt_font_size
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
@@ -221,12 +222,14 @@ class CardConjurerAutomator:
             text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
             current_text = text_input.get_attribute('value')
 
+            font_size_tag = f"{{fontsize{self.pt_font_size}}}" if self.pt_font_size is not None else ""
             shadow_tag = f"{{shadow{self.pt_shadow}}}" if self.pt_shadow is not None else ""
             bold_tag = "{bold}" if self.pt_bold else ""
             bold_close_tag = "{/bold}" if self.pt_bold else ""
             
             if current_text and current_text.strip():
-                new_text = f"{shadow_tag}{bold_tag}{current_text}{bold_close_tag}"
+                # Prepend all tags to the existing text
+                new_text = f"{font_size_tag}{shadow_tag}{bold_tag}{current_text}{bold_close_tag}"
                 
                 # Using JavaScript to set the value can be more reliable than send_keys
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
@@ -280,7 +283,7 @@ class CardConjurerAutomator:
                 self.apply_white_border()
                 mods_applied = True
             
-            if self.pt_bold or self.pt_shadow is not None:
+            if self.pt_bold or self.pt_shadow is not None or self.pt_font_size is not None:
                 self._apply_pt_mods()
                 mods_applied = True
 

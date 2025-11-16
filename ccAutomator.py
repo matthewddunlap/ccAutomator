@@ -112,6 +112,13 @@ def main():
         help="Add a {shadow#} tag to the Power/Toughness text."
     )
 
+    parser.add_argument(
+        '--pt-font-size',
+        type=int,
+        metavar='NUM',
+        help="Add a {fontsize#} tag to the Power/Toughness text."
+    )
+
     args = parser.parse_args()
 
     card_names_to_process = parse_card_file(args.input_file)
@@ -133,7 +140,8 @@ def main():
             render_delay=args.render_delay,
             white_border=args.white_border,
             pt_bold=args.pt_bold,
-            pt_shadow=args.pt_shadow
+            pt_shadow=args.pt_shadow,
+            pt_font_size=args.pt_font_size 
         ) as automator:
             
             automator.set_frame(args.frame)
