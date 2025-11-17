@@ -25,7 +25,7 @@ class CardConjurerAutomator:
                  no_match_skip=False, render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
-                 type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                 type_font_size=None, type_shadow=None, type_kerning=None, type_left=None, flavor_font=None,
                  image_server=None, image_server_path=None, autofit_art=False,
                  upload_path=None, upload_secret=None):
         """
@@ -63,6 +63,8 @@ class CardConjurerAutomator:
         self.title_shadow = title_shadow
         self.title_kerning = title_kerning
         self.title_left = title_left
+
+        self.flavor_font = flavor_font
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -222,6 +224,47 @@ class CardConjurerAutomator:
             print(f"Error: Timed out for '{card_name}'. Card might not exist.", file=sys.stderr); return []
         except Exception as e:
             print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr); return []
+
+    def _apply_flavor_font_mod(self):
+        """
+        Specifically handles inserting a font size tag after a {flavor} tag
+        in the 'Rules' text box.
+        """
+        if self.flavor_font is None:
+            return
+
+        print("   Checking for flavor text font modification...")
+        try:
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Rules Text']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            current_text = text_input.get_attribute('value')
+
+            # Only proceed if the {flavor} tag exists
+            if '{flavor}' in current_text:
+                font_tag = f"{{fontsize{self.flavor_font}}}"
+                # Replace the first occurrence of {flavor} with itself plus the new tag
+                new_text = current_text.replace('{flavor}', f'{{flavor}}{font_tag}', 1)
+
+                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+                print(f"      Found {flavor} tag. Injected font size tag.")
+                
+                time.sleep(self.render_delay)
+            else:
+                print("      No {flavor} tag found. Skipping.")
+
+        except Exception as e:
+            print(f"      An error occurred while applying flavor text mods: {e}", file=sys.stderr)
+
 
     def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False):
         """
@@ -422,6 +465,8 @@ class CardConjurerAutomator:
 
             self._apply_text_mods(
                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold)
+
+            self._apply_flavor_font_mod()
 
             if self.apply_white_border_on_capture:
                 self.apply_white_border()

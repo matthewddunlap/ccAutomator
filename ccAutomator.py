@@ -141,6 +141,12 @@ def main():
     parser.add_argument(
         '--type-left', type=int, metavar='NUM', help="Add a {left#} tag to the Type text.")
 
+    parser.add_argument(
+        '--flavor-font',
+        type=int,
+        metavar='NUM',
+        help="If rules text contains {flavor}, inserts a {fontsize#} tag immediately after it."
+    )
 
     parser.add_argument(
         '--image-server',
@@ -219,6 +225,7 @@ def main():
             type_shadow=args.type_shadow,
             type_kerning=args.type_kerning,
             type_left=args.type_left,
+            flavor_font=args.flavor_font,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             autofit_art=args.autofit_art,
