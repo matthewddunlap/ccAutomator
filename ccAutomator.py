@@ -94,17 +94,11 @@ def main():
         help="Apply the white border to the card frame."
     )
 
+    # Power/Toughness Arguments
     parser.add_argument(
         '--pt-bold',
         action='store_true',
         help="Wrap the Power/Toughness text in {bold} tags."
-    )
-
-    parser.add_argument(
-        '--pt-shadow',
-        type=int,
-        metavar='NUM',
-        help="Add a {shadow#} tag to the Power/Toughness text."
     )
 
     parser.add_argument(
@@ -113,6 +107,40 @@ def main():
         metavar='NUM',
         help="Add a {fontsize#} tag to the Power/Toughness text."
     )
+
+    parser.add_argument(
+        '--pt-kerning',
+        type=int,
+        metavar='NUM',
+        help="Add a {kerning#} tag to the Power/Toughness text."
+    )
+    parser.add_argument(
+        '--pt-shadow',
+        type=int,
+        metavar='NUM',
+        help="Add a {shadow#} tag to the Power/Toughness text."
+    )
+
+    # Title Arguments
+    parser.add_argument(
+        '--title-font-size', type=int, metavar='NUM', help="Add a {fontsize#} tag to the Title text.")
+    parser.add_argument(
+        '--title-shadow', type=int, metavar='NUM', help="Add a {shadow#} tag to the Title text.")
+    parser.add_argument(
+        '--title-kerning', type=int, metavar='NUM', help="Add a {kerning#} tag to the Title text.")
+    parser.add_argument(
+        '--title-left', type=int, metavar='NUM', help="Add a {left#} tag to the Title text.")
+
+    # Type Line Arguments
+    parser.add_argument(
+        '--type-font-size', type=int, metavar='NUM', help="Add a {fontsize#} tag to the Type text.")
+    parser.add_argument(
+        '--type-shadow', type=int, metavar='NUM', help="Add a {shadow#} tag to the Type text.")
+    parser.add_argument(
+        '--type-kerning', type=int, metavar='NUM', help="Add a {kerning#} tag to the Type text.")
+    parser.add_argument(
+        '--type-left', type=int, metavar='NUM', help="Add a {left#} tag to the Type text.")
+
 
     parser.add_argument(
         '--image-server',
@@ -182,6 +210,15 @@ def main():
             pt_bold=args.pt_bold,
             pt_shadow=args.pt_shadow,
             pt_font_size=args.pt_font_size,
+            pt_kerning=args.pt_kerning,
+            title_font_size=args.title_font_size,
+            title_shadow=args.title_shadow,
+            title_kerning=args.title_kerning,
+            title_left=args.title_left,
+            type_font_size=args.type_font_size,
+            type_shadow=args.type_shadow,
+            type_kerning=args.type_kerning,
+            type_left=args.type_left,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             autofit_art=args.autofit_art,

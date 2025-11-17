@@ -23,7 +23,9 @@ class CardConjurerAutomator:
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
                  no_match_skip=False, render_delay=1.5, white_border=False,
-                 pt_bold=False, pt_shadow=None, pt_font_size=None,
+                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None,
+                 title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
+                 type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                  image_server=None, image_server_path=None, autofit_art=False,
                  upload_path=None, upload_secret=None):
         """
@@ -55,6 +57,17 @@ class CardConjurerAutomator:
         self.pt_bold = pt_bold
         self.pt_shadow = pt_shadow
         self.pt_font_size = pt_font_size
+        self.pt_kerning = pt_kerning
+
+        self.title_font_size = title_font_size
+        self.title_shadow = title_shadow
+        self.title_kerning = title_kerning
+        self.title_left = title_left
+
+        self.type_font_size = type_font_size
+        self.type_shadow = type_shadow
+        self.type_kerning = type_kerning
+        self.type_left = type_left
 
         self.app_url = url 
         self.image_server_url = image_server
@@ -210,53 +223,54 @@ class CardConjurerAutomator:
         except Exception as e:
             print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr); return []
 
-    def _apply_pt_mods(self):
+    def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False):
         """
-        If requested, navigates to the text tab, selects the P/T field,
-        and applies bold/shadow tags to its content.
+        Generic method to apply modifications to a specific text field (e.g., Title, Type).
         """
-        if not self.pt_bold and self.pt_shadow is None:
+        # If no modifications are specified for this field, do nothing.
+        if all(arg is None for arg in [font_size, shadow, kerning, left]) and not bold:
             return
 
-        print("   Applying Power/Toughness modifications...")
+        print(f"   Applying text modifications to '{field_name}'...")
         try:
             self.text_tab.click()
             
-            # --- CORRECTED SELECTORS ---
-            pt_button_selector = "//h4[text()='Power/Toughness']"
+            field_button_selector = f"//h4[text()='{field_name}']"
             text_editor_id = "text-editor"
-            # --- END CORRECTED SELECTORS ---
 
-            pt_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, pt_button_selector)))
-            pt_button.click()
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
             
-            # Brief pause to let the textarea populate with the P/T value
+            # Brief pause to let the textarea populate
             time.sleep(0.5)
 
             text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
             current_text = text_input.get_attribute('value')
 
-            font_size_tag = f"{{fontsize{self.pt_font_size}}}" if self.pt_font_size is not None else ""
-            shadow_tag = f"{{shadow{self.pt_shadow}}}" if self.pt_shadow is not None else ""
-            bold_tag = "{bold}" if self.pt_bold else ""
-            bold_close_tag = "{/bold}" if self.pt_bold else ""
+            # Build the prefix tags
+            tags = []
+            if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
+            if shadow is not None: tags.append(f"{{shadow{shadow}}}")
+            if kerning is not None: tags.append(f"{{kerning{kerning}}}")
+            if left is not None: tags.append(f"{{left{left}}}")
+            if bold: tags.append("{bold}")
             
-            if current_text and current_text.strip():
-                # Prepend all tags to the existing text
-                new_text = f"{font_size_tag}{shadow_tag}{bold_tag}{current_text}{bold_close_tag}"
-                
-                # Using JavaScript to set the value can be more reliable than send_keys
-                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
-                # Manually trigger the 'oninput' event so the website recognizes the change
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            prefix = "".join(tags)
+            suffix = "{/bold}" if bold else ""
 
-                print(f"   P/T changed from '{current_text}' to '{new_text}'.")
+            if current_text and current_text.strip():
+                new_text = f"{prefix}{current_text}{suffix}"
+                
+                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+                print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
 
             # Wait for the change to render on the canvas
             time.sleep(self.render_delay)
 
         except Exception as e:
-            print(f"   An error occurred while applying P/T mods: {e}", file=sys.stderr)
+            print(f"      An error occurred while applying mods to '{field_name}': {e}", file=sys.stderr)
+
 
     # --- 3. ADD THE NEW _apply_custom_art METHOD ---
     def _apply_custom_art(self, card_name, set_name, collector_number):
@@ -400,14 +414,18 @@ class CardConjurerAutomator:
             # Set a flag to see if we need an extra delay at the end
             mods_applied = False
 
-            if self.pt_bold or self.pt_shadow is not None or self.pt_font_size is not None:
-                self._apply_pt_mods()
-                mods_applied = True
+            self._apply_text_mods(
+                "Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left)
+            
+            self._apply_text_mods(
+                "Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left)
+
+            self._apply_text_mods(
+                "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold)
 
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True
-            
 
             # If no modifications were made that include their own delays,
             # we must add the default render delay here.
