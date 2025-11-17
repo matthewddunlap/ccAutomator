@@ -400,13 +400,14 @@ class CardConjurerAutomator:
             # Set a flag to see if we need an extra delay at the end
             mods_applied = False
 
+            if self.pt_bold or self.pt_shadow is not None or self.pt_font_size is not None:
+                self._apply_pt_mods()
+                mods_applied = True
+
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True
             
-            if self.pt_bold or self.pt_shadow is not None or self.pt_font_size is not None:
-                self._apply_pt_mods()
-                mods_applied = True
 
             # If no modifications were made that include their own delays,
             # we must add the default render delay here.
