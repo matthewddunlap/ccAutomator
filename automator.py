@@ -256,7 +256,7 @@ class CardConjurerAutomator:
 
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
-                print(f"      Found {flavor} tag. Injected font size tag.")
+                print(f"      Found {{flavor}} tag. Injected font size tag.")
                 
                 time.sleep(self.render_delay)
             else:
