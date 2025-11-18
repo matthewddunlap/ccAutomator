@@ -121,6 +121,13 @@ def main():
         help="Add a {shadow#} tag to the Power/Toughness text."
     )
 
+    parser.add_argument(
+        '--pt-up',
+        type=int,
+        metavar='NUM',
+        help="Add a {up#} tag to the Power/Toughness text."
+    )
+
     # Title Arguments
     parser.add_argument(
         '--title-font-size', type=int, metavar='NUM', help="Add a {fontsize#} tag to the Title text.")
@@ -146,6 +153,13 @@ def main():
         type=int,
         metavar='NUM',
         help="If rules text contains {flavor}, inserts a {fontsize#} tag immediately after it."
+    )
+
+    parser.add_argument(
+        '--rules-down',
+        type=int,
+        metavar='NUM',
+        help="Add a {down#} tag to the Rules text."
     )
 
     parser.add_argument(
@@ -217,6 +231,7 @@ def main():
             pt_shadow=args.pt_shadow,
             pt_font_size=args.pt_font_size,
             pt_kerning=args.pt_kerning,
+            pt_up=args.pt_up,
             title_font_size=args.title_font_size,
             title_shadow=args.title_shadow,
             title_kerning=args.title_kerning,
@@ -226,6 +241,7 @@ def main():
             type_kerning=args.type_kerning,
             type_left=args.type_left,
             flavor_font=args.flavor_font,
+            rules_down=args.rules_down,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             autofit_art=args.autofit_art,

@@ -23,9 +23,10 @@ class CardConjurerAutomator:
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, set_selection_strategy='earliest',
                  no_match_skip=False, render_delay=1.5, white_border=False,
-                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None,
+                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
-                 type_font_size=None, type_shadow=None, type_kerning=None, type_left=None, flavor_font=None,
+                 type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                 flavor_font=None, rules_down=None,
                  image_server=None, image_server_path=None, autofit_art=False,
                  upload_path=None, upload_secret=None):
         """
@@ -58,6 +59,7 @@ class CardConjurerAutomator:
         self.pt_shadow = pt_shadow
         self.pt_font_size = pt_font_size
         self.pt_kerning = pt_kerning
+        self.pt_up = pt_up
 
         self.title_font_size = title_font_size
         self.title_shadow = title_shadow
@@ -65,6 +67,7 @@ class CardConjurerAutomator:
         self.title_left = title_left
 
         self.flavor_font = flavor_font
+        self.rules_down = rules_down
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -266,12 +269,12 @@ class CardConjurerAutomator:
             print(f"      An error occurred while applying flavor text mods: {e}", file=sys.stderr)
 
 
-    def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False):
+    def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None, down=None):
         """
         Generic method to apply modifications to a specific text field (e.g., Title, Type).
         """
         # If no modifications are specified for this field, do nothing.
-        if all(arg is None for arg in [font_size, shadow, kerning, left]) and not bold:
+        if all(arg is None for arg in [font_size, shadow, kerning, left, up, down]) and not bold:
             return
 
         print(f"   Applying text modifications to '{field_name}'...")
@@ -296,6 +299,8 @@ class CardConjurerAutomator:
             if shadow is not None: tags.append(f"{{shadow{shadow}}}")
             if kerning is not None: tags.append(f"{{kerning{kerning}}}")
             if left is not None: tags.append(f"{{left{left}}}")
+            if up is not None: tags.append(f"{{up{up}}}")
+            if down is not None: tags.append(f"{{down{down}}}")
             if bold: tags.append("{bold}")
             
             prefix = "".join(tags)
@@ -464,7 +469,10 @@ class CardConjurerAutomator:
                 "Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left)
 
             self._apply_text_mods(
-                "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold)
+                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up)
+
+            self._apply_text_mods(
+                  "Rules Text", down=self.rules_down)
 
             self._apply_flavor_font_mod()
 
@@ -564,6 +572,35 @@ class CardConjurerAutomator:
         except Exception as e:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
+
+    def _process_all_text_modifications(self):
+        """
+        Orchestrator for all text modifications to prevent race conditions.
+        Returns True if any modification was successfully made.
+        """
+        # --- UPDATED: Check for new parameters ---
+        has_mods_to_apply = any([
+            self.title_font_size, self.title_shadow, self.title_kerning, self.title_left,
+            self.type_font_size, self.type_shadow, self.type_kerning, self.type_left,
+            self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up,
+            self.flavor_font, self.rules_down
+        ])
+        if not has_mods_to_apply:
+            return False
+
+        self.text_tab.click()
+        
+        any_text_mod_made = False
+        if self._apply_text_mods("Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left): any_text_mod_made = True
+        if self._apply_text_mods("Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left): any_text_mod_made = True
+        # --- UPDATED: Pass the 'up' parameter for Power/Toughness ---
+        if self._apply_text_mods("Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up): any_text_mod_made = True
+        # --- NEW: Add a call for prepending to Rules Text ---
+        if self._apply_text_mods("Rules Text", down=self.rules_down): any_text_mod_made = True
+        # Flavor font mod is called separately as it has unique logic (inserting, not prepending)
+        if self._apply_flavor_font_mod(): any_text_mod_made = True
+        
+        return any_text_mod_made
 
     def close(self):
         if self.driver:
