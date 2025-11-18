@@ -170,11 +170,37 @@ def main():
         '--image-server-path',
         help="The path on the image server where the art files are located (e.g., '/local_art/upscaled/')."
     )
+    parser.add_argument(
+        '--art-path',
+        default='/local_art/art/',
+        help="The base path on the image server for art assets (default: '/local_art/art/')."
+    )
 
     parser.add_argument(
         '--autofit-art',
         action='store_true',
         help="Check the 'Autofit when setting art' checkbox before applying custom art."
+    )
+
+    parser.add_argument(
+        '--upscale-art',
+        action='store_true',
+        help="Enable Ilaria upscaling for custom art."
+    )
+    parser.add_argument(
+        '--ilaria-url',
+        help="The URL for the Ilaria upscaling service (e.g., 'https://matthewddunlap-ilaria.hf.space/')."
+    )
+    parser.add_argument(
+        '--upscaler-model',
+        default='RealESRGAN_x2plus',
+        help="The specific model to use for Ilaria upscaling (default: 'RealESRGAN_x2plus')."
+    )
+    parser.add_argument(
+        '--upscaler-factor',
+        type=int,
+        default=4,
+        help="The factor by which to upscale the image (default: 4)."
     )
 
     # --- START OF MODIFIED ARGUMENTS ---
@@ -244,7 +270,12 @@ def main():
             rules_down=args.rules_down,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
+            art_path=args.art_path,
             autofit_art=args.autofit_art,
+            upscale_art=args.upscale_art,
+            ilaria_url=args.ilaria_url,
+            upscaler_model=args.upscaler_model,
+            upscaler_factor=args.upscaler_factor,
             upload_path=args.upload_path,
             upload_secret=args.upload_secret
         ) as automator:
