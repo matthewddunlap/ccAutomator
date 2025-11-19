@@ -878,7 +878,8 @@ class CardConjurerAutomator:
 
     def _select_prints_from_candidate(self, candidate_prints: list, selection_strategy: str) -> list:
         """
-        Applies the set selection strategy to a list of candidate prints.
+        Applies a selection strategy to a list of candidate prints from the Card Conjurer UI.
+        This method assumes the sorting order of Card Conjurer's dropdown (newest to oldest).
         """
         if not candidate_prints:
             return []
@@ -886,34 +887,14 @@ class CardConjurerAutomator:
         if selection_strategy == 'all':
             return candidate_prints
         
-        selected_prints = []
-        representative_print = None
-
         if selection_strategy == 'latest':
-            # For UI prints, 'latest' is usually the first in the dropdown if sorted by default.
-            # For Scryfall results, prefer:newest should handle ordering.
-            # Here, we'll just take the first if multiple are returned in case of specific set filtering.
-            representative_print = candidate_prints[0] 
+            return [candidate_prints[0]] # Newest is first in CC dropdown
         elif selection_strategy == 'earliest':
-            # For UI prints, 'earliest' is usually the last in the dropdown if sorted by default.
-            # For Scryfall, prefer:oldest should handle ordering.
-            # Here, we'll just take the last if multiple are returned in case of specific set filtering.
-            representative_print = candidate_prints[-1]
+            return [candidate_prints[-1]] # Oldest is last
         elif selection_strategy == 'random':
-            representative_print = random.choice(candidate_prints)
-        
-        if representative_print:
-            target_set = representative_print.get('set_name') # Scryfall results use 'set_name', Scryfall API results use 'set'
-            if not target_set:
-                selected_prints = [representative_print]
-            else:
-                # If a representative print has a set, capture all prints from that set
-                # Match by set_name (Card Conjurer UI) or set (Scryfall API)
-                selected_prints = [p for p in candidate_prints if (p.get('set_name') and p.get('set_name').lower() == target_set.lower()) or (p.get('set') and p.get('set').lower() == target_set.lower())]
-                # If the target_set is from Scryfall API, it might use 'set' key directly.
-                # If from Card Conjurer UI, it uses 'set_name'. Handle both.
+            return [random.choice(candidate_prints)]
 
-        return selected_prints
+        return [] # Should not be reached
 
     def process_and_capture_card(self, card_name, is_priming=False):
         all_cc_prints = self._get_and_filter_prints(card_name) # Get all prints from CC UI once
@@ -922,9 +903,12 @@ class CardConjurerAutomator:
         
         if self.card_selection_strategy == 'scryfall':
             print(f"--- Scryfall Mode for '{card_name}' ---")
-            query_parts = [f'!"{card_name}"', 'unique:art', 'game:paper'] # Base query
             
-            # Add include/exclude set filters
+            # --- Initial Scryfall Query ---
+            base_query_parts = [f'!"{card_name}"', 'unique:art', 'game:paper', 'not:covered']
+            query_parts = list(base_query_parts) # Make a copy
+
+            # Add include/exclude set filters for the initial query
             if self.include_sets:
                 include_query = " OR ".join([f"set:{s}" for s in self.include_sets])
                 query_parts.append(f"({include_query})")
@@ -933,46 +917,62 @@ class CardConjurerAutomator:
                 query_parts.append(f" {exclude_query}")
 
             full_query = " ".join(query_parts)
-            print(f"   Scryfall query: {full_query}")
-
-            # 'search_cards' in scryfall_api_utils sorts by release date ascending (oldest to newest)
+            print(f"   Scryfall query (with filters): {full_query}")
             scryfall_results = self.scryfall_api.search_cards(full_query, unique="art", order_by="released", direction="asc")
 
+            selection_strategy = self.set_selection_strategy
+
+            # --- Fallback Scryfall Query ---
             if not scryfall_results:
-                print(f"   Warning: No unique art prints found on Scryfall for '{card_name}' with query '{full_query}'.", file=sys.stderr)
-                print(f"   Falling back to Card Conjurer with '{self.no_match_selection}' strategy.", file=sys.stderr)
+                print(f"   Warning: Initial query found no matches. Stripping set filters and retrying.", file=sys.stderr)
+                
+                # Use the base query parts, but add prefer:newest/oldest based on the *fallback* strategy
+                fallback_query_parts = list(base_query_parts)
+                if self.no_match_selection == 'latest':
+                    fallback_query_parts.append('prefer:newest')
+                elif self.no_match_selection == 'earliest':
+                    fallback_query_parts.append('prefer:oldest')
+                
+                fallback_query = " ".join(fallback_query_parts)
+                print(f"   Scryfall fallback query: {fallback_query}")
+                scryfall_results = self.scryfall_api.search_cards(fallback_query, unique="art", order_by="released", direction="asc")
+
+                if not scryfall_results:
+                    print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
+                    return
+
+                # If the fallback was used, the selection strategy to apply is the no_match_selection
+                selection_strategy = self.no_match_selection
+
+            # --- Match Scryfall results against Card Conjurer UI prints ---
+            matched_prints = []
+            for sr in scryfall_results:
+                scryfall_set = sr.get('set')
+                scryfall_cn = sr.get('collector_number')
+                if scryfall_set and scryfall_cn:
+                    for cc_print in all_cc_prints:
+                        cc_set = cc_print.get('set_name')
+                        cc_cn = cc_print.get('collector_number')
+                        if cc_set and cc_cn and scryfall_set.lower() == cc_set.lower() and str(scryfall_cn).lower() == cc_cn.lower():
+                            matched_prints.append(cc_print)
+                            break
+            
+            if not matched_prints:
+                print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI.", file=sys.stderr)
+                print(f"   Applying fallback selection '{self.no_match_selection}' to all available Card Conjurer prints.", file=sys.stderr)
                 prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)
             else:
-                # Filter Card Conjurer prints against Scryfall results
-                scryfall_unique_identifiers = set()
-                # Create a list of prints that match between scryfall and cc, preserving scryfall's order
-                matched_prints = []
-                for sr in scryfall_results:
-                    scryfall_set = sr.get('set')
-                    scryfall_cn = sr.get('collector_number')
-                    if scryfall_set and scryfall_cn:
-                        for cc_print in all_cc_prints:
-                            cc_set = cc_print.get('set_name')
-                            cc_cn = cc_print.get('collector_number')
-                            if cc_set and cc_cn and scryfall_set.lower() == cc_set.lower() and str(scryfall_cn).lower() == cc_cn.lower():
-                                matched_prints.append(cc_print)
-                                break # Move to next scryfall result once a match is found
+                print(f"   Found {len(matched_prints)} matching prints in UI from {len(scryfall_results)} Scryfall results.")
                 
-                if not matched_prints:
-                    print(f"   Warning: No Card Conjurer prints matched Scryfall unique art for '{card_name}'.", file=sys.stderr)
-                    print(f"   Falling back to Card Conjurer with '{self.no_match_selection}' strategy.", file=sys.stderr)
-                    prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)
-                else:
-                    print(f"   Found {len(matched_prints)} matching prints from Scryfall unique art and Card Conjurer UI for '{card_name}'.")
-                    # Apply set_selection_strategy to the matched Scryfall prints
-                    if self.set_selection_strategy == 'latest':
-                        prints_to_capture = [matched_prints[-1]] # Last item is newest
-                    elif self.set_selection_strategy == 'earliest':
-                        prints_to_capture = [matched_prints[0]] # First item is oldest
-                    elif self.set_selection_strategy == 'random':
-                        prints_to_capture = [random.choice(matched_prints)]
-                    else: # 'all'
-                        prints_to_capture = matched_prints
+                # --- Apply Final Selection Strategy ---
+                if selection_strategy == 'latest':
+                    prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest
+                elif selection_strategy == 'earliest':
+                    prints_to_capture = [matched_prints[0]] # First item is oldest
+                elif selection_strategy == 'random':
+                    prints_to_capture = [random.choice(matched_prints)]
+                else: # 'all'
+                    prints_to_capture = matched_prints
 
         elif self.card_selection_strategy == 'cardconjurer':
             print(f"--- Card Conjurer Mode for '{card_name}' ---")
