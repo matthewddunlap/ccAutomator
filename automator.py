@@ -157,6 +157,7 @@ class CardConjurerAutomator:
     def _generate_safe_filename(self, value: str):
         if not isinstance(value, str): value = str(value)
         value = value.replace("'", "")
+        value = value.replace(",", "")
         value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
         value = re.sub(r'[\s/:<>:"\\|?*&]+', '-', value)
         value = re.sub(r'-+', '-', value)
@@ -339,6 +340,31 @@ class CardConjurerAutomator:
 
         except Exception as e:
             print(f"      An error occurred while applying mods to '{field_name}': {e}", file=sys.stderr)
+
+    def _set_rules_text(self, new_text: str):
+        """
+        Sets the 'Rules Text' to the provided new_text.
+        """
+        print(f"   Setting Rules Text to: '{new_text}'")
+        try:
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Rules Text']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            
+            self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            
+            time.sleep(self.render_delay)
+        except Exception as e:
+            print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
 
     # --- 3. ADD THE NEW _apply_custom_art METHOD ---
@@ -615,7 +641,7 @@ class CardConjurerAutomator:
             print(f"   Error: Gradio upscaling error for '{filename}': {e}", file=sys.stderr)
             return None
 
-    def _get_scryfall_art_crop_url(self, card_name: str, set_code: str, collector_number: str) -> Optional[str]:
+    def _get_scryfall_art_crop_url(self, card_name: str, set_code: str, collector_number: str) -> tuple[Optional[str], Optional[str]]:
         """
         Fetches the art_crop URL for a given card from the Scryfall API.
         """
@@ -635,28 +661,29 @@ class CardConjurerAutomator:
                         art_crop_url = face['image_uris']['art_crop']
                         break
             
+            type_line = card_data.get('type_line', '')
             if art_crop_url:
                 print(f"   Found art_crop URL: {art_crop_url}")
-                return art_crop_url
+                return art_crop_url, type_line
             else:
                 print(f"   Warning: No art_crop URL found for '{card_name}' ({set_code}/{collector_number}).", file=sys.stderr)
-                return None
+                return None, None
         except requests.exceptions.RequestException as e:
             print(f"   Error fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}): {e}", file=sys.stderr)
-            return None
+            return None, None
 
-    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str) -> Optional[str]:
+    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str) -> tuple[Optional[str], Optional[str]]:
         """
         Prepares the art asset for a card, including fetching, upscaling, and saving/uploading.
         Returns the URL of the final art asset to be used in Card Conjurer.
         """
         print(f"   Preparing art asset for '{card_name}' ({set_code}/{collector_number})...")
         
-        # 1. Get original art_crop URL from Scryfall
-        art_crop_url = self._get_scryfall_art_crop_url(card_name, set_code, collector_number)
+        # 1. Get original art_crop URL and type_line from Scryfall
+        art_crop_url, type_line = self._get_scryfall_art_crop_url(card_name, set_code, collector_number)
         if not art_crop_url:
             print(f"   Warning: Could not get Scryfall art_crop URL for '{card_name}'. Skipping art preparation.", file=sys.stderr)
-            return None
+            return None, None
 
         final_art_source_url = art_crop_url
         hosted_original_art_url: Optional[str] = None
@@ -760,7 +787,7 @@ class CardConjurerAutomator:
             final_art_source_url = art_crop_url
             print(f"   Using Scryfall art_crop URL: {final_art_source_url}")
 
-        return final_art_source_url
+        return final_art_source_url, type_line
 
     def process_and_capture_card(self, card_name, is_priming=False):
         
@@ -797,9 +824,9 @@ class CardConjurerAutomator:
             dropdown.select_by_value(print_data['index'])
 
             # --- NEW: PREPARE AND APPLY CUSTOM ART RIGHT AFTER IMPORT ---
-            final_art_url = None
+            final_art_url, type_line = None, None
             if self.image_server_url or self.download_dir: # Only prepare art if image server or local download is configured
-                final_art_url = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
+                final_art_url, type_line = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
             
             if final_art_url:
                 self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'], final_art_url)
@@ -818,10 +845,29 @@ class CardConjurerAutomator:
             self._apply_text_mods(
                  "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up)
 
-            self._apply_text_mods(
-                  "Rules Text", down=self.rules_down)
+            # --- NEW: Basic Land Rules Text Handling ---
+            is_basic_land = False
+            if type_line and 'Basic' in type_line and 'Land' in type_line:
+                is_basic_land = True
 
-            self._apply_flavor_font_mod()
+            if is_basic_land:
+                mana_symbol = ''
+                if 'Plains' in card_name: mana_symbol = '{w}'
+                elif 'Island' in card_name: mana_symbol = '{u}'
+                elif 'Swamp' in card_name: mana_symbol = '{b}'
+                elif 'Mountain' in card_name: mana_symbol = '{r}'
+                elif 'Forest' in card_name: mana_symbol = '{g}'
+                
+                if mana_symbol:
+                    rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{mana_symbol}"
+                    self._set_rules_text(rules_text)
+                else:
+                    # Fallback for other basic lands if any
+                    self._apply_text_mods("Rules Text", down=self.rules_down)
+                    self._apply_flavor_font_mod()
+            else:
+                self._apply_text_mods("Rules Text", down=self.rules_down)
+                self._apply_flavor_font_mod()
 
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
