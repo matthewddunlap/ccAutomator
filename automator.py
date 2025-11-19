@@ -23,6 +23,19 @@ import io
 import unicodedata
 from typing import Optional
 
+# Add the scry2cc directory to the Python path to import the Scryfall API utilities.
+# This assumes that the 'scry2cc' and 'ccAutomator-ccDownloader' directories are siblings.
+SCRY2CC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scry2cc'))
+if SCRY2CC_PATH not in sys.path:
+    sys.path.append(SCRY2CC_PATH)
+
+try:
+    from scryfall_api_utils import ScryfallAPI
+except ImportError:
+    print(f"FATAL: Could not import ScryfallAPI from '{SCRY2CC_PATH}'.", file=sys.stderr)
+    print("Please ensure the 'scry2cc' directory is a sibling to the 'ccAutomator-ccDownloader' directory.", file=sys.stderr)
+    sys.exit(1)
+
 def parse_time_string(time_str: str) -> Optional[datetime]:
     """Parses a timestamp string (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h) into a timezone-aware datetime object (UTC)."""
     if not time_str:
@@ -161,6 +174,9 @@ class CardConjurerAutomator:
             self.overwrite_newer_than_dt = parse_time_string(self.overwrite_newer_than_str)
         self.upload_path = upload_path
         self.upload_secret = upload_secret # This can be None, which is fine
+
+        # Initialize the Scryfall API client
+        self.scryfall_api = ScryfallAPI()
         
         self.current_canvas_hash = None
         self.STABILIZE_TIMEOUT = 10
@@ -868,7 +884,34 @@ class CardConjurerAutomator:
         prints_to_capture = []
         if self.set_selection_strategy == 'all':
             prints_to_capture = candidate_prints
-        else:
+        elif self.set_selection_strategy == 'scryfall_unique_art':
+            print(f"   Fetching unique art prints for '{card_name}' from Scryfall...")
+            scryfall_api_printings = self.scryfall_api.get_all_art_printings(card_name, set_include=list(self.include_sets), set_exclude=list(self.exclude_sets))
+            
+            if not scryfall_api_printings:
+                print(f"   Warning: No unique art prints found on Scryfall for '{card_name}'. Falling back to 'all' strategy.", file=sys.stderr)
+                prints_to_capture = candidate_prints # Fallback to 'all' if Scryfall returns nothing
+            else:
+                scryfall_unique_ids = set()
+                for p in scryfall_api_printings:
+                    set_code = p.get('set')
+                    collector_number = p.get('collector_number')
+                    if set_code and collector_number:
+                        scryfall_unique_ids.add((set_code.lower(), collector_number.lower()))
+
+                for print_data in candidate_prints:
+                    cc_set_name = print_data.get('set_name')
+                    cc_collector_number = print_data.get('collector_number')
+                    if cc_set_name and cc_collector_number:
+                        if (cc_set_name.lower(), cc_collector_number.lower()) in scryfall_unique_ids:
+                            prints_to_capture.append(print_data)
+                
+                if not prints_to_capture:
+                    print(f"   Warning: No matching prints found in Card Conjurer UI for Scryfall unique art for '{card_name}'. Falling back to 'all' strategy.", file=sys.stderr)
+                    prints_to_capture = candidate_prints # Fallback if no matches found after filtering
+                else:
+                    print(f"   Found {len(prints_to_capture)} unique art prints for '{card_name}' based on Scryfall data.")
+        else: # Existing logic for 'latest', 'earliest', 'random'
             if self.set_selection_strategy == 'latest': representative_print = candidate_prints[0]
             elif self.set_selection_strategy == 'random': representative_print = random.choice(candidate_prints)
             else: representative_print = candidate_prints[-1]

@@ -60,10 +60,11 @@ def main():
     parser.add_argument(
         '--set-selection',
         default='earliest',
-        choices=['latest', 'earliest', 'random', 'all'],
+        choices=['latest', 'earliest', 'random', 'all', 'scryfall_unique_art'],
         help="Determines the final capture logic after filtering:\n"
              "'all': Capture every print that survives the filters.\n"
              "'latest'/'earliest'/'random': Pick a representative print, then capture all prints from its set.\n"
+             "'scryfall_unique_art': Use Scryfall to find unique art versions and capture them.\n"
              "(defaults to 'earliest')"
     )
     parser.add_argument(
