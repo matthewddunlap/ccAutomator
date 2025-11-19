@@ -222,9 +222,31 @@ def main():
     )
     # --- END OF MODIFIED ARGUMENTS ---
 
+    overwrite_group = parser.add_argument_group('Overwrite Options')
+    overwrite_group.add_argument(
+        '--overwrite',
+        action='store_true',
+        help="If a file with the same name exists on the server, overwrite it. Default is to skip."
+    )
+    overwrite_group.add_argument(
+        '--overwrite-older-than',
+        type=str,
+        metavar='TIME',
+        help="Overwrite if the server file is OLDER than the given timestamp (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h)."
+    )
+    overwrite_group.add_argument(
+        '--overwrite-newer-than',
+        type=str,
+        metavar='TIME',
+        help="Overwrite if the server file is NEWER than the given timestamp (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h)."
+    )
+
     args = parser.parse_args()
 
     # --- Validation ---
+    if args.overwrite_older_than and args.overwrite_newer_than:
+        parser.error("Cannot use --overwrite-older-than and --overwrite-newer-than together.")
+
     if args.upload_path and not args.image_server:
         parser.error("--upload-path requires --image-server to be set.")
 
@@ -277,7 +299,10 @@ def main():
             upscaler_model=args.upscaler_model,
             upscaler_factor=args.upscaler_factor,
             upload_path=args.upload_path,
-            upload_secret=args.upload_secret
+            upload_secret=args.upload_secret,
+            overwrite=args.overwrite,
+            overwrite_older_than=args.overwrite_older_than,
+            overwrite_newer_than=args.overwrite_newer_than
         ) as automator:
             
             automator.set_frame(args.frame)

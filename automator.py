@@ -15,12 +15,70 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from gradio_client import Client, file as gradio_file
 from PIL import Image
 import io
 import unicodedata
 from typing import Optional
+
+def parse_time_string(time_str: str) -> Optional[datetime]:
+    """Parses a timestamp string (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h) into a timezone-aware datetime object (UTC)."""
+    if not time_str:
+        return None
+    # Try parsing as a fixed timestamp first (assuming local time, then converting to UTC)
+    try:
+        local_dt = datetime.strptime(time_str, '%Y-%m-%d-%H-%M-%S')
+        # Assume the user provides the timestamp in their local time, convert it to UTC for comparison
+        utc_dt = local_dt.astimezone().replace(microsecond=0).astimezone(timezone.utc)
+        return utc_dt
+    except ValueError:
+        pass
+
+    # Try parsing as relative time
+    match = re.match(r'(\d+)([mh])$', time_str.lower())
+    if match:
+        value, unit = int(match.group(1)), match.group(2)
+        # Relative time is always calculated from now
+        now_utc = datetime.now(timezone.utc)
+        if unit == 'm':
+            delta = timedelta(minutes=value)
+        elif unit == 'h':
+            delta = timedelta(hours=value)
+        else: # Should not happen with the regex
+            return None
+        
+        result_dt = now_utc - delta
+        return result_dt
+    
+    print(f"Error: Invalid time format for '{time_str}'. Use 'yyyy-mm-dd-hh-mm-ss' or a relative time like '5m' or '2h'.")
+    return None
+
+def check_server_file_details(url: str) -> tuple[bool, Optional[datetime]]:
+    """Check if a file exists at a URL and return its last-modified time as a timezone-aware UTC datetime."""
+    if not url:
+        return False, None
+    try:
+        r = requests.head(url, timeout=15, allow_redirects=True)
+        if r.status_code == 200:
+            last_modified_str = r.headers.get('Last-Modified')
+            if last_modified_str:
+                try:
+                    # HTTP-date format is RFC 1123, e.g., 'Wed, 21 Oct 2015 07:28:00 GMT'
+                    dt_naive = datetime.strptime(last_modified_str.replace(' GMT', ''), '%a, %d %b %Y %H:%M:%S')
+                    dt_aware_utc = dt_naive.replace(tzinfo=timezone.utc)
+                    return True, dt_aware_utc
+                except ValueError:
+                    return True, None # File exists, but can't parse date
+            return True, None # File exists but no time info
+        if r.status_code == 404:
+            return False, None
+        print(f"Warning: Received status {r.status_code} when checking {url}. Assuming it does not exist.")
+        return False, None
+    except requests.exceptions.RequestException as e:
+        print(f"Warning: Network error while checking {url}: {e}. Assuming it does not exist.")
+        return False, None
 
 class CardConjurerAutomator:
     """
@@ -33,9 +91,10 @@ class CardConjurerAutomator:
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                  flavor_font=None, rules_down=None,
-                 image_server=None, image_server_path=None, art_path='/localart/art', autofit_art=False,
-                 upscale_art=False, ilaria_url=None, upscaler_model='4x-UltraSharp', upscaler_factor=4,
-                 upload_path=None, upload_secret=None):
+                 image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
+                 upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
+                 upload_path=None, upload_secret=None,
+                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -90,6 +149,16 @@ class CardConjurerAutomator:
         self.ilaria_url = ilaria_url
         self.upscaler_model = upscaler_model
         self.upscaler_factor = upscaler_factor
+        self.overwrite = overwrite
+        self.overwrite_older_than_str = overwrite_older_than
+        self.overwrite_newer_than_str = overwrite_newer_than
+
+        self.overwrite_older_than_dt: Optional[datetime] = None
+        self.overwrite_newer_than_dt: Optional[datetime] = None
+        if self.overwrite_older_than_str:
+            self.overwrite_older_than_dt = parse_time_string(self.overwrite_older_than_str)
+        if self.overwrite_newer_than_str:
+            self.overwrite_newer_than_dt = parse_time_string(self.overwrite_newer_than_str)
         self.upload_path = upload_path
         self.upload_secret = upload_secret # This can be None, which is fine
         
@@ -820,6 +889,39 @@ class CardConjurerAutomator:
         dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
         for i, print_data in enumerate(prints_to_capture, 1):
             print(f"-> Capturing {i}/{len(prints_to_capture)}: '{print_data['text']}'")
+
+            # --- OVERWRITE PRE-CHECK ---
+            should_skip = False
+            if self.upload_path: # Only check for overwrites if we are in an upload mode
+                output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
+                check_url = urljoin(self.image_server_url, os.path.join(self.upload_path, output_filename))
+                
+                exists, last_modified = check_server_file_details(check_url)
+                
+                if exists:
+                    if self.overwrite:
+                        should_skip = False # Unconditional overwrite
+                    elif self.overwrite_older_than_dt:
+                        if last_modified and last_modified < self.overwrite_older_than_dt:
+                            print(f"   Overwriting '{output_filename}' as server file is older than {self.overwrite_older_than_str}.")
+                            should_skip = False
+                        else:
+                            print(f"   Skipping '{output_filename}', server file is not older than {self.overwrite_older_than_str} (or has no timestamp).")
+                            should_skip = True
+                    elif self.overwrite_newer_than_dt:
+                        if last_modified and last_modified > self.overwrite_newer_than_dt:
+                            print(f"   Overwriting '{output_filename}' as server file is newer than {self.overwrite_newer_than_str}.")
+                            should_skip = False
+                        else:
+                            print(f"   Skipping '{output_filename}', server file is not newer than {self.overwrite_newer_than_str} (or has no timestamp).")
+                            should_skip = True
+                    else: # Default behavior: skip if exists and no overwrite flag
+                        print(f"   Skipping '{output_filename}', file exists on server.")
+                        should_skip = True
+            
+            if should_skip:
+                continue # Skip to the next print
+
             self.import_save_tab.click()
             dropdown.select_by_value(print_data['index'])
 
