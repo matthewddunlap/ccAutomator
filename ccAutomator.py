@@ -85,6 +85,13 @@ def main():
              "Default is to fall back and apply selection to all available prints."
     )
     parser.add_argument(
+        '--no-match-selection',
+        default='earliest',
+        choices=['latest', 'earliest', 'random', 'all'],
+        help="When --card-selection is 'scryfall' and no matches are found, this strategy is used for the fallback Card Conjurer prints.\n"
+             "(defaults to 'earliest')"
+    )
+    parser.add_argument(
         '--render-delay',
         type=float,
         default=1.5,
@@ -286,6 +293,7 @@ def main():
             card_selection_strategy=args.card_selection,
             set_selection_strategy=args.set_selection,
             no_match_skip=args.no_match_skip,
+            no_match_selection=args.no_match_selection,
             render_delay=args.render_delay,
             white_border=args.white_border,
             pt_bold=args.pt_bold,
