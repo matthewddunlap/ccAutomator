@@ -60,12 +60,23 @@ def main():
     parser.add_argument(
         '--set-selection',
         default='earliest',
-        choices=['latest', 'earliest', 'random', 'all', 'scryfall_unique_art'],
+        choices=['latest', 'earliest', 'random', 'all'],
         help="Determines the final capture logic after filtering:\n"
-             "'all': Capture every print that survives the filters.\n"
-             "'latest'/'earliest'/'random': Pick a representative print, then capture all prints from its set.\n"
-             "'scryfall_unique_art': Use Scryfall to find unique art versions and capture them.\n"
+             "For '--card-selection cardconjurer':\n"
+             "  'all': Capture every print that survives the filters.\n"
+             "  'latest'/'earliest'/'random': Pick a representative print, then capture all prints from its set.\n"
+             "For '--card-selection scryfall':\n"
+             "  'all': Capture all unique art prints from Scryfall that survive filters.\n"
+             "  'latest'/'earliest'/'random': Pick a single print (latest/earliest/random) matching unique Scryfall art.\n"
              "(defaults to 'earliest')"
+    )
+    parser.add_argument(
+        '--card-selection',
+        required=True,
+        choices=['scryfall', 'cardconjurer'],
+        help="Determines the source for card versions:\n"
+             "'scryfall': Use the Scryfall API to determine unique art prints.\n"
+             "'cardconjurer': Use the prints available directly from the Card Conjurer UI dropdown."
     )
     parser.add_argument(
         '--no-match-skip',
@@ -272,6 +283,7 @@ def main():
             headless=not args.no_headless,
             include_sets=args.include_set,
             exclude_sets=args.exclude_set,
+            card_selection_strategy=args.card_selection,
             set_selection_strategy=args.set_selection,
             no_match_skip=args.no_match_skip,
             render_delay=args.render_delay,

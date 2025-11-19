@@ -98,7 +98,7 @@ class CardConjurerAutomator:
     A class to automate interactions with the Card Conjurer web application.
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
-                 exclude_sets=None, set_selection_strategy='earliest',
+                 exclude_sets=None, card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
                  no_match_skip=False, render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
@@ -129,6 +129,7 @@ class CardConjurerAutomator:
         
         self.include_sets = {s.strip().lower() for s in include_sets.split(',')} if include_sets else set()
         self.exclude_sets = {s.strip().lower() for s in exclude_sets.split(',')} if exclude_sets else set()
+        self.card_selection_strategy = card_selection_strategy
         self.set_selection_strategy = set_selection_strategy
         self.no_match_skip = no_match_skip
         self.render_delay = render_delay
@@ -874,53 +875,108 @@ class CardConjurerAutomator:
 
         return final_art_source_url, type_line
 
-    def process_and_capture_card(self, card_name, is_priming=False):
-        
-            
-        candidate_prints = self._get_and_filter_prints(card_name)
+    def _select_prints_from_candidate(self, candidate_prints: list, selection_strategy: str) -> list:
+        """
+        Applies the set selection strategy to a list of candidate prints.
+        """
         if not candidate_prints:
-            return
+            return []
 
-        prints_to_capture = []
-        if self.set_selection_strategy == 'all':
-            prints_to_capture = candidate_prints
-        elif self.set_selection_strategy == 'scryfall_unique_art':
-            print(f"   Fetching unique art prints for '{card_name}' from Scryfall...")
-            scryfall_api_printings = self.scryfall_api.get_all_art_printings(card_name, set_include=list(self.include_sets), set_exclude=list(self.exclude_sets))
-            
-            if not scryfall_api_printings:
-                print(f"   Warning: No unique art prints found on Scryfall for '{card_name}'. Falling back to 'all' strategy.", file=sys.stderr)
-                prints_to_capture = candidate_prints # Fallback to 'all' if Scryfall returns nothing
+        if selection_strategy == 'all':
+            return candidate_prints
+        
+        selected_prints = []
+        representative_print = None
+
+        if selection_strategy == 'latest':
+            # For UI prints, 'latest' is usually the first in the dropdown if sorted by default.
+            # For Scryfall results, prefer:newest should handle ordering.
+            # Here, we'll just take the first if multiple are returned in case of specific set filtering.
+            representative_print = candidate_prints[0] 
+        elif selection_strategy == 'earliest':
+            # For UI prints, 'earliest' is usually the last in the dropdown if sorted by default.
+            # For Scryfall, prefer:oldest should handle ordering.
+            # Here, we'll just take the last if multiple are returned in case of specific set filtering.
+            representative_print = candidate_prints[-1]
+        elif selection_strategy == 'random':
+            representative_print = random.choice(candidate_prints)
+        
+        if representative_print:
+            target_set = representative_print.get('set_name') # Scryfall results use 'set_name', Scryfall API results use 'set'
+            if not target_set:
+                selected_prints = [representative_print]
             else:
-                scryfall_unique_ids = set()
-                for p in scryfall_api_printings:
-                    set_code = p.get('set')
-                    collector_number = p.get('collector_number')
-                    if set_code and collector_number:
-                        scryfall_unique_ids.add((set_code.lower(), collector_number.lower()))
+                # If a representative print has a set, capture all prints from that set
+                # Match by set_name (Card Conjurer UI) or set (Scryfall API)
+                selected_prints = [p for p in candidate_prints if (p.get('set_name') and p.get('set_name').lower() == target_set.lower()) or (p.get('set') and p.get('set').lower() == target_set.lower())]
+                # If the target_set is from Scryfall API, it might use 'set' key directly.
+                # If from Card Conjurer UI, it uses 'set_name'. Handle both.
 
-                for print_data in candidate_prints:
-                    cc_set_name = print_data.get('set_name')
-                    cc_collector_number = print_data.get('collector_number')
-                    if cc_set_name and cc_collector_number:
-                        if (cc_set_name.lower(), cc_collector_number.lower()) in scryfall_unique_ids:
-                            prints_to_capture.append(print_data)
+        return selected_prints
+
+    def process_and_capture_card(self, card_name, is_priming=False):
+        all_cc_prints = self._get_and_filter_prints(card_name) # Get all prints from CC UI once
+        
+        prints_to_capture = []
+        
+        if self.card_selection_strategy == 'scryfall':
+            print(f"--- Scryfall Mode for '{card_name}' ---")
+            query_parts = [f'!"{card_name}"', 'unique:art', 'game:paper', 'not:covered'] # Base query for unique art in paper
+            
+            # Add include/exclude set filters
+            if self.include_sets:
+                include_query = " OR ".join([f"set:{s}" for s in self.include_sets])
+                query_parts.append(f"({include_query})")
+            if self.exclude_sets:
+                exclude_query = " ".join([f"-set:{s}" for s in self.exclude_sets])
+                query_parts.append(f" {exclude_query}")
+
+            # Add set selection preference to query (for Scryfall API ordering)
+            if self.set_selection_strategy == 'latest':
+                query_parts.append('prefer:newest') # Scryfall uses newest for latest
+            elif self.set_selection_strategy == 'earliest':
+                query_parts.append('prefer:oldest') # Scryfall uses oldest for earliest
+            # 'random' and 'all' will be handled after fetching all results
+
+            full_query = " ".join(query_parts)
+            print(f"   Scryfall query: {full_query}")
+
+            scryfall_results = self.scryfall_api.search_cards(full_query, unique="art") # unique="art" is important here
+
+            if not scryfall_results:
+                print(f"   Warning: No unique art prints found on Scryfall for '{card_name}' with query '{full_query}'. Falling back to Card Conjurer 'all' strategy.", file=sys.stderr)
+                # Fallback to 'cardconjurer' mode if Scryfall yields nothing
+                prints_to_capture = self._select_prints_from_candidate(all_cc_prints, 'all') # Use 'all' strategy for CC fallback
+            else:
+                # Filter Card Conjurer prints against Scryfall results
+                scryfall_unique_identifiers = set()
+                for sr in scryfall_results:
+                    scryfall_set = sr.get('set')
+                    scryfall_cn = sr.get('collector_number')
+                    if scryfall_set and scryfall_cn:
+                        scryfall_unique_identifiers.add((scryfall_set.lower(), str(scryfall_cn).lower()))
+
+                for cc_print in all_cc_prints:
+                    cc_set = cc_print.get('set_name')
+                    cc_cn = cc_print.get('collector_number')
+                    if cc_set and cc_cn and (cc_set.lower(), cc_cn.lower()) in scryfall_unique_identifiers:
+                        prints_to_capture.append(cc_print)
                 
                 if not prints_to_capture:
-                    print(f"   Warning: No matching prints found in Card Conjurer UI for Scryfall unique art for '{card_name}'. Falling back to 'all' strategy.", file=sys.stderr)
-                    prints_to_capture = candidate_prints # Fallback if no matches found after filtering
+                    print(f"   Warning: No Card Conjurer prints matched Scryfall unique art for '{card_name}'. Falling back to Card Conjurer 'all' strategy.", file=sys.stderr)
+                    prints_to_capture = self._select_prints_from_candidate(all_cc_prints, 'all') # Use 'all' strategy for CC fallback
                 else:
-                    print(f"   Found {len(prints_to_capture)} unique art prints for '{card_name}' based on Scryfall data.")
-        else: # Existing logic for 'latest', 'earliest', 'random'
-            if self.set_selection_strategy == 'latest': representative_print = candidate_prints[0]
-            elif self.set_selection_strategy == 'random': representative_print = random.choice(candidate_prints)
-            else: representative_print = candidate_prints[-1]
-            
-            target_set = representative_print['set_name']
-            if not target_set:
-                prints_to_capture = [representative_print]
-            else:
-                prints_to_capture = [p for p in candidate_prints if p['set_name'] == target_set]
+                    print(f"   Found {len(prints_to_capture)} matching prints from Scryfall unique art and Card Conjurer UI for '{card_name}'.")
+                    # Apply set_selection_strategy to the matched Scryfall prints
+                    prints_to_capture = self._select_prints_from_candidate(prints_to_capture, self.set_selection_strategy)
+
+        elif self.card_selection_strategy == 'cardconjurer':
+            print(f"--- Card Conjurer Mode for '{card_name}' ---")
+            prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.set_selection_strategy)
+        
+        if not prints_to_capture:
+            print(f"Error: No prints selected for '{card_name}' after applying all filters and selection strategies.", file=sys.stderr)
+            return
         
         if is_priming:
             dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
