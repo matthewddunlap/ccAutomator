@@ -103,7 +103,7 @@ class CardConjurerAutomator:
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                 flavor_font=None, rules_down=None,
+                 flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
                  upload_path=None, upload_secret=None,
@@ -148,6 +148,8 @@ class CardConjurerAutomator:
 
         self.flavor_font = flavor_font
         self.rules_down = rules_down
+        self.rules_bounds_y = rules_bounds_y
+        self.rules_bounds_height = rules_bounds_height
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -442,6 +444,62 @@ class CardConjurerAutomator:
             time.sleep(self.render_delay)
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
+
+
+    def _apply_rules_text_bounds_mods(self):
+        """
+        Modifies the Y position and height of the rules text box by opening the
+        'Edit Bounds' dialog and adjusting the values.
+        """
+        if self.rules_bounds_y is None and self.rules_bounds_height is None:
+            return
+
+        print("   Applying rules text bounds modifications...")
+        try:
+            # 1. Ensure the 'Rules Text' editor is open (it should be from previous steps)
+            #    and click the 'Edit Bounds' button.
+            edit_bounds_button_selector = "//button[contains(text(), 'Edit Bounds')]"
+            edit_bounds_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, edit_bounds_button_selector)))
+            edit_bounds_button.click()
+
+            # 2. Wait for the textbox editor modal to appear.
+            textbox_editor_selector = "div#textbox-editor.opened"
+            self.wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, textbox_editor_selector)))
+            print("      'Edit Bounds' dialog opened.")
+
+            # 3. Modify the 'Y' value if provided.
+            if self.rules_bounds_y is not None:
+                y_input = self.driver.find_element(By.ID, 'textbox-editor-y')
+                current_y = int(y_input.get_attribute('value') or 0)
+                new_y = current_y + self.rules_bounds_y
+                
+                self.driver.execute_script("arguments[0].value = arguments[1];", y_input, new_y)
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", y_input)
+                print(f"      Adjusted Rules Bounds Y from {current_y} to {new_y} (delta: {self.rules_bounds_y}).")
+
+            # 4. Modify the 'Height' value if provided.
+            if self.rules_bounds_height is not None:
+                height_input = self.driver.find_element(By.ID, 'textbox-editor-height')
+                current_height = int(height_input.get_attribute('value') or 0)
+                new_height = current_height + self.rules_bounds_height
+
+                self.driver.execute_script("arguments[0].value = arguments[1];", height_input, new_height)
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", height_input)
+                print(f"      Adjusted Rules Bounds Height from {current_height} to {new_height} (delta: {self.rules_bounds_height}).")
+
+            # 5. Close the textbox editor.
+            close_button_selector = "h2.textbox-editor-close"
+            close_button = self.driver.find_element(By.CSS_SELECTOR, close_button_selector)
+            close_button.click()
+            print("      Closed 'Edit Bounds' dialog.")
+
+            # 6. Wait for the changes to render.
+            time.sleep(self.render_delay)
+
+        except (TimeoutException, NoSuchElementException) as e:
+            print(f"      An error occurred while modifying rules text bounds: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"      An unexpected error occurred in _apply_rules_text_bounds_mods: {e}", file=sys.stderr)
 
 
     def _apply_custom_art(self, card_name, set_name, collector_number, art_url_to_apply: str):
@@ -1082,10 +1140,11 @@ class CardConjurerAutomator:
                     # Fallback for other basic lands if any
                     self._apply_text_mods("Rules Text", down=self.rules_down)
                     self._apply_flavor_font_mod()
+                    self._apply_rules_text_bounds_mods()
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 self._apply_flavor_font_mod()
-
+                self._apply_rules_text_bounds_mods()
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True

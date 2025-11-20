@@ -178,6 +178,20 @@ def main():
     )
 
     parser.add_argument(
+        '--rules-bounds-y',
+        type=int,
+        metavar='NUM',
+        help="Adjust the Y position of the rules text box by this amount."
+    )
+
+    parser.add_argument(
+        '--rules-bounds-height',
+        type=int,
+        metavar='NUM',
+        help="Adjust the height of the rules text box by this amount."
+    )
+
+    parser.add_argument(
         '--image-server',
         help="The base URL of the web server where custom art is stored (e.g., 'http://mtgproxy:4242')."
     )
@@ -306,6 +320,8 @@ def main():
             type_left=args.type_left,
             flavor_font=args.flavor_font,
             rules_down=args.rules_down,
+            rules_bounds_y=args.rules_bounds_y,
+            rules_bounds_height=args.rules_bounds_height,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             art_path=args.art_path,
