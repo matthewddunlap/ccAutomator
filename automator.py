@@ -259,7 +259,7 @@ class CardConjurerAutomator:
         safe_num = self._generate_safe_filename(collector_number) if collector_number else 'no-num'
         return f"{safe_card}_{safe_set}_{safe_num}.png"
 
-    def _get_and_filter_prints(self, card_name) -> Tuple[List[dict], bool]:
+    def _get_and_filter_prints(self, card_name, is_priming=False) -> Tuple[List[dict], bool]:
         """
         Gets all prints from the Card Conjurer UI and filters them based on include/exclude sets.
         Returns the list of prints and a boolean indicating if an include-set filter caused a fallback.
@@ -299,6 +299,12 @@ class CardConjurerAutomator:
             if not all_exact_matches:
                 print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr)
                 return [], False # No exact matches, no fallback needed because nothing was found at all.
+
+            # --- Priming Logic ---
+            # If we are only priming, we return all matches immediately without any filtering.
+            if is_priming:
+                print("   Bypassing filters for priming.")
+                return all_exact_matches, False
 
             # --- Filtering Logic ---
             # 1. Apply the blacklist first. This list is the "true" base for all further operations.
@@ -356,7 +362,7 @@ class CardConjurerAutomator:
             if '{flavor}' in current_text:
                 font_tag = f"{{fontsize{self.flavor_font}}}"
                 # Replace the first occurrence of {flavor} with itself plus the new tag
-                new_text = current_text.replace('{flavor}', f'{{flavor}}{{font_tag}}', 1)
+                new_text = current_text.replace('{flavor}', f'{{flavor}}{font_tag}', 1)
 
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
@@ -947,8 +953,19 @@ class CardConjurerAutomator:
         return [] # Should not be reached
 
     def process_and_capture_card(self, card_name, is_priming=False):
-        # Step 1: Get all possible prints from the UI and see if include filters caused a fallback.
-        all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name)
+        # Step 1: Get all possible prints from the UI, bypassing filters if priming.
+        all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name, is_priming=is_priming)
+
+        # --- Priming ---
+        # If priming, just select the first available print and return.
+        if is_priming:
+            if all_cc_prints:
+                dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
+                dropdown.select_by_value(all_cc_prints[0]['index'])
+                time.sleep(self.render_delay)
+            else:
+                print(f"   Error: No prints found for priming card '{card_name}'.", file=sys.stderr)
+            return
 
         prints_to_capture = []
         
@@ -1046,15 +1063,9 @@ class CardConjurerAutomator:
                 else: # 'all'
                     prints_to_capture = matched_prints
         
-        # --- Final Check and Priming ---
+        # --- Final Check ---
         if not prints_to_capture:
             print(f"Error: No prints selected for '{card_name}' after applying all filters and strategies.", file=sys.stderr)
-            return
-        
-        if is_priming:
-            dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
-            dropdown.select_by_value(prints_to_capture[0]['index'])
-            time.sleep(self.render_delay)
             return
 
         # --- Main Capture Loop ---
