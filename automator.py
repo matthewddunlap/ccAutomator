@@ -21,7 +21,7 @@ from gradio_client import Client, file as gradio_file
 from PIL import Image
 import io
 import unicodedata
-from typing import Optional
+from typing import Optional, Tuple, List
 
 # Add the scry2cc directory to the Python path to import the Scryfall API utilities.
 # This assumes that the 'scry2cc' and 'ccAutomator-ccDownloader' directories are siblings.
@@ -236,7 +236,8 @@ class CardConjurerAutomator:
             if current_hash == last_hash: stable_count += 1
             else: last_hash = current_hash; stable_count = 1
             if stable_count >= self.STABILITY_CHECKS:
-                print(f"Canvas stabilized with new hash: {current_hash[:10]}..."); return current_hash
+                print(f"Canvas stabilized with new hash: {current_hash[:10]}...")
+                return current_hash
             time.sleep(self.STABILITY_INTERVAL)
         print("Warning: Timeout waiting for canvas to stabilize.", file=sys.stderr); return None
 
@@ -256,10 +257,14 @@ class CardConjurerAutomator:
         safe_num = self._generate_safe_filename(collector_number) if collector_number else 'no-num'
         return f"{safe_card}_{safe_set}_{safe_num}.png"
 
-    def _get_and_filter_prints(self, card_name):
+    def _get_and_filter_prints(self, card_name) -> Tuple[List[dict], bool]:
+        """
+        Gets all prints from the Card Conjurer UI and filters them based on include/exclude sets.
+        Returns the list of prints and a boolean indicating if an include-set filter caused a fallback.
+        """
         try:
-            import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
-            import_save_tab.click()
+            # First, interact with the UI to get all available prints for the card name
+            self.import_save_tab.click()
             import_input = self.wait.until(EC.presence_of_element_located((By.ID, 'import-name')))
             import_input.clear()
             dropdown_locator = (By.ID, 'import-index')
@@ -290,10 +295,10 @@ class CardConjurerAutomator:
                         all_exact_matches.append(match_data)
             
             if not all_exact_matches:
-                print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr); return []
+                print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr)
+                return [], False # No exact matches, no fallback needed because nothing was found at all.
 
-            # --- START OF CORRECTED FILTERING LOGIC ---
-            
+            # --- Filtering Logic ---
             # 1. Apply the blacklist first. This list is the "true" base for all further operations.
             prints_after_exclude = all_exact_matches
             if self.exclude_sets:
@@ -304,37 +309,23 @@ class CardConjurerAutomator:
             if self.include_sets:
                 final_filtered_prints = [p for p in prints_after_exclude if p['set_name'] and p['set_name'].lower() in self.include_sets]
 
-            # 3. Handle the results and fallback logic.
-            # The fallback condition is: an include filter was active, but it produced an empty list.
-            if not final_filtered_prints and self.include_sets:
-                if self.no_match_selection == 'skip':
-                    print(f"Skipping '{card_name}': No prints matched the include/exclude filters.")
-                    return []
-                else:
-                    print(f"Warning: No prints for '{card_name}' matched the include filter. Falling back to the post-exclusion list.")
-                    # CORRECTED: Fall back to the list that has been filtered by exclude, not the original.
-                    return prints_after_exclude
+            # --- Fallback Logic ---
+            # Determine if an include filter was active and resulted in an empty list.
+            filter_failed = bool(self.include_sets and not final_filtered_prints)
+            if filter_failed:
+                print(f"Warning: No prints for '{card_name}' matched the include filter. Falling back to the post-exclusion list.")
+                # Return the prints before the include filter was applied, and indicate fallback.
+                return prints_after_exclude, True
             
-            return final_filtered_prints
-            # --- END OF CORRECTED FILTERING LOGIC ---
+            # If no fallback needed, return the final filtered prints and indicate no fallback.
+            return final_filtered_prints, False
 
-#            filtered_prints = all_exact_matches
-#            if self.exclude_sets:
-#                filtered_prints = [p for p in filtered_prints if not (p['set_name'] and p['set_name'].lower() in self.exclude_sets)]
-#            if self.include_sets:
-#                filtered_prints = [p for p in filtered_prints if p['set_name'] and p['set_name'].lower() in self.include_sets]
-#
-#            if not filtered_prints and (self.include_sets or self.exclude_sets):
-#                if self.no_match_skip:
-#                    print(f"Skipping '{card_name}': No prints matched the include/exclude filters."); return []
-#                else:
-#                    print(f"Warning: No prints for '{card_name}' matched filters. Falling back to all prints."); return all_exact_matches
-#            
-#            return filtered_prints
         except TimeoutException:
-            print(f"Error: Timed out for '{card_name}'. Card might not exist.", file=sys.stderr); return []
+            print(f"Error: Timed out for '{card_name}'. Card might not exist.", file=sys.stderr)
+            return [], False
         except Exception as e:
-            print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr); return []
+            print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr)
+            return [], False
 
     def _apply_flavor_font_mod(self):
         """
@@ -363,7 +354,7 @@ class CardConjurerAutomator:
             if '{flavor}' in current_text:
                 font_tag = f"{{fontsize{self.flavor_font}}}"
                 # Replace the first occurrence of {flavor} with itself plus the new tag
-                new_text = current_text.replace('{flavor}', f'{{flavor}}{font_tag}', 1)
+                new_text = current_text.replace('{flavor}', f'{{flavor}}{{font_tag}}', 1)
 
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
@@ -421,7 +412,7 @@ class CardConjurerAutomator:
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
                 print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
 
-            # Wait for the change to render on the canvas
+            # Wait for the change to render on a canvas
             time.sleep(self.render_delay)
 
         except Exception as e:
@@ -453,7 +444,6 @@ class CardConjurerAutomator:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
 
-    # --- 3. ADD THE NEW _apply_custom_art METHOD ---
     def _apply_custom_art(self, card_name, set_name, collector_number, art_url_to_apply: str):
         """
         Applies custom art to the card in Card Conjurer.
@@ -492,7 +482,7 @@ class CardConjurerAutomator:
             # Navigate to the art tab and paste the URL
             self.art_tab.click()
 
-            # --- NEW: Handle Autofit Checkbox ---
+            # Handle Autofit Checkbox
             if self.autofit_art:
                 print("   Ensuring Autofit is enabled...")
                 try:
@@ -504,7 +494,6 @@ class CardConjurerAutomator:
                         print("   'Autofit when setting art' checkbox enabled.")
                 except Exception as e:
                     print(f"   Warning: Could not set the autofit checkbox. {e}", file=sys.stderr)
-            # --- END OF NEW LOGIC ---
             
             art_url_input_selector = "//h5[contains(text(), 'Choose/upload your art')]/following-sibling::div//input[@type='url']"
             art_url_input = self.wait.until(EC.presence_of_element_located((By.XPATH, art_url_input_selector)))
@@ -522,7 +511,6 @@ class CardConjurerAutomator:
         except requests.exceptions.RequestException as e:
             print(f"   Network error checking for custom art '{art_url_to_apply}': {e}", file=sys.stderr)
 
-    # --- 2. ADD THE NEW _upload_image METHOD ---
     def _upload_image(self, image_data, filename):
         """
         Uploads the given image data to the configured server endpoint
@@ -549,7 +537,7 @@ class CardConjurerAutomator:
             response = requests.put(full_upload_url, data=image_data, headers=headers, timeout=60)
             response.raise_for_status()  # This will raise an HTTPError for 4xx or 5xx responses.
 
-            # If raise_for_status() doesn't raise an error, the upload was successful.
+            # If raise_for_status() doesn't raise a HTTP error, the upload was successful.
             print(f"   Upload successful.")
 
         except requests.exceptions.HTTPError as e:
@@ -620,7 +608,7 @@ class CardConjurerAutomator:
             response.raise_for_status()
             # No api_delay_seconds for now, as we are not hitting Scryfall API directly for every image fetch
             return response.content
-        except requests.RequestException as e:
+        except requests.exceptions.RequestException as e:
             print(f"   Error: Failed to fetch image for {purpose} from {url}: {e}", file=sys.stderr)
             return None
             
@@ -636,7 +624,6 @@ class CardConjurerAutomator:
             if fmt == "JPEG": return "image/jpeg", ".jpg"
             if fmt == "PNG": return "image/png", ".png"
             if fmt == "GIF": return "image/gif", ".gif"
-            if fmt == "WEBP": return "image/webp", ".webp"
             if image_bytes.startswith(b'\xff\xd8\xff'): return "image/jpeg", ".jpg"
             if image_bytes.startswith(b'\x89PNG\r\n\x1a\n'): return "image/png", ".png"
             if image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'): return "image/gif", ".gif"
@@ -849,7 +836,7 @@ class CardConjurerAutomator:
                     hosted_upscaled_art_url = str(expected_upscaled_local_path)
             else:
                 # Determine the path/URL to the original art for the upscaler
-                # If we saved locally, the upscaler can read from the local path
+                # If we saved locally, the upscaler can read from a local path
                 original_art_path_for_upscaler = hosted_original_art_url if self.download_dir else art_crop_url
                 
                 upscaled_bytes = self._upscale_image_with_ilaria(original_art_path_for_upscaler, f"{sanitized_card_name}_{set_code_sanitized}_{collector_number_sanitized}", original_image_mime_type, self.upscaler_factor)
@@ -875,36 +862,58 @@ class CardConjurerAutomator:
 
         return final_art_source_url, type_line
 
-    def _select_prints_from_candidate(self, candidate_prints: list, selection_strategy: str) -> list:
+    def _select_prints_from_candidate(self, candidate_prints: List[dict], selection_strategy: str) -> List[dict]:
         """
-        Applies a selection strategy to a list of candidate prints from the Card Conjurer UI.
-        This method assumes the sorting order of Card Conjurer's dropdown (newest to oldest).
+        Applies a selection strategy to a list of candidate prints.
+        This method is used for both Card Conjurer mode selections and Scryfall fallbacks.
+        It assumes that the input `candidate_prints` list is sorted newest to oldest for CC dropdowns
+        and oldest to newest if derived from Scryfall API results.
         """
         if not candidate_prints:
             return []
 
         if selection_strategy == 'all':
+            # Return all prints if the strategy is 'all'.
             return candidate_prints
         
         if selection_strategy == 'latest':
-            return [candidate_prints[0]] # Newest is first in CC dropdown
+            # For CC dropdown, newest is first. For Scryfall results (oldest to newest), newest is last.
+            # We are calling this on a list already sorted based on the primary source.
+            return [candidate_prints[0]] 
         elif selection_strategy == 'earliest':
-            return [candidate_prints[-1]] # Oldest is last
+            # For CC dropdown, earliest is last. For Scryfall results (oldest to newest), earliest is first.
+            return [candidate_prints[-1]]
         elif selection_strategy == 'random':
             return [random.choice(candidate_prints)]
 
         return [] # Should not be reached
 
     def process_and_capture_card(self, card_name, is_priming=False):
-        all_cc_prints = self._get_and_filter_prints(card_name) # Get all prints from CC UI once
-        
+        # Step 1: Get all possible prints from the UI and see if include filters caused a fallback.
+        all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name)
+
         prints_to_capture = []
         
-        if self.card_selection_strategy == 'scryfall':
+        # --- Card Conjurer Mode ---
+        if self.card_selection_strategy == 'cardconjurer':
+            print(f"--- Card Conjurer Mode for '{card_name}' ---")
+            strategy_to_use = self.set_selection_strategy
+            
+            # If the include filter failed in _get_and_filter_prints, we use the no_match_selection strategy.
+            if include_filter_failed_cc:
+                if self.no_match_selection == 'skip':
+                    print(f"   Skipping card because no prints matched the include filter and --no-match-selection is 'skip'.", file=sys.stderr)
+                    return
+                strategy_to_use = self.no_match_selection
+            
+            prints_to_capture = self._select_prints_from_candidate(all_cc_prints, strategy_to_use)
+
+        # --- Scryfall Mode ---
+        elif self.card_selection_strategy == 'scryfall':
             print(f"--- Scryfall Mode for '{card_name}' ---")
             
-            # --- Initial Scryfall Query ---
-            base_query_parts = [f'!"{card_name}"', 'unique:art', 'game:paper', 'not:covered']
+            # 1. Initial Scryfall Query (with set filters)
+            base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'game:paper', 'not:covered']
             query_parts = list(base_query_parts) # Make a copy
 
             # Add include/exclude set filters for the initial query
@@ -919,16 +928,17 @@ class CardConjurerAutomator:
             print(f"   Scryfall query (with filters): {full_query}")
             scryfall_results = self.scryfall_api.search_cards(full_query, unique="art", order_by="released", direction="asc")
 
-            selection_strategy = self.set_selection_strategy
+            selection_strategy = self.set_selection_strategy # Default to set_selection_strategy
 
-            # --- Fallback Scryfall Query ---
+            # 2. Fallback Scryfall Query if initial one yields no results
             if not scryfall_results:
                 if self.no_match_selection == 'skip':
-                    print(f"   Warning: Initial query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
+                    print(f"   Warning: Initial Scryfall query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
                     return
-                print(f"   Warning: Initial query found no matches. Stripping set filters and retrying.", file=sys.stderr)
+
+                print(f"   Warning: Initial query found no matches. Stripping set filters and retrying a broader Scryfall search.", file=sys.stderr)
                 
-                # Use the base query parts, but add prefer:newest/oldest based on the *fallback* strategy
+                # Construct fallback query without set filters, applying prefer:newest/oldest if specified
                 fallback_query_parts = list(base_query_parts)
                 if self.no_match_selection == 'latest':
                     fallback_query_parts.append('prefer:newest')
@@ -943,49 +953,44 @@ class CardConjurerAutomator:
                     print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
                     return
 
-                # If the fallback was used, the selection strategy to apply is the no_match_selection
+                # If fallback query was used, the selection strategy shifts to no_match_selection
                 selection_strategy = self.no_match_selection
 
-            # --- Match Scryfall results against Card Conjurer UI prints ---
+            # 3. Match Scryfall results against Card Conjurer UI prints
             matched_prints = []
             for sr in scryfall_results:
                 scryfall_set = sr.get('set')
                 scryfall_cn = sr.get('collector_number')
                 if scryfall_set and scryfall_cn:
                     for cc_print in all_cc_prints:
-                        cc_set = cc_print.get('set_name')
-                        cc_cn = cc_print.get('collector_number')
-                        if cc_set and cc_cn and scryfall_set.lower() == cc_set.lower() and str(scryfall_cn).lower() == cc_cn.lower():
+                        if cc_print.get('set_name', '').lower() == scryfall_set.lower() and cc_print.get('collector_number', '').lower() == str(scryfall_cn).lower():
                             matched_prints.append(cc_print)
                             break
             
+            # 4. Apply Final Selection from matched prints or fallback to all CC prints
             if not matched_prints:
                 if self.no_match_selection == 'skip':
-                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
+                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none were available in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
                     return
-
+                
                 print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI.", file=sys.stderr)
                 print(f"   Applying fallback selection '{self.no_match_selection}' to all available Card Conjurer prints.", file=sys.stderr)
                 prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)
             else:
                 print(f"   Found {len(matched_prints)} matching prints in UI from {len(scryfall_results)} Scryfall results.")
                 
-                # --- Apply Final Selection Strategy ---
                 if selection_strategy == 'latest':
-                    prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest
+                    prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest (Scryfall results are oldest-to-newest)
                 elif selection_strategy == 'earliest':
-                    prints_to_capture = [matched_prints[0]] # First item is oldest
+                    prints_to_capture = [matched_prints[0]] # First item is oldest (Scryfall results are oldest-to-newest)
                 elif selection_strategy == 'random':
                     prints_to_capture = [random.choice(matched_prints)]
                 else: # 'all'
                     prints_to_capture = matched_prints
-
-        elif self.card_selection_strategy == 'cardconjurer':
-            print(f"--- Card Conjurer Mode for '{card_name}' ---")
-            prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.set_selection_strategy)
         
+        # --- Final Check and Priming ---
         if not prints_to_capture:
-            print(f"Error: No prints selected for '{card_name}' after applying all filters and selection strategies.", file=sys.stderr)
+            print(f"Error: No prints selected for '{card_name}' after applying all filters and strategies.", file=sys.stderr)
             return
         
         if is_priming:
@@ -994,6 +999,7 @@ class CardConjurerAutomator:
             time.sleep(self.render_delay)
             return
 
+        # --- Main Capture Loop ---
         print(f"Preparing to capture {len(prints_to_capture)} print(s) for '{card_name}'.")
         dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
         for i, print_data in enumerate(prints_to_capture, 1):
@@ -1044,7 +1050,7 @@ class CardConjurerAutomator:
             else:
                 print(f"   No custom art URL available for '{card_name}'. Using default art.")
 
-            # Set a flag to see if we need an extra delay at the end
+            # Set a flag to see if we need a final delay at the end
             mods_applied = False
 
             self._apply_text_mods(
@@ -1164,7 +1170,7 @@ class CardConjurerAutomator:
 #            print("Waiting for white border to apply to the canvas...")
 #            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
 #            
-#            if self.current_canvas_hash is None:
+#            if self.current_canvas == initial_hash:
 #                 print("Warning: Canvas did not stabilize after applying white border. The change may not have registered.", file=sys.stderr)
 #            else:
 #                 print("Successfully applied white border.")
@@ -1180,7 +1186,7 @@ class CardConjurerAutomator:
     def _process_all_text_modifications(self):
         """
         Orchestrator for all text modifications to prevent race conditions.
-        Returns True if any modification was successfully made.
+        Returns True if a modified was successfully made.
         """
         # --- UPDATED: Check for new parameters ---
         has_mods_to_apply = any([
