@@ -99,7 +99,7 @@ class CardConjurerAutomator:
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
                  exclude_sets=None, card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
-                 no_match_skip=False, no_match_selection='earliest', render_delay=1.5, white_border=False,
+                 no_match_selection='earliest', render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
@@ -131,7 +131,6 @@ class CardConjurerAutomator:
         self.exclude_sets = {s.strip().lower() for s in exclude_sets.split(',')} if exclude_sets else set()
         self.card_selection_strategy = card_selection_strategy
         self.set_selection_strategy = set_selection_strategy
-        self.no_match_skip = no_match_skip
         self.no_match_selection = no_match_selection
         self.render_delay = render_delay
         self.apply_white_border_on_capture = white_border
@@ -308,7 +307,7 @@ class CardConjurerAutomator:
             # 3. Handle the results and fallback logic.
             # The fallback condition is: an include filter was active, but it produced an empty list.
             if not final_filtered_prints and self.include_sets:
-                if self.no_match_skip:
+                if self.no_match_selection == 'skip':
                     print(f"Skipping '{card_name}': No prints matched the include/exclude filters.")
                     return []
                 else:
@@ -924,6 +923,9 @@ class CardConjurerAutomator:
 
             # --- Fallback Scryfall Query ---
             if not scryfall_results:
+                if self.no_match_selection == 'skip':
+                    print(f"   Warning: Initial query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
+                    return
                 print(f"   Warning: Initial query found no matches. Stripping set filters and retrying.", file=sys.stderr)
                 
                 # Use the base query parts, but add prefer:newest/oldest based on the *fallback* strategy
@@ -958,6 +960,10 @@ class CardConjurerAutomator:
                             break
             
             if not matched_prints:
+                if self.no_match_selection == 'skip':
+                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
+                    return
+
                 print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI.", file=sys.stderr)
                 print(f"   Applying fallback selection '{self.no_match_selection}' to all available Card Conjurer prints.", file=sys.stderr)
                 prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)

@@ -79,16 +79,12 @@ def main():
              "'cardconjurer': Use the prints available directly from the Card Conjurer UI dropdown."
     )
     parser.add_argument(
-        '--no-match-skip',
-        action='store_true',
-        help="If set filters result in no matches, skip the card. \n"
-             "Default is to fall back and apply selection to all available prints."
-    )
-    parser.add_argument(
         '--no-match-selection',
         default='earliest',
-        choices=['latest', 'earliest', 'random', 'all'],
-        help="When --card-selection is 'scryfall' and no matches are found, this strategy is used for the fallback Card Conjurer prints.\n"
+        choices=['skip', 'latest', 'earliest', 'random', 'all'],
+        help="Defines the behavior when a Scryfall query (with or without filters) fails to find a match.\n"
+             "'skip': Skip the card entirely.\n"
+             "'latest'/'earliest'/'random'/'all': Apply this strategy to the available Card Conjurer prints as a fallback.\n"
              "(defaults to 'earliest')"
     )
     parser.add_argument(
@@ -292,7 +288,6 @@ def main():
             exclude_sets=args.exclude_set,
             card_selection_strategy=args.card_selection,
             set_selection_strategy=args.set_selection,
-            no_match_skip=args.no_match_skip,
             no_match_selection=args.no_match_selection,
             render_delay=args.render_delay,
             white_border=args.white_border,
