@@ -1,6 +1,7 @@
 import time
 import sys
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
@@ -147,8 +148,10 @@ class TextMixin:
                 current_y = int(y_input.get_attribute('value') or 0)
                 new_y = current_y + self.rules_bounds_y
                 
-                self.driver.execute_script("arguments[0].value = arguments[1];", y_input, new_y)
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", y_input)
+                # Use send_keys to ensure events are triggered and hit Enter
+                y_input.clear()
+                y_input.send_keys(str(new_y))
+                y_input.send_keys(Keys.RETURN)
                 print(f"      Adjusted Rules Bounds Y from {current_y} to {new_y} (delta: {self.rules_bounds_y}).")
 
             # 4. Modify the 'Height' value if provided.
@@ -157,9 +160,14 @@ class TextMixin:
                 current_height = int(height_input.get_attribute('value') or 0)
                 new_height = current_height + self.rules_bounds_height
 
-                self.driver.execute_script("arguments[0].value = arguments[1];", height_input, new_height)
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", height_input)
+                # Use send_keys to ensure events are triggered and hit Enter
+                height_input.clear()
+                height_input.send_keys(str(new_height))
+                height_input.send_keys(Keys.RETURN)
                 print(f"      Adjusted Rules Bounds Height from {current_height} to {new_height} (delta: {self.rules_bounds_height}).")
+
+            # Wait for a fraction of a second before closing
+            time.sleep(0.5)
 
             # 5. Close the textbox editor.
             close_button_selector = "h2.textbox-editor-close"
