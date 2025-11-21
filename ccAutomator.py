@@ -49,14 +49,37 @@ def main():
              "1 Hidden Necropolis\n"
              "1 Star Charter"
     )
-    parser.add_argument(
+    # --- START OF MODIFIED ARGUMENTS ---
+    # Legacy arguments (mutually exclusive with granular arguments)
+    legacy_group = parser.add_argument_group('Legacy Filtering Options')
+    legacy_group.add_argument(
         '--include-set',
-        help="Whitelist of sets to capture, provided as a comma-separated list (e.g., 'DRK,LEG')."
+        help="Whitelist of sets to capture (applies to ALL cards). Cannot be used with granular filters."
     )
-    parser.add_argument(
+    legacy_group.add_argument(
         '--exclude-set',
-        help="Blacklist of sets to ignore, provided as a comma-separated list (e.g., 'LEA,LEB')."
+        help="Blacklist of sets to ignore (applies to ALL cards). Cannot be used with granular filters."
     )
+
+    # Granular arguments
+    granular_group = parser.add_argument_group('Granular Filtering Options')
+    granular_group.add_argument(
+        '--spells-include-set',
+        help="Whitelist of sets for SPELLS (non-basic lands)."
+    )
+    granular_group.add_argument(
+        '--spells-exclude-set',
+        help="Blacklist of sets for SPELLS (non-basic lands)."
+    )
+    granular_group.add_argument(
+        '--basic-land-include-set',
+        help="Whitelist of sets for BASIC LANDS."
+    )
+    granular_group.add_argument(
+        '--basic-land-exclude-set',
+        help="Blacklist of sets for BASIC LANDS."
+    )
+    # --- END OF MODIFIED ARGUMENTS ---
     parser.add_argument(
         '--set-selection',
         default='earliest',
@@ -288,6 +311,15 @@ def main():
     if args.upload_secret and not args.upload_path:
         parser.error("--upload-secret is only valid when using --upload-path.")
 
+    # Check for mutual exclusivity between legacy and granular filters
+    has_legacy = args.include_set or args.exclude_set
+    has_granular = (args.spells_include_set or args.spells_exclude_set or 
+                    args.basic_land_include_set or args.basic_land_exclude_set)
+
+    if has_legacy and has_granular:
+        parser.error("Cannot mix legacy filters (--include-set/--exclude-set) with granular filters "
+                     "(--spells-*-set/--basic-land-*-set). Please use one or the other.")
+
     # Determine if we are in local save mode or upload mode
     save_locally = True if args.output_dir else False
 
@@ -306,6 +338,10 @@ def main():
             headless=not args.no_headless,
             include_sets=args.include_set,
             exclude_sets=args.exclude_set,
+            spells_include_sets=args.spells_include_set,
+            spells_exclude_sets=args.spells_exclude_set,
+            basic_land_include_sets=args.basic_land_include_set,
+            basic_land_exclude_sets=args.basic_land_exclude_set,
             card_selection_strategy=args.card_selection,
             set_selection_strategy=args.set_selection,
             no_match_selection=args.no_match_selection,

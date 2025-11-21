@@ -59,19 +59,40 @@ class PrintMixin:
                 return all_exact_matches, False
 
             # --- Filtering Logic ---
+            
+            # Import Basic Land Names
+            from automator_utils import BASIC_LAND_NAMES
+
+            # Determine which filters to use
+            current_include_sets = set()
+            current_exclude_sets = set()
+
+            if self.include_sets or self.exclude_sets:
+                # Legacy mode
+                current_include_sets = self.include_sets
+                current_exclude_sets = self.exclude_sets
+            else:
+                # Granular mode
+                if card_name in BASIC_LAND_NAMES:
+                    current_include_sets = self.basic_land_include_sets
+                    current_exclude_sets = self.basic_land_exclude_sets
+                else:
+                    current_include_sets = self.spells_include_sets
+                    current_exclude_sets = self.spells_exclude_sets
+
             # 1. Apply the blacklist first. This list is the "true" base for all further operations.
             prints_after_exclude = all_exact_matches
-            if self.exclude_sets:
-                prints_after_exclude = [p for p in all_exact_matches if not (p['set_name'] and p['set_name'].lower() in self.exclude_sets)]
+            if current_exclude_sets:
+                prints_after_exclude = [p for p in all_exact_matches if not (p['set_name'] and p['set_name'].lower() in current_exclude_sets)]
 
             # 2. Apply the whitelist to the already-excluded list.
             final_filtered_prints = prints_after_exclude
-            if self.include_sets:
-                final_filtered_prints = [p for p in prints_after_exclude if p['set_name'] and p['set_name'].lower() in self.include_sets]
+            if current_include_sets:
+                final_filtered_prints = [p for p in prints_after_exclude if p['set_name'] and p['set_name'].lower() in current_include_sets]
 
             # --- Fallback Logic ---
             # Determine if an include filter was active and resulted in an empty list.
-            filter_failed = bool(self.include_sets and not final_filtered_prints)
+            filter_failed = bool(current_include_sets and not final_filtered_prints)
             if filter_failed:
                 print(f"Warning: No prints for '{card_name}' matched the include filter. Falling back to the post-exclusion list.")
                 # Return the prints before the include filter was applied, and indicate fallback.

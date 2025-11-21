@@ -6,6 +6,13 @@ import requests
 from PIL import Image
 import io
 
+# Basic Land Names
+BASIC_LAND_NAMES = {
+    'Island', 'Forest', 'Mountain', 'Plains', 'Swamp',
+    'Snow-Covered Island', 'Snow-Covered Forest', 'Snow-Covered Mountain', 
+    'Snow-Covered Plains', 'Snow-Covered Swamp'
+}
+
 def parse_time_string(time_str: str) -> Optional[datetime]:
     """Parses a timestamp string (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h) into a timezone-aware datetime object (UTC)."""
     if not time_str:

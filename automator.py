@@ -46,7 +46,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
     A class to automate interactions with the Card Conjurer web application.
     """
     def __init__(self, url, download_dir='.', headless=True, include_sets=None,
-                 exclude_sets=None, card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
+                 exclude_sets=None, spells_include_sets=None, spells_exclude_sets=None,
+                 basic_land_include_sets=None, basic_land_exclude_sets=None,
+                 card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
                  no_match_selection='earliest', render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
@@ -76,8 +78,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         self.wait = WebDriverWait(self.driver, 15)
         self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
         
+        # Legacy filters
         self.include_sets = {s.strip().lower() for s in include_sets.split(',')} if include_sets else set()
         self.exclude_sets = {s.strip().lower() for s in exclude_sets.split(',')} if exclude_sets else set()
+
+        # Granular filters
+        self.spells_include_sets = {s.strip().lower() for s in spells_include_sets.split(',')} if spells_include_sets else set()
+        self.spells_exclude_sets = {s.strip().lower() for s in spells_exclude_sets.split(',')} if spells_exclude_sets else set()
+        self.basic_land_include_sets = {s.strip().lower() for s in basic_land_include_sets.split(',')} if basic_land_include_sets else set()
+        self.basic_land_exclude_sets = {s.strip().lower() for s in basic_land_exclude_sets.split(',')} if basic_land_exclude_sets else set()
         self.card_selection_strategy = card_selection_strategy
         self.set_selection_strategy = set_selection_strategy
         self.no_match_selection = no_match_selection
@@ -206,12 +215,30 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'game:paper', 'not:covered']
             query_parts = list(base_query_parts) # Make a copy
 
+            # Determine which filters to use (Granular vs Legacy)
+            from automator_utils import BASIC_LAND_NAMES
+            current_include_sets = set()
+            current_exclude_sets = set()
+
+            if self.include_sets or self.exclude_sets:
+                # Legacy mode
+                current_include_sets = self.include_sets
+                current_exclude_sets = self.exclude_sets
+            else:
+                # Granular mode
+                if card_name in BASIC_LAND_NAMES:
+                    current_include_sets = self.basic_land_include_sets
+                    current_exclude_sets = self.basic_land_exclude_sets
+                else:
+                    current_include_sets = self.spells_include_sets
+                    current_exclude_sets = self.spells_exclude_sets
+
             # Add include/exclude set filters for the initial query
-            if self.include_sets:
-                include_query = " OR ".join([f"set:{s}" for s in self.include_sets])
+            if current_include_sets:
+                include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
                 query_parts.append(f"({include_query})")
-            if self.exclude_sets:
-                exclude_query = " ".join([f"-set:{s}" for s in self.exclude_sets])
+            if current_exclude_sets:
+                exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
                 query_parts.append(f" {exclude_query}")
 
             full_query = " ".join(query_parts)
