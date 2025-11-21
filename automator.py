@@ -176,6 +176,54 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         safe_num = self._generate_safe_filename(collector_number) if collector_number else 'no-num'
         return f"{safe_card}_{safe_set}_{safe_num}.png"
 
+    def _match_scryfall_to_cc_prints(self, scryfall_results, all_cc_prints):
+        """
+        Matches Scryfall results to Card Conjurer prints, including cross-referencing via illustration_id.
+        """
+        matched_prints = []
+        processed_illustration_ids = set()
+
+        print(f"   Cross-referencing {len(scryfall_results)} Scryfall result(s) with Card Conjurer prints...")
+
+        for sr in scryfall_results:
+            # Check for direct match first
+            scryfall_set = sr.get('set')
+            scryfall_cn = sr.get('collector_number')
+            
+            direct_match_found = False
+            if scryfall_set and scryfall_cn:
+                for cc_print in all_cc_prints:
+                    if cc_print.get('set_name', '').lower() == scryfall_set.lower() and cc_print.get('collector_number', '').lower() == str(scryfall_cn).lower():
+                        matched_prints.append(cc_print)
+                        direct_match_found = True
+                        break
+            
+            if direct_match_found:
+                continue
+
+            # If no direct match, try cross-referencing via illustration_id
+            illustration_id = sr.get('illustration_id')
+            if illustration_id and illustration_id not in processed_illustration_ids:
+                processed_illustration_ids.add(illustration_id)
+                
+                # Query for all prints with this illustration_id
+                ill_query = f"illustration_id:{illustration_id} unique:prints game:paper"
+                # print(f"      Checking for other prints with illustration_id: {illustration_id}")
+                ill_results = self.scryfall_api.search_cards(ill_query, unique="prints", order_by="released", direction="asc")
+                
+                for ir in ill_results:
+                    ir_set = ir.get('set')
+                    ir_cn = ir.get('collector_number')
+                    if ir_set and ir_cn:
+                        for cc_print in all_cc_prints:
+                            if cc_print.get('set_name', '').lower() == ir_set.lower() and cc_print.get('collector_number', '').lower() == str(ir_cn).lower():
+                                # Avoid duplicates if we already matched this print
+                                if cc_print not in matched_prints:
+                                    matched_prints.append(cc_print)
+                                    # print(f"      -> Found cross-reference match: {cc_print['text']}")
+        
+        return matched_prints
+
     def process_and_capture_card(self, card_name, is_priming=False):
         # Step 1: Get all possible prints from the UI, bypassing filters if priming.
         all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name, is_priming=is_priming)
@@ -274,27 +322,19 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 selection_strategy = self.no_match_selection
 
             # 3. Match Scryfall results against Card Conjurer UI prints
-            matched_prints = []
-            for sr in scryfall_results:
-                scryfall_set = sr.get('set')
-                scryfall_cn = sr.get('collector_number')
-                if scryfall_set and scryfall_cn:
-                    for cc_print in all_cc_prints:
-                        if cc_print.get('set_name', '').lower() == scryfall_set.lower() and cc_print.get('collector_number', '').lower() == str(scryfall_cn).lower():
-                            matched_prints.append(cc_print)
-                            break
+            matched_prints = self._match_scryfall_to_cc_prints(scryfall_results, all_cc_prints)
             
             # 4. Apply Final Selection from matched prints or fallback to all CC prints
             if not matched_prints:
                 if self.no_match_selection == 'skip':
-                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none were available in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
+                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall (and checked cross-references), but none were available in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
                     return
                 
-                print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI.", file=sys.stderr)
+                print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI (even after cross-referencing).", file=sys.stderr)
                 print(f"   Applying fallback selection '{self.no_match_selection}' to all available Card Conjurer prints.", file=sys.stderr)
                 prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)
             else:
-                print(f"   Found {len(matched_prints)} matching prints in UI from {len(scryfall_results)} Scryfall results.")
+                print(f"   Found {len(matched_prints)} matching prints in UI from {len(scryfall_results)} Scryfall results (including cross-references).")
                 
                 if selection_strategy == 'latest':
                     prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest (Scryfall results are oldest-to-newest)
