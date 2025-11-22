@@ -1,6 +1,8 @@
 import argparse
 import re
 import sys
+import os
+import json
 from pathlib import Path
 from automator import CardConjurerAutomator
 
@@ -85,21 +87,17 @@ def main():
     )
     parser.add_argument(
         '--url',
-        required=True,
-        help="The URL for the Card Conjurer web app."
+        help="The URL for the Card Conjurer web app. Required for 'selenium' and 'cc-file' modes."
     )
     parser.add_argument(
         '--frame',
-        required=True,
-        help="The name of the frame to select from the dropdown (e.g., 'Seventh')."
+        help="The name of the frame to select from the dropdown (e.g., 'Seventh'). Required for 'selenium' and 'cc-file' modes."
     )
     parser.add_argument(
         'input_file',
-        help="A plain text file with a list of card names to process and capture.\n"
-             "Format: <number> <Card Name>\n"
-             "Example:\n"
-             "1 Hidden Necropolis\n"
-             "1 Star Charter"
+        help="Input file path.\n"
+             "For '--card-builder selenium': A plain text file with a list of card names.\n"
+             "For '--card-builder cc-file' or 'edit': A .cardconjurer project file."
     )
     # --- START OF MODIFIED ARGUMENTS ---
     # Legacy arguments (mutually exclusive with granular arguments)
@@ -147,11 +145,8 @@ def main():
     )
     parser.add_argument(
         '--card-selection',
-        required=True,
         choices=['scryfall', 'cardconjurer'],
-        help="Determines the source for card versions:\n"
-             "'scryfall': Use the Scryfall API to determine unique art prints.\n"
-             "'cardconjurer': Use the prints available directly from the Card Conjurer UI dropdown."
+        help="Determines the source for card versions. Required for 'selenium' mode."
     )
     parser.add_argument(
         '--no-match-selection',
@@ -182,6 +177,12 @@ def main():
         '--white-border',
         action='store_true',
         help="Apply the white border to the card frame."
+    )
+
+    parser.add_argument(
+        '--black-border',
+        action='store_true',
+        help="Remove the white border (if present) to revert to black border."
     )
 
     # Power/Toughness Arguments
@@ -314,8 +315,8 @@ def main():
     )
 
     # --- START OF MODIFIED ARGUMENTS ---
-    # Create a mutually exclusive group for the output destination
-    output_group = parser.add_mutually_exclusive_group(required=True)
+    # Create a mutually exclusive group for the output destination (optional in parser, enforced manually)
+    output_group = parser.add_mutually_exclusive_group()
     
     output_group.add_argument(
         '--output-dir',
@@ -346,6 +347,16 @@ def main():
         action='store_true',
         help="Keep the browser open after processing is complete (for debugging)."
     )
+
+    parser.add_argument(
+        '--card-builder',
+        choices=['selenium', 'cc-file', 'edit'],
+        default='selenium',
+        help="Choose the operation mode:\n"
+             "'selenium': Drive the UI to create cards from a list of names.\n"
+             "'cc-file': Upload an existing .cardconjurer file and capture the cards.\n"
+             "'edit': Edit an existing .cardconjurer file with provided text parameters."
+    )
     # --- END OF MODIFIED ARGUMENTS ---
 
     overwrite_group = parser.add_argument_group('Overwrite Options')
@@ -369,6 +380,27 @@ def main():
 
     args = parser.parse_args()
 
+    # --- Manual Validation based on Mode ---
+    if args.card_builder == 'selenium':
+        if not args.url:
+            parser.error("--url is required for 'selenium' mode.")
+        if not args.card_selection:
+            parser.error("--card-selection is required for 'selenium' mode.")
+        if not args.frame:
+            parser.error("--frame is required for 'selenium' mode.")
+        if not (args.output_dir or args.upload_path):
+            parser.error("One of --output-dir or --upload-path is required for 'selenium' mode.")
+            
+    elif args.card_builder == 'cc-file':
+        if not args.url:
+            parser.error("--url is required for 'cc-file' mode.")
+        if not args.frame:
+            parser.error("--frame is required for 'cc-file' mode.")
+        if not (args.output_dir or args.upload_path):
+            parser.error("One of --output-dir or --upload-path is required for 'cc-file' mode.")
+            
+    # 'edit' mode does not require frame, card-selection, or output options (it saves to file)
+
     # --- Validation ---
     if args.overwrite_older_than and args.overwrite_newer_than:
         parser.error("Cannot use --overwrite-older-than and --overwrite-newer-than together.")
@@ -391,12 +423,50 @@ def main():
     # Determine if we are in local save mode or upload mode
     save_locally = True if args.output_dir else False
 
-    card_names_to_process = parse_card_file(args.input_file)
-    if not card_names_to_process:
-        print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
-        sys.exit(1)
+    # Handle 'edit' mode separately as it doesn't require the browser
+    if args.card_builder == 'edit':
+        print(f"--- Starting Edit Mode for '{args.input_file}' ---")
+        from cc_file_editor import CcFileEditor
+        
+        editor = CcFileEditor(args.input_file)
+        editor.apply_edits(
+            title_kerning=args.title_kerning,
+            title_font_size=args.title_font_size,
+            title_shadow=args.title_shadow,
+            title_left=args.title_left,
+            type_kerning=args.type_kerning,
+            type_font_size=args.type_font_size,
+            type_shadow=args.type_shadow,
+            type_left=args.type_left,
+            pt_kerning=args.pt_kerning,
+            pt_font_size=args.pt_font_size,
+            pt_shadow=args.pt_shadow,
+            pt_bold=args.pt_bold,
+            pt_up=args.pt_up,
+            flavor_font=args.flavor_font,
+            rules_down=args.rules_down,
+            white_border=args.white_border,
+            black_border=args.black_border
+        )
+        
+        # Determine output filename
+        input_path = Path(args.input_file)
+        output_filename = f"{input_path.stem}_edited.cardconjurer"
+        output_path = os.path.abspath(output_filename)
+        
+        editor.save(output_path)
+        sys.exit(0)
 
-    print(f"Found {len(card_names_to_process)} cards to process for capture.")
+    # For Selenium modes, we need to parse the input file ONLY if it's 'selenium' mode
+    card_names_to_process = []
+    if args.card_builder == 'selenium':
+        card_names_to_process = parse_card_file(args.input_file)
+        if not card_names_to_process:
+            print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
+            sys.exit(1)
+        print(f"Found {len(card_names_to_process)} cards to process for capture.")
+    elif args.card_builder == 'cc-file':
+        print(f"Mode 'cc-file': Will render project file '{args.input_file}'.")
 
     try:
         with CardConjurerAutomator(
@@ -451,10 +521,15 @@ def main():
         ) as automator:
             
             automator.set_frame(args.frame)
+            
+            # Only apply these mods in selenium mode or if they are global frame settings
+            # But for cc-file, the file dictates the content.
+            # However, rules_bounds_y/height might be frame-level tweaks?
+            # Let's assume they apply to the session.
             automator.apply_rules_text_bounds_mods()
             automator.apply_hide_reminder_text()
 
-            if args.prime_file:
+            if args.prime_file and args.card_builder in ['selenium', 'cc-file']:
                 prime_card_names = parse_card_file(args.prime_file)
                 if prime_card_names:
                     print(f"\n--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
@@ -466,11 +541,22 @@ def main():
                     print(f"Warning: Prime file '{args.prime_file}' was provided but contained no valid card names.", file=sys.stderr)
 
             print("\n--- Starting Main Card Processing ---")
-            for i, card_name in enumerate(card_names_to_process, 1):
-                print(f"--- Processing card {i}/{len(card_names_to_process)} ---")
-                automator.process_and_capture_card(card_name)
+            # --- Main Processing Loop ---
+            if args.card_builder == 'selenium':
+                for i, card_name in enumerate(card_names_to_process, 1):
+                    print(f"--- Processing card {i}/{len(card_names_to_process)} ---")
+                    automator.process_and_capture_card(card_name)
+            
+            elif args.card_builder == 'cc-file':
+                print(f"\n--- Starting CC File Render Mode ---")
+                # Render
+                automator.render_project_file(args.input_file, frame_name=args.frame)
 
-            if args.save_cc_file:
+            if args.save_cc_file and args.card_builder == 'selenium':
+                # In JSON mode, we already generated the file, but maybe the user wants the *final* state
+                # after rendering (which might have minor diffs). 
+                # But usually JSON mode implies we have the file.
+                # However, let's keep this logic for Selenium mode primarily.
                 print("\n--- Saving Card Conjurer Project File ---")
                 # Derive output filename from input filename
                 input_path = Path(args.input_file)

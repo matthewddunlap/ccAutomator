@@ -257,6 +257,25 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         
         return matched_prints
 
+    def _format_mana_cost(self, mana_cost):
+        # Convert {2}{R} to {2}{R} (it's usually already correct from Scryfall)
+        # But we might need to handle specific symbols if CC differs.
+        return mana_cost
+
+    def _generate_text_with_tags(self, text, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None):
+        if not text: return ""
+        tags = []
+        if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
+        if shadow is not None: tags.append(f"{{shadow{shadow}}}")
+        if kerning is not None: tags.append(f"{{kerning{kerning}}}")
+        if left is not None: tags.append(f"{{left{left}}}")
+        if up is not None: tags.append(f"{{up{up}}}")
+        if bold: tags.append("{bold}")
+        
+        prefix = "".join(tags)
+        suffix = "{/bold}" if bold else ""
+        return f"{prefix}{text}{suffix}"
+
     def process_and_capture_card(self, card_name, is_priming=False):
         # Step 1: Get all possible prints from the UI, bypassing filters if priming.
         all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name, is_priming=is_priming)
@@ -600,6 +619,106 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             print(f"   Error downloading saved cards: {e}", file=sys.stderr)
 
 
+
+    def render_project_file(self, project_file_path, frame_name):
+        """
+        Uploads a .cardconjurer project file and iterates through the saved cards to capture them.
+        """
+        print(f"--- Rendering Project File: {project_file_path} ---")
+        try:
+            # 1. Upload the project file
+            self.import_save_tab.click()
+            
+            # Find the file input for uploading saved cards
+            # <input type="file" accept=".cardconjurer,.txt" class="input margin-bottom" oninput="uploadSavedCards(event);" autocomplete="off">
+            # We target it by the oninput attribute to be precise
+            file_input = self.driver.find_element(By.XPATH, "//input[@oninput='uploadSavedCards(event);']")
+            
+            abs_path = os.path.abspath(project_file_path)
+            file_input.send_keys(abs_path)
+            
+            print("   Uploaded project file.")
+            time.sleep(2) # Wait for processing
+            
+            # Enable Autofit globally before processing cards
+            # Enable Autofit globally before processing cards
+            self.enable_autofit()
+            
+            # Switch back to Import/Save tab to load cards
+            self.import_save_tab.click()
+            
+            # 2. Iterate through saved cards using the dropdown
+            # <select id="load-card-options" ...>
+            dropdown_element = self.driver.find_element(By.ID, 'load-card-options')
+            select = Select(dropdown_element)
+            
+            # Get all options except the first one (which is "None selected" or similar)
+            options = select.options
+            
+            # Filter out disabled options or the placeholder
+            valid_options = [opt for opt in options if not opt.get_attribute("disabled")]
+            
+            print(f"   Found {len(valid_options)} cards in project.")
+            
+            for i in range(len(valid_options)):
+                # Re-locate dropdown and options to avoid StaleElementReferenceException
+                # and ensure we get the correct text if it was hidden before
+                self.import_save_tab.click()
+                dropdown_element = self.driver.find_element(By.ID, 'load-card-options')
+                select = Select(dropdown_element)
+                options = select.options
+                valid_options_fresh = [opt for opt in options if not opt.get_attribute("disabled")]
+                
+                if i >= len(valid_options_fresh):
+                    break
+                    
+                option = valid_options_fresh[i]
+                card_name = option.text
+                print(f"   Rendering card {i+1}/{len(valid_options)}: '{card_name}'...")
+                
+                # Select the option to load the card
+                select.select_by_visible_text(card_name)
+                time.sleep(1.5) # Wait for load
+                
+                # 3. Apply Frame
+                if frame_name:
+                    self.set_frame(frame_name)
+                    
+                # 4. Apply Global Mods (Rules Bounds, Reminder Text)
+                # Since loading a card might reset these, we should re-apply them.
+                self.apply_rules_text_bounds_mods()
+                self.apply_hide_reminder_text()
+                
+                # 5. Apply White Border (if enabled)
+                if self.apply_white_border_on_capture:
+                    self.apply_white_border()
+                    
+                # 6. Capture
+                # Capture canvas
+                canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+                self.current_canvas_hash = canvas_hash
+                
+                # Get image data
+                img_data_b64 = self._get_canvas_data_url()
+                if img_data_b64:
+                     # Parse base64
+                    header, encoded = img_data_b64.split(",", 1)
+                    image_data = base64.b64decode(encoded)
+                    
+                    filename = f"{self._generate_safe_filename(card_name)}.png"
+                    
+                    # Upload/Save
+                    if self.upload_path:
+                        self._upload_image(image_data, filename)
+                    else:
+                        # Save locally
+                        save_path = os.path.join(self.download_dir, filename)
+                        with open(save_path, "wb") as f:
+                            f.write(image_data)
+                        print(f"      Saved to {save_path}")
+
+        except Exception as e:
+            print(f"   Error rendering project file: {e}", file=sys.stderr)
 
     def close(self):
         if self.driver:

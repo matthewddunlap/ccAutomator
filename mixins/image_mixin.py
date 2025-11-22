@@ -14,13 +14,13 @@ from automator_utils import (
 )
 
 class ImageMixin:
-    def _apply_custom_art(self, card_name, set_name, collector_number, art_url_to_apply: str):
+    def _trim_art_url(self, art_url_to_apply):
         """
-        Applies custom art to the card in Card Conjurer.
+        Trims the art URL if it matches the local server host, making it relative.
         """
         if not art_url_to_apply:
-            return
-
+            return art_url_to_apply
+            
         url_to_paste = art_url_to_apply
         
         # If the image server and the app are on the same host, we might need to provide a relative path.
@@ -43,9 +43,40 @@ class ImageMixin:
 
                     print(f"   Trimming URL for same-host server. Pasting: {url_to_paste}")
             except ImportError:
-                # Fallback if urlparse is not available (should not happen)
                 pass
+        return url_to_paste
 
+    def enable_autofit(self):
+        """
+        Ensures the 'Autofit when setting art' checkbox is enabled.
+        """
+        if not self.autofit_art:
+            return
+
+        print("   Ensuring Autofit is enabled...")
+        try:
+            # Navigate to Art tab first to ensure element is reachable
+            self.art_tab.click()
+            
+            autofit_checkbox = self.wait.until(EC.presence_of_element_located((By.ID, 'art-update-autofit')))
+            if not autofit_checkbox.is_selected():
+                # Click the parent label, which is more reliable for custom checkboxes
+                label_for_autofit = self.driver.find_element(By.XPATH, "//label[.//input[@id='art-update-autofit']]")
+                label_for_autofit.click()
+                print("   'Autofit when setting art' checkbox enabled.")
+            else:
+                print("   'Autofit when setting art' checkbox already enabled.")
+        except Exception as e:
+            print(f"   Warning: Could not set the autofit checkbox. {e}", file=sys.stderr)
+
+    def _apply_custom_art(self, card_name, set_name, collector_number, art_url_to_apply: str):
+        """
+        Applies custom art to the card in Card Conjurer.
+        """
+        if not art_url_to_apply:
+            return
+
+        url_to_paste = self._trim_art_url(art_url_to_apply)
         print(f"   Applying custom art from: {url_to_paste}")
 
         try:
@@ -53,17 +84,7 @@ class ImageMixin:
             self.art_tab.click()
 
             # Handle Autofit Checkbox
-            if self.autofit_art:
-                print("   Ensuring Autofit is enabled...")
-                try:
-                    autofit_checkbox = self.wait.until(EC.presence_of_element_located((By.ID, 'art-update-autofit')))
-                    if not autofit_checkbox.is_selected():
-                        # Click the parent label, which is more reliable for custom checkboxes
-                        label_for_autofit = self.driver.find_element(By.XPATH, "//label[.//input[@id='art-update-autofit']]")
-                        label_for_autofit.click()
-                        print("   'Autofit when setting art' checkbox enabled.")
-                except Exception as e:
-                    print(f"   Warning: Could not set the autofit checkbox. {e}", file=sys.stderr)
+            self.enable_autofit()
             
             art_url_input_selector = "//h5[contains(text(), 'Choose/upload your art')]/following-sibling::div//input[@type='url']"
             art_url_input = self.wait.until(EC.presence_of_element_located((By.XPATH, art_url_input_selector)))
@@ -294,15 +315,33 @@ class ImageMixin:
             print(f"   Error fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}): {e}", file=sys.stderr)
             return None, None
 
-    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str) -> tuple[str, str]:
+    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str, scryfall_data: dict = None) -> tuple[str, str]:
         """
         Prepares the art asset for a card, including fetching, upscaling, and saving/uploading.
         Returns the URL of the final art asset to be used in Card Conjurer.
         """
         print(f"   Preparing art asset for '{card_name}' ({set_code}/{collector_number})...")
         
-        # 1. Get original art_crop URL and type_line from Scryfall
-        art_crop_url, type_line = self._get_scryfall_art_crop_url(card_name, set_code, collector_number)
+        # 1. Get original art_crop URL and type_line
+        if scryfall_data:
+            # Use provided data to avoid re-fetching
+            art_crop_url = ""
+            if 'image_uris' in scryfall_data and 'art_crop' in scryfall_data['image_uris']:
+                art_crop_url = scryfall_data['image_uris']['art_crop']
+            elif 'card_faces' in scryfall_data and scryfall_data['card_faces']:
+                for face in scryfall_data['card_faces']:
+                    if 'image_uris' in face and 'art_crop' in face['image_uris']:
+                        art_crop_url = face['image_uris']['art_crop']
+                        break
+            type_line = scryfall_data.get('type_line', '')
+            if art_crop_url:
+                print(f"   Using provided Scryfall art_crop URL: {art_crop_url}")
+            else:
+                print(f"   Warning: No art_crop URL found in provided data for '{card_name}'.", file=sys.stderr)
+        else:
+            # Fetch from Scryfall API
+            art_crop_url, type_line = self._get_scryfall_art_crop_url(card_name, set_code, collector_number)
+
         if not art_crop_url:
             print(f"   Warning: Could not get Scryfall art_crop URL for '{card_name}'. Skipping art preparation.", file=sys.stderr)
             return None, None
