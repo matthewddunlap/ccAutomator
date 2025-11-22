@@ -23,13 +23,64 @@ def parse_card_file(filepath):
         sys.exit(1)
     return card_names
 
+class CustomArgumentParser(argparse.ArgumentParser):
+    """
+    Custom ArgumentParser that supports loading arguments from files with comment support.
+    
+    Usage: python script.py @config.conf
+    
+    Config file format:
+    - One argument per line
+    - Lines starting with # are comments
+    - Inline comments (after #) are stripped
+    - Blank lines are ignored
+    """
+    def convert_arg_line_to_args(self, arg_line):
+        """
+        Override to handle comments and blank lines in argument files.
+        
+        Args:
+            arg_line: A single line from the argument file
+            
+        Returns:
+            List of arguments parsed from the line (empty list if comment/blank)
+        """
+        # Strip whitespace
+        arg_line = arg_line.strip()
+        
+        # Skip blank lines
+        if not arg_line:
+            return []
+        
+        # Skip comment lines (lines starting with #)
+        if arg_line.startswith('#'):
+            return []
+        
+        # Strip inline comments (everything after #)
+        if '#' in arg_line:
+            arg_line = arg_line.split('#', 1)[0].strip()
+        
+        # Skip if line became empty after stripping inline comment
+        if not arg_line:
+            return []
+        
+        # Return the argument as a single item
+        # argparse expects each line to be one argument
+        return [arg_line]
+
 def main():
     """
     Main entry point for the script. Parses arguments and orchestrates the automation.
     """
-    parser = argparse.ArgumentParser(
-        description="Automate card creation in Card Conjurer using Selenium.",
-        formatter_class=argparse.RawTextHelpFormatter
+    parser = CustomArgumentParser(
+        description="Automate card creation in Card Conjurer using Selenium.\n\n"
+                    "Arguments can be loaded from configuration files using @filename syntax.\n"
+                    "Multiple config files can be specified and will be processed in order.\n"
+                    "Command-line arguments override config file settings.\n\n"
+                    "Example: python ccAutomator.py @my.conf cards.txt\n"
+                    "Example: python ccAutomator.py @base.conf @custom.conf --frame Modern cards.txt",
+        formatter_class=argparse.RawTextHelpFormatter,
+        fromfile_prefix_chars='@'
     )
     parser.add_argument(
         '--url',
