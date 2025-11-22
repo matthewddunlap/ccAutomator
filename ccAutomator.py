@@ -394,8 +394,7 @@ def main():
     elif args.card_builder == 'cc-file':
         if not args.url:
             parser.error("--url is required for 'cc-file' mode.")
-        if not args.frame:
-            parser.error("--frame is required for 'cc-file' mode.")
+        # Frame is optional for cc-file (defaults to what's in the file)
         if not (args.output_dir or args.upload_path):
             parser.error("One of --output-dir or --upload-path is required for 'cc-file' mode.")
             
@@ -520,14 +519,12 @@ def main():
             overwrite_newer_than=args.overwrite_newer_than
         ) as automator:
             
-            automator.set_frame(args.frame)
-            
-            # Only apply these mods in selenium mode or if they are global frame settings
-            # But for cc-file, the file dictates the content.
-            # However, rules_bounds_y/height might be frame-level tweaks?
-            # Let's assume they apply to the session.
-            automator.apply_rules_text_bounds_mods()
-            automator.apply_hide_reminder_text()
+            # Only apply these mods in selenium mode.
+            # For cc-file, render_project_file handles setting the frame and applying mods per card.
+            if args.card_builder == 'selenium':
+                automator.set_frame(args.frame)
+                automator.apply_rules_text_bounds_mods()
+                automator.apply_hide_reminder_text()
 
             if args.prime_file and args.card_builder in ['selenium', 'cc-file']:
                 prime_card_names = parse_card_file(args.prime_file)

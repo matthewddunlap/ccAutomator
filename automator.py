@@ -695,7 +695,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                     
                 # 6. Capture
                 # Capture canvas
-                canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+                # We use wait_for_change=False because we just want to ensure it's stable before capturing.
+                canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
                 self.current_canvas_hash = canvas_hash
                 
                 # Get image data

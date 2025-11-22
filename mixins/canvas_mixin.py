@@ -20,37 +20,62 @@ class CanvasMixin:
         """
         return self.driver.execute_script(js_script)
 
-    def _wait_for_canvas_stabilization(self, initial_hash):
+    def _wait_for_canvas_stabilization(self, initial_hash, wait_for_change=True):
         start_time = time.time()
         last_hash, stable_count = None, 0
-        if initial_hash is None:
+        
+        # If we don't have an initial hash but are asked to wait for change, 
+        # we must get one.
+        if initial_hash is None and wait_for_change:
             data_url = self._get_canvas_data_url()
             if data_url and data_url.startswith('data:image/png;base64,'):
                 initial_hash = hashlib.md5(data_url.encode('utf-8')).hexdigest()
+                
         while time.time() - start_time < self.STABILIZE_TIMEOUT:
             data_url = self._get_canvas_data_url()
             if not data_url or not data_url.startswith('data:image/png;base64,'):
                 time.sleep(self.STABILITY_INTERVAL); continue
+            
             current_hash = hashlib.md5(data_url.encode('utf-8')).hexdigest()
-            if current_hash == initial_hash:
+            
+            # If waiting for change, ensure we have moved away from initial state
+            if wait_for_change and initial_hash and current_hash == initial_hash:
                 time.sleep(self.STABILITY_INTERVAL); continue
-            if current_hash == last_hash: stable_count += 1
-            else: last_hash = current_hash; stable_count = 1
+                
+            # Stability Check
+            if current_hash == last_hash: 
+                stable_count += 1
+            else: 
+                last_hash = current_hash; stable_count = 1
+                
             if stable_count >= self.STABILITY_CHECKS:
-                print(f"Canvas stabilized with new hash: {current_hash[:10]}...")
+                # print(f"Canvas stabilized with new hash: {current_hash[:10]}...")
                 return current_hash
             time.sleep(self.STABILITY_INTERVAL)
-        print("Warning: Timeout waiting for canvas to stabilize.", file=sys.stderr); return None
+        
+        if wait_for_change:
+            print("Warning: Timeout waiting for canvas to stabilize (change detected: False).", file=sys.stderr)
+        else:
+            print("Warning: Timeout waiting for canvas to stabilize (steady state).", file=sys.stderr)
+        return None
 
     def set_frame(self, frame_value):
         try:
             art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[3]')))
             art_tab.click()
             frame_dropdown = self.wait.until(EC.presence_of_element_located((By.ID, 'autoFrame')))
-            Select(frame_dropdown).select_by_value(frame_value)
+            
+            select = Select(frame_dropdown)
+            current_val = select.first_selected_option.get_attribute("value")
+            
+            if current_val == frame_value:
+                print(f"   Frame already set to '{frame_value}'. Skipping update.")
+                return
+
+            select.select_by_value(frame_value)
             print(f"Successfully set frame by value to '{frame_value}'.")
             print("Waiting for frame to apply...")
-            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash)
+            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=True)
         except (TimeoutException, NoSuchElementException) as e:
             print(f"Error setting frame: {e}", file=sys.stderr)
             raise
