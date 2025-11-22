@@ -1,6 +1,7 @@
 import argparse
 import re
 import sys
+from pathlib import Path
 from automator import CardConjurerAutomator
 
 def parse_card_file(filepath):
@@ -333,6 +334,18 @@ def main():
         '--scryfall-filter',
         help="Optional: Arbitrary Scryfall query filters to append to the base query (e.g., 'lang:en' or 'is:fullart')."
     )
+    
+    parser.add_argument(
+        '--save-cc-file',
+        action='store_true',
+        help="Save the Card Conjurer project file (.cardconjurer) containing all processed cards."
+    )
+
+    parser.add_argument(
+        '--no-close',
+        action='store_true',
+        help="Keep the browser open after processing is complete (for debugging)."
+    )
     # --- END OF MODIFIED ARGUMENTS ---
 
     overwrite_group = parser.add_argument_group('Overwrite Options')
@@ -431,12 +444,15 @@ def main():
             upload_path=args.upload_path,
             upload_secret=args.upload_secret,
             scryfall_filter=args.scryfall_filter,
+            save_cc_file=args.save_cc_file,
             overwrite=args.overwrite,
             overwrite_older_than=args.overwrite_older_than,
             overwrite_newer_than=args.overwrite_newer_than
         ) as automator:
             
             automator.set_frame(args.frame)
+            automator.apply_rules_text_bounds_mods()
+            automator.apply_hide_reminder_text()
 
             if args.prime_file:
                 prime_card_names = parse_card_file(args.prime_file)
@@ -453,6 +469,17 @@ def main():
             for i, card_name in enumerate(card_names_to_process, 1):
                 print(f"--- Processing card {i}/{len(card_names_to_process)} ---")
                 automator.process_and_capture_card(card_name)
+
+            if args.save_cc_file:
+                print("\n--- Saving Card Conjurer Project File ---")
+                # Derive output filename from input filename
+                input_path = Path(args.input_file)
+                output_filename = f"{input_path.stem}.cardconjurer"
+                automator.download_saved_cards(output_filename)
+
+            if args.no_close:
+                print("\n--- Execution Paused (--no-close) ---")
+                input("Press Enter to close the browser and exit...")
 
     except Exception as e:
         print(f"\nA critical error occurred during automation: {e}", file=sys.stderr)

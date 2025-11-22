@@ -57,7 +57,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
-                 upload_path=None, upload_secret=None, scryfall_filter=None,
+                 upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None):
         """
         Initializes the WebDriver and stores the automation strategy.
@@ -73,7 +73,38 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1200,900")
+        
+        # Allow insecure downloads and content
+        chrome_options.add_argument("--ignore-certificate-errors")
+        chrome_options.add_argument("--allow-running-insecure-content")
+        chrome_options.add_argument("--disable-web-security")
+        
+        # Treat the origin as secure to bypass download blocking
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        chrome_options.add_argument(f"--unsafely-treat-insecure-origin-as-secure={origin}")
+        
+        # Configure preferences for automatic downloads
+        prefs = {
+            "download.default_directory": os.path.abspath(self.download_dir) if self.download_dir else os.getcwd(),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": False,
+            "safebrowsing.disable_download_protection": True,
+            "profile.default_content_setting_values.automatic_downloads": 1,
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
         self.driver = webdriver.Chrome(options=chrome_options)
+        
+        # Use CDP to allow downloads in headless mode
+        params = {
+            'behavior': 'allow',
+            'downloadPath': os.path.abspath(self.download_dir) if self.download_dir else os.getcwd()
+        }
+        self.driver.execute_cdp_cmd('Page.setDownloadBehavior', params)
+        
         self.driver.get(url)
         self.wait = WebDriverWait(self.driver, 15)
         self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
@@ -137,6 +168,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         self.upload_path = upload_path
         self.upload_secret = upload_secret # This can be None, which is fine
         self.scryfall_filter = scryfall_filter
+        self.save_cc_file = save_cc_file
 
         # Initialize the Scryfall API client
         self.scryfall_api = ScryfallAPI()
@@ -436,13 +468,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                     # Fallback for other basic lands if any
                     self._apply_text_mods("Rules Text", down=self.rules_down)
                     self._apply_flavor_font_mod()
-                    self._apply_rules_text_bounds_mods()
-                    self._apply_hide_reminder_text()
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 self._apply_flavor_font_mod()
-                self._apply_rules_text_bounds_mods()
-                self._apply_hide_reminder_text()
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True
@@ -472,6 +500,104 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
 
             except Exception as e:
                 print(f"   Error processing or saving/uploading image data: {e}", file=sys.stderr)
+
+        # --- Save Card to Browser Storage (if enabled) ---
+        if self.save_cc_file:
+            self._save_card_to_browser_storage()
+
+    def _save_card_to_browser_storage(self):
+        """
+        Navigates to the Import/Save tab, clicks 'Save Card', and handles the alert.
+        """
+        try:
+            # Navigate to Import/Save tab
+            self.import_save_tab.click()
+            
+            # Find and click the "Save Card" button
+            # <button class="input margin-bottom" onclick="saveCard();">Save Card</button>
+            save_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Save Card')]")))
+            save_btn.click()
+            
+            # Handle the alert/popup
+            try:
+                # Wait for alert to be present
+                WebDriverWait(self.driver, 3).until(EC.alert_is_present())
+                alert = self.driver.switch_to.alert
+                # print(f"   Alert text: {alert.text}")
+                alert.accept()
+                print("   Saved card to browser storage.")
+            except TimeoutException:
+                print("   Warning: No alert appeared after clicking 'Save Card'. It might have saved silently or failed.", file=sys.stderr)
+                
+        except Exception as e:
+            print(f"   Error saving card to browser storage: {e}", file=sys.stderr)
+
+    def download_saved_cards(self, output_filename):
+        """
+        Downloads all saved cards as a .cardconjurer file and renames it.
+        """
+        try:
+            # Navigate to Import/Save tab
+            self.import_save_tab.click()
+            
+            # Find and click the "Download All" button
+            # <button class="input margin-bottom" onclick="downloadSavedCards();">Download All</button>
+            download_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download All')]")))
+            download_btn.click()
+            
+            print(f"   Initiated download for '{output_filename}'...")
+            
+            # Wait for the file to appear in the download directory
+            # The default name is typically 'cards.cardconjurer' or similar
+            # We'll look for the most recently created .cardconjurer file
+            target_dir = self.download_dir if self.download_dir else os.getcwd()
+            
+            downloaded_file = None
+            timeout = 10
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                # List all .cardconjurer files in the directory
+                files = [f for f in os.listdir(target_dir) if f.endswith('.cardconjurer')]
+                if not files:
+                    time.sleep(0.5)
+                    continue
+                
+                # Sort by modification time (newest first)
+                files.sort(key=lambda x: os.path.getmtime(os.path.join(target_dir, x)), reverse=True)
+                candidate = files[0]
+                
+                # Check if it's a new file (created within the last few seconds)
+                if os.path.getmtime(os.path.join(target_dir, candidate)) > start_time - 5:
+                    downloaded_file = os.path.join(target_dir, candidate)
+                    break
+                
+                time.sleep(0.5)
+            
+            if downloaded_file:
+                # Rename the file
+                final_path = os.path.join(target_dir, output_filename)
+                
+                # If destination exists, remove it first
+                if os.path.exists(final_path):
+                    os.remove(final_path)
+                    
+                os.rename(downloaded_file, final_path)
+                print(f"   Successfully downloaded and saved project file to: {final_path}")
+                
+                # If upload path is set, we might want to upload this too?
+                # The user said "store alongside whatever the output of card images is"
+                if self.upload_path:
+                    with open(final_path, 'rb') as f:
+                        file_data = f.read()
+                    self._upload_image(file_data, output_filename) # Reusing _upload_image for convenience
+                    print(f"   Uploaded project file to server: {output_filename}")
+                    
+            else:
+                print("   Error: Download timed out. No .cardconjurer file found.", file=sys.stderr)
+                
+        except Exception as e:
+            print(f"   Error downloading saved cards: {e}", file=sys.stderr)
 
 
 

@@ -121,7 +121,7 @@ class TextMixin:
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
-    def _apply_rules_text_bounds_mods(self):
+    def apply_rules_text_bounds_mods(self):
         """
         Modifies the Y position and height of the rules text box by opening the
         'Edit Bounds' dialog and adjusting the values.
@@ -131,8 +131,16 @@ class TextMixin:
 
         print("   Applying rules text bounds modifications...")
         try:
-            # 1. Ensure the 'Rules Text' editor is open (it should be from previous steps)
-            #    and click the 'Edit Bounds' button.
+            # 1. Navigate to the Text tab and select Rules Text
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Rules Text']"
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            # 2. Click the 'Edit Bounds' button.
             edit_bounds_button_selector = "//button[contains(text(), 'Edit Bounds')]"
             edit_bounds_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, edit_bounds_button_selector)))
             edit_bounds_button.click()
@@ -183,7 +191,7 @@ class TextMixin:
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_rules_text_bounds_mods: {e}", file=sys.stderr)
 
-    def _apply_hide_reminder_text(self):
+    def apply_hide_reminder_text(self):
         """
         Clicks the 'Hide reminder text' checkbox if the flag is enabled.
         """
@@ -192,8 +200,13 @@ class TextMixin:
 
         print("   Applying hide reminder text setting...")
         try:
-            # 1. Ensure we're on the Text tab
+            # 1. Navigate to the Text tab and select Rules Text
             self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Rules Text']"
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
             time.sleep(0.5)  # Wait for tab to fully load
 
             # 2. Find the checkbox
