@@ -57,7 +57,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
-                 upload_path=None, upload_secret=None,
+                 upload_path=None, upload_secret=None, scryfall_filter=None,
                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None):
         """
         Initializes the WebDriver and stores the automation strategy.
@@ -136,6 +136,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             self.overwrite_newer_than_dt = parse_time_string(self.overwrite_newer_than_str)
         self.upload_path = upload_path
         self.upload_secret = upload_secret # This can be None, which is fine
+        self.scryfall_filter = scryfall_filter
 
         # Initialize the Scryfall API client
         self.scryfall_api = ScryfallAPI()
@@ -261,6 +262,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             
             # 1. Initial Scryfall Query (with set filters)
             base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'game:paper', 'not:covered']
+            if self.scryfall_filter:
+                base_query_parts.append(self.scryfall_filter)
             query_parts = list(base_query_parts) # Make a copy
 
             # Determine which filters to use (Granular vs Legacy)

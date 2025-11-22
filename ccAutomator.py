@@ -329,6 +329,10 @@ def main():
         '--upload-secret',
         help="Optional: A secret key sent in the 'X-Upload-Secret' header for authentication."
     )
+    parser.add_argument(
+        '--scryfall-filter',
+        help="Optional: Arbitrary Scryfall query filters to append to the base query (e.g., 'lang:en' or 'is:fullart')."
+    )
     # --- END OF MODIFIED ARGUMENTS ---
 
     overwrite_group = parser.add_argument_group('Overwrite Options')
@@ -426,6 +430,7 @@ def main():
             upscaler_factor=args.upscaler_factor,
             upload_path=args.upload_path,
             upload_secret=args.upload_secret,
+            scryfall_filter=args.scryfall_filter,
             overwrite=args.overwrite,
             overwrite_older_than=args.overwrite_older_than,
             overwrite_newer_than=args.overwrite_newer_than
