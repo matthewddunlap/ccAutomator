@@ -350,34 +350,54 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
 
             selection_strategy = self.set_selection_strategy # Default to set_selection_strategy
 
-            # 2. Fallback Scryfall Query if initial one yields no results
+            # 2. Fallback Scryfall Queries if initial one yields no results
             if not scryfall_results:
                 if self.no_match_selection == 'skip':
                     print(f"   Warning: Initial Scryfall query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
                     return
 
-                print(f"   Warning: Initial query found no matches. Stripping set filters and retrying a broader Scryfall search.", file=sys.stderr)
-                
-                # Construct fallback query without set filters, applying prefer:newest/oldest if specified
-                fallback_query_parts = list(base_query_parts)
-                if self.no_match_selection == 'latest':
-                    fallback_query_parts.append('prefer:newest')
-                elif self.no_match_selection == 'earliest':
-                    fallback_query_parts.append('prefer:oldest')
-                
-                fallback_query = " ".join(fallback_query_parts)
-                print(f"   Scryfall fallback query: {fallback_query}")
-                scryfall_results = self.scryfall_api.search_cards(fallback_query, unique="art", order_by="released", direction="asc")
+                # Fallback Step 1: Try stripping ONLY include sets, keeping exclude sets (if any exist)
+                if current_exclude_sets:
+                    print(f"   Warning: Initial query found no matches. Stripping include sets but keeping exclude sets...", file=sys.stderr)
+                    fallback_1_parts = list(base_query_parts)
+                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                    fallback_1_parts.append(f" {exclude_query}")
+                    
+                    fallback_1_query = " ".join(fallback_1_parts)
+                    print(f"   Scryfall fallback query (excludes only): {fallback_1_query}")
+                    scryfall_results = self.scryfall_api.search_cards(fallback_1_query, unique="art", order_by="released", direction="asc")
+                    
+                    if scryfall_results:
+                        selection_strategy = self.no_match_selection
 
+                # Fallback Step 2: If still no results, strip ALL set filters
                 if not scryfall_results:
-                    print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
-                    return
+                    print(f"   Warning: Query found no matches. Stripping ALL set filters and retrying a broader Scryfall search.", file=sys.stderr)
+                    
+                    # Construct fallback query without set filters, applying prefer:newest/oldest if specified
+                    fallback_2_parts = list(base_query_parts)
+                    if self.no_match_selection == 'latest':
+                        fallback_2_parts.append('prefer:newest')
+                    elif self.no_match_selection == 'earliest':
+                        fallback_2_parts.append('prefer:oldest')
+                    
+                    fallback_2_query = " ".join(fallback_2_parts)
+                    print(f"   Scryfall fallback query (broadest): {fallback_2_query}")
+                    scryfall_results = self.scryfall_api.search_cards(fallback_2_query, unique="art", order_by="released", direction="asc")
+
+                    if not scryfall_results:
+                        print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
+                        return
 
                 # If fallback query was used, the selection strategy shifts to no_match_selection
                 selection_strategy = self.no_match_selection
 
             # 3. Match Scryfall results against Card Conjurer UI prints
             matched_prints = self._match_scryfall_to_cc_prints(scryfall_results, all_cc_prints)
+            
+            if not matched_prints:
+                print(f"   Warning: Scryfall found results, but none matched the available prints in Card Conjurer for '{card_name}'. Skipping.", file=sys.stderr)
+                return
             
             # 4. Select prints to capture based on strategy
             if selection_strategy == 'latest':

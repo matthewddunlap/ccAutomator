@@ -13,45 +13,65 @@ class PrintMixin:
         Gets all prints from the Card Conjurer UI and filters them based on include/exclude sets.
         Returns the list of prints and a boolean indicating if an include-set filter caused a fallback.
         """
-        try:
-            # First, interact with the UI to get all available prints for the card name
-            import time
-            time.sleep(0.5)
-            self.import_save_tab.click()
-            import_input = self.wait.until(EC.presence_of_element_located((By.ID, 'import-name')))
-            import_input.clear()
-            dropdown_locator = (By.ID, 'import-index')
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                first_option = self.driver.find_element(*dropdown_locator).find_element(By.TAG_NAME, 'option')
-            except NoSuchElementException:
-                first_option = None
-            
-            time.sleep(0.2)
-            import_input.send_keys(card_name)
-            import_input.send_keys(Keys.RETURN)
-            print(f"Searching for '{card_name}'...")
-            if first_option:
-                self.wait.until(EC.staleness_of(first_option))
-            self.wait.until(lambda d: len(d.find_element(*dropdown_locator).find_elements(By.TAG_NAME, 'option')) > 0)
+                # First, interact with the UI to get all available prints for the card name
+                import time
+                time.sleep(0.5)
+                self.import_save_tab.click()
+                import_input = self.wait.until(EC.presence_of_element_located((By.ID, 'import-name')))
+                import_input.clear()
+                dropdown_locator = (By.ID, 'import-index')
+                try:
+                    first_option = self.driver.find_element(*dropdown_locator).find_element(By.TAG_NAME, 'option')
+                except NoSuchElementException:
+                    first_option = None
+                
+                time.sleep(0.2)
+                import_input.send_keys(card_name)
+                import_input.send_keys(Keys.RETURN)
+                print(f"Searching for '{card_name}' (Attempt {attempt+1}/{max_retries})...")
+                if first_option:
+                    self.wait.until(EC.staleness_of(first_option))
+                self.wait.until(lambda d: len(d.find_element(*dropdown_locator).find_elements(By.TAG_NAME, 'option')) > 0)
 
-            all_exact_matches = []
-            dropdown = Select(self.driver.find_element(*dropdown_locator))
-            for option in dropdown.options:
-                option_text = option.text
-                if option_text.lower().startswith(card_name.lower()):
-                    end_of_name_index = len(card_name)
-                    if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
-                        match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
-                        set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
-                        if set_info:
-                            match_data['set_name'] = set_info.group(1).strip()
-                            match_data['collector_number'] = set_info.group(2).strip()
-                        all_exact_matches.append(match_data)
-            
-            if not all_exact_matches:
-                print(f"Error: No exact match found for '{card_name}'. Skipping.", file=sys.stderr)
-                return [], False # No exact matches, no fallback needed because nothing was found at all.
+                all_exact_matches = []
+                dropdown = Select(self.driver.find_element(*dropdown_locator))
+                for option in dropdown.options:
+                    option_text = option.text
+                    if option_text.lower().startswith(card_name.lower()):
+                        end_of_name_index = len(card_name)
+                        if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
+                            match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
+                            set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
+                            if set_info:
+                                match_data['set_name'] = set_info.group(1).strip()
+                                match_data['collector_number'] = set_info.group(2).strip()
+                            all_exact_matches.append(match_data)
+                
+                if not all_exact_matches:
+                    print(f"   Warning: No exact match found for '{card_name}'.", file=sys.stderr)
+                    if attempt < max_retries - 1:
+                        print("   Retrying...", file=sys.stderr)
+                        continue
+                    return [], False # No exact matches found after retries.
 
+                # If we got here, we found matches! Break the loop.
+                break
+
+            except TimeoutException:
+                print(f"   Warning: Timed out searching for '{card_name}' (Attempt {attempt+1}/{max_retries}).", file=sys.stderr)
+                if attempt < max_retries - 1:
+                    print("   Retrying...", file=sys.stderr)
+                else:
+                    print(f"Error: Timed out for '{card_name}' after {max_retries} attempts. Card might not exist.", file=sys.stderr)
+                    return [], False
+        else:
+            # Loop finished without break (all retries failed or no matches found)
+            return [], False
+
+        try:
             # --- Priming Logic ---
             # If we are only priming, we return all matches immediately without any filtering.
             if is_priming:
@@ -101,9 +121,6 @@ class PrintMixin:
             # If no fallback needed, return the final filtered prints and indicate no fallback.
             return final_filtered_prints, False
 
-        except TimeoutException:
-            print(f"Error: Timed out for '{card_name}'. Card might not exist.", file=sys.stderr)
-            return [], False
         except Exception as e:
             print(f"An unexpected error occurred for '{card_name}': {e}", file=sys.stderr)
             return [], False
