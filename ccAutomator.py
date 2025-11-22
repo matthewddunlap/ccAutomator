@@ -5,6 +5,7 @@ import os
 import json
 from pathlib import Path
 from automator import CardConjurerAutomator
+from cc_file_editor import CcFileEditor
 
 def parse_card_file(filepath):
     """
@@ -356,12 +357,9 @@ def main():
 
     parser.add_argument(
         '--card-builder',
-        choices=['selenium', 'cc-file', 'edit'],
+        choices=['selenium', 'cc-file', 'edit', 'combo'],
         default='selenium',
-        help="Choose the operation mode:\n"
-             "'selenium': Drive the UI to create cards from a list of names.\n"
-             "'cc-file': Upload an existing .cardconjurer file and capture the cards.\n"
-             "'edit': Edit an existing .cardconjurer file with provided text parameters."
+        help="Choose the card building method."
     )
     # --- END OF MODIFIED ARGUMENTS ---
 
@@ -431,7 +429,6 @@ def main():
     # Handle 'edit' mode separately as it doesn't require the browser
     if args.card_builder == 'edit':
         print(f"--- Starting Edit Mode for '{args.input_file}' ---")
-        from cc_file_editor import CcFileEditor
         
         editor = CcFileEditor(args.input_file)
         editor.apply_edits(
@@ -464,7 +461,7 @@ def main():
 
     # For Selenium modes, we need to parse the input file ONLY if it's 'selenium' mode
     card_names_to_process = []
-    if args.card_builder == 'selenium':
+    if args.card_builder in ['selenium', 'combo']:
         card_names_to_process = parse_card_file(args.input_file)
         if not card_names_to_process:
             print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
@@ -472,6 +469,143 @@ def main():
         print(f"Found {len(card_names_to_process)} cards to process for capture.")
     elif args.card_builder == 'cc-file':
         print(f"Mode 'cc-file': Will render project file '{args.input_file}'.")
+
+    if args.card_builder == 'combo':
+        print("--- Starting Combo Mode (Selenium Prep -> JSON Edit -> Render) ---")
+        
+        try:
+            # --- Phase 1: Selenium Prep ---
+            print("\n--- Phase 1: Selenium Preparation ---")
+            temp_project_file = "combo_prep.cardconjurer"
+            
+            with CardConjurerAutomator(
+                url=args.url,
+                download_dir=args.output_dir if args.output_dir else '.',
+                headless=not args.no_headless,
+                include_sets=args.include_set,
+                exclude_sets=args.exclude_set,
+                spells_include_sets=args.spells_include_set,
+                spells_exclude_sets=args.spells_exclude_set,
+                basic_land_include_sets=args.basic_land_include_set,
+                basic_land_exclude_sets=args.basic_land_exclude_set,
+                card_selection_strategy=args.card_selection,
+                set_selection_strategy=args.set_selection,
+                no_match_selection=args.no_match_selection,
+                render_delay=args.render_delay,
+                white_border=False, # Applied in Phase 2/3
+                image_server=args.image_server,
+                image_server_path=args.image_server_path,
+                art_path=args.art_path,
+                autofit_art=args.autofit_art,
+                upscale_art=args.upscale_art,
+                ilaria_url=args.ilaria_url,
+                upscaler_model=args.upscaler_model,
+                upscaler_factor=args.upscaler_factor,
+                upload_path=args.upload_path,
+                upload_secret=args.upload_secret,
+                scryfall_filter=args.scryfall_filter,
+                rules_bounds_y=args.rules_bounds_y,
+                rules_bounds_height=args.rules_bounds_height,
+                hide_reminder_text=args.hide_reminder_text,
+                save_cc_file=True, # Force save for combo mode
+                overwrite=args.overwrite,
+                overwrite_older_than=args.overwrite_older_than,
+                overwrite_newer_than=args.overwrite_newer_than,
+                debug=args.debug
+            ) as automator:
+                
+                # Clear any existing saved cards to start fresh
+                automator.clear_saved_cards()
+                
+                # Apply global settings
+                automator.enable_autofit()
+                automator.set_frame(args.frame, wait=False)
+                automator.apply_rules_text_bounds_mods()
+                automator.apply_hide_reminder_text()
+                
+                if args.prime_file:
+                    prime_card_names = parse_card_file(args.prime_file)
+                    print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
+                    for i, card_name in enumerate(prime_card_names):
+                        print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
+                        automator.process_and_capture_card(card_name, is_priming=True)
+                    print("--- Renderer Priming Complete ---\n")
+
+                print("--- Starting Main Card Processing (Preparation Only) ---")
+                for i, card_name in enumerate(card_names_to_process):
+                    print(f"--- Processing card {i+1}/{len(card_names_to_process)} ---")
+                    automator.process_and_capture_card(card_name, prepare_only=True)
+                
+                # Download the prepared project file
+                automator.download_saved_cards(temp_project_file)
+                print("--- Phase 1 Complete: Project file prepared. ---")
+                
+            # --- Phase 2: JSON Edit ---
+            print("\n--- Phase 2: JSON Editing ---")
+            prep_file_path = os.path.join(args.output_dir if args.output_dir else '.', temp_project_file)
+            edited_project_file = temp_project_file.replace('.cardconjurer', '_edited.cardconjurer')
+            
+            editor = CcFileEditor(prep_file_path)
+            editor.apply_edits(
+                pt_bold=args.pt_bold,
+                pt_shadow=args.pt_shadow,
+                pt_font_size=args.pt_font_size,
+                pt_kerning=args.pt_kerning,
+                pt_up=args.pt_up,
+                title_font_size=args.title_font_size,
+                title_shadow=args.title_shadow,
+                title_kerning=args.title_kerning,
+                title_left=args.title_left,
+                type_font_size=args.type_font_size,
+                type_shadow=args.type_shadow,
+                type_kerning=args.type_kerning,
+                type_left=args.type_left,
+                flavor_font=args.flavor_font,
+                rules_down=args.rules_down,
+                white_border=args.white_border,
+                black_border=args.black_border
+            )
+            editor.save(os.path.join(args.output_dir if args.output_dir else '.', edited_project_file))
+            print(f"--- Phase 2 Complete: Edited file saved to {edited_project_file} ---")
+
+            # --- Phase 3: Render ---
+            print("\n--- Phase 3: Rendering ---")
+            with CardConjurerAutomator(
+                url=args.url,
+                download_dir=args.output_dir if args.output_dir else '.',
+                headless=not args.no_headless,
+                render_delay=args.render_delay,
+                image_server=args.image_server,
+                image_server_path=args.image_server_path,
+                upload_path=args.upload_path,
+                upload_secret=args.upload_secret,
+                rules_bounds_y=args.rules_bounds_y,
+                rules_bounds_height=args.rules_bounds_height,
+                hide_reminder_text=args.hide_reminder_text,
+                overwrite=args.overwrite,
+                overwrite_older_than=args.overwrite_older_than,
+                overwrite_newer_than=args.overwrite_newer_than,
+                debug=args.debug
+            ) as automator:
+                 edited_file_full_path = os.path.join(args.output_dir if args.output_dir else '.', edited_project_file)
+                 
+                 prime_card_names_phase3 = []
+                 if args.prime_file:
+                     prime_card_names_phase3 = parse_card_file(args.prime_file)
+                     
+                 automator.render_project_file(edited_file_full_path, frame_name=None, prime_card_names=prime_card_names_phase3)
+                 
+            print("--- Combo Mode Complete ---")
+            
+            if args.no_close:
+                print("\n--- Execution Paused (--no-close) ---")
+                input("Press Enter to close the browser and exit...")
+                
+        except Exception as e:
+            print(f"\nA critical error occurred during combo mode: {e}", file=sys.stderr)
+            sys.exit(1)
+            
+        sys.exit(0)
 
     try:
         with CardConjurerAutomator(
@@ -533,7 +667,7 @@ def main():
                 automator.apply_rules_text_bounds_mods()
                 automator.apply_hide_reminder_text()
 
-            if args.prime_file and args.card_builder in ['selenium', 'cc-file']:
+            if args.prime_file and args.card_builder == 'selenium':
                 prime_card_names = parse_card_file(args.prime_file)
                 if prime_card_names:
                     print(f"\n--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
@@ -553,8 +687,13 @@ def main():
             
             elif args.card_builder == 'cc-file':
                 print(f"\n--- Starting CC File Render Mode ---")
+                
+                prime_card_names_ccfile = []
+                if args.prime_file:
+                    prime_card_names_ccfile = parse_card_file(args.prime_file)
+
                 # Render
-                automator.render_project_file(args.input_file, frame_name=args.frame)
+                automator.render_project_file(args.input_file, frame_name=args.frame, prime_card_names=prime_card_names_ccfile)
 
             if args.save_cc_file and args.card_builder == 'selenium':
                 # In JSON mode, we already generated the file, but maybe the user wants the *final* state

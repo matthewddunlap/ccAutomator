@@ -71,6 +71,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         chrome_options = Options()
         if headless:
             chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--incognito")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1200,900")
@@ -272,12 +273,11 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         if left is not None: tags.append(f"{{left{left}}}")
         if up is not None: tags.append(f"{{up{up}}}")
         if bold: tags.append("{bold}")
-        
         prefix = "".join(tags)
         suffix = "{/bold}" if bold else ""
         return f"{prefix}{text}{suffix}"
 
-    def process_and_capture_card(self, card_name, is_priming=False):
+    def process_and_capture_card(self, card_name, is_priming=False, prepare_only=False):
         # Step 1: Get all possible prints from the UI, bypassing filters if priming.
         all_cc_prints, include_filter_failed_cc = self._get_and_filter_prints(card_name, is_priming=is_priming)
 
@@ -379,62 +379,64 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             # 3. Match Scryfall results against Card Conjurer UI prints
             matched_prints = self._match_scryfall_to_cc_prints(scryfall_results, all_cc_prints)
             
-            # 4. Apply Final Selection from matched prints or fallback to all CC prints
-            if not matched_prints:
-                if self.no_match_selection == 'skip':
-                    print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall (and checked cross-references), but none were available in the UI. Skipping card as per --no-match-selection.", file=sys.stderr)
-                    return
-                
-                print(f"   Warning: Found {len(scryfall_results)} print(s) on Scryfall, but none matched in the Card Conjurer UI (even after cross-referencing).", file=sys.stderr)
-                print(f"   Applying fallback selection '{self.no_match_selection}' to all available Card Conjurer prints.", file=sys.stderr)
-                prints_to_capture = self._select_prints_from_candidate(all_cc_prints, self.no_match_selection)
-            else:
-                print(f"   Found {len(matched_prints)} matching prints in UI from {len(scryfall_results)} Scryfall results (including cross-references).")
-                
-                if selection_strategy == 'latest':
-                    prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest (Scryfall results are oldest-to-newest)
-                elif selection_strategy == 'earliest':
-                    prints_to_capture = [matched_prints[0]] # First item is oldest (Scryfall results are oldest-to-newest)
-                elif selection_strategy == 'random':
-                    prints_to_capture = [random.choice(matched_prints)]
-                else: # 'all'
-                    prints_to_capture = matched_prints
-        
-        # --- Final Check ---
+            # 4. Select prints to capture based on strategy
+            if selection_strategy == 'latest':
+                prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest (Scryfall results are oldest-to-newest)
+            elif selection_strategy == 'earliest':
+                prints_to_capture = [matched_prints[0]] # First item is oldest (Scryfall results are oldest-to-newest)
+            elif selection_strategy == 'random':
+                prints_to_capture = [random.choice(matched_prints)]
+            else: # 'all'
+                prints_to_capture = matched_prints
+
+
+        # Step 2: Iterate through selected prints and capture
         if not prints_to_capture:
-            print(f"Error: No prints selected for '{card_name}' after applying all filters and strategies.", file=sys.stderr)
+            print(f"   No prints selected for capture for '{card_name}'.")
             return
 
-        # --- Main Capture Loop ---
         print(f"Preparing to capture {len(prints_to_capture)} print(s) for '{card_name}'.")
-        dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
-        for i, print_data in enumerate(prints_to_capture, 1):
-            print(f"-> Capturing {i}/{len(prints_to_capture)}: '{print_data['text']}'")
-
-            # --- OVERWRITE PRE-CHECK ---
+        for print_data in prints_to_capture:
+            print(f"   Processing print: {print_data['text']}")
+            
+            # Check if file already exists on server or locally
+            output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
             should_skip = False
-            if self.upload_path: # Only check for overwrites if we are in an upload mode
-                output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
-                check_url = urljoin(self.image_server_url, os.path.join(self.upload_path, output_filename))
-                
-                exists, last_modified = check_server_file_details(check_url)
-                
-                if exists:
+            if self.upload_path:
+                # Check if file exists on the server
+                if self._check_file_exists_on_server(output_filename):
                     if self.overwrite:
-                        should_skip = False # Unconditional overwrite
-                    elif self.overwrite_older_than_dt:
-                        if last_modified and last_modified < self.overwrite_older_than_dt:
-                            print(f"   Overwriting '{output_filename}' as server file is older than {self.overwrite_older_than_str}.")
-                            should_skip = False
+                        print(f"   '{output_filename}' exists on server, but --overwrite is enabled. Proceeding.")
+                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                        # Check modification time on server
+                        server_mod_time = self._get_file_modification_time_on_server(output_filename)
+                        if server_mod_time:
+                            if self.overwrite_older_than_dt and server_mod_time < self.overwrite_older_than_dt:
+                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                            elif self.overwrite_newer_than_dt and server_mod_time > self.overwrite_newer_than_dt:
+                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
+                            else:
+                                print(f"   Skipping '{output_filename}', file exists on server and does not meet overwrite criteria.")
+                                should_skip = True
                         else:
-                            print(f"   Skipping '{output_filename}', server file is not older than {self.overwrite_older_than_str} (or has no timestamp).")
+                            print(f"   Could not get modification time for '{output_filename}' on server. Skipping as per overwrite policy.")
                             should_skip = True
-                    elif self.overwrite_newer_than_dt:
-                        if last_modified and last_modified > self.overwrite_newer_than_dt:
-                            print(f"   Overwriting '{output_filename}' as server file is newer than {self.overwrite_newer_than_str}.")
-                            should_skip = False
+                    else: # Default behavior: skip if exists and no overwrite flag
+                        print(f"   Skipping '{output_filename}', file exists on server.")
+                        should_skip = True
+            else: # Local save mode
+                output_path = os.path.join(self.download_dir, output_filename)
+                if os.path.exists(output_path):
+                    if self.overwrite:
+                        print(f"   '{output_filename}' exists locally, but --overwrite is enabled. Proceeding.")
+                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                        local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
+                        if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
+                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                        elif self.overwrite_newer_than_dt and local_mod_time > self.overwrite_newer_than_dt:
+                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
                         else:
-                            print(f"   Skipping '{output_filename}', server file is not newer than {self.overwrite_newer_than_str} (or has no timestamp).")
+                            print(f"   Skipping '{output_filename}', file exists locally and does not meet overwrite criteria.")
                             should_skip = True
                     else: # Default behavior: skip if exists and no overwrite flag
                         print(f"   Skipping '{output_filename}', file exists on server.")
@@ -444,6 +446,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 continue # Skip to the next print
 
             self.import_save_tab.click()
+            dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
             dropdown.select_by_value(print_data['index'])
 
             # --- NEW: PREPARE AND APPLY CUSTOM ART RIGHT AFTER IMPORT ---
@@ -455,6 +458,12 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'], final_art_url)
             else:
                 print(f"   No custom art URL available for '{card_name}'. Using default art.")
+
+            # If prepare_only is True, we stop here and save the card to browser storage
+            if prepare_only:
+                print(f"   [Combo Phase 1] Prepared '{card_name}'. Saving to browser storage...")
+                self._save_card_to_browser_storage()
+                continue
 
             # Set a flag to see if we need a final delay at the end
             mods_applied = False
@@ -525,6 +534,34 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         if self.save_cc_file:
             self._save_card_to_browser_storage()
 
+    def clear_saved_cards(self):
+        """
+        Clears all saved cards from browser storage to ensure a clean state.
+        """
+        try:
+            self.import_save_tab.click()
+            # Execute JS to clear local storage for cards
+            self.driver.execute_script("localStorage.removeItem('cardConjurerSavedCards');")
+            # Refresh the page to reflect changes? Or just reload the list?
+            # Reloading the page is safest but slow. 
+            # Maybe just clicking 'Remove All' if it exists?
+            # <button class="input margin-bottom" onclick="removeSavedCards();">Remove All</button>
+            try:
+                remove_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Remove All')]")
+                remove_btn.click()
+                # Handle potential confirmation alert
+                try:
+                    WebDriverWait(self.driver, 2).until(EC.alert_is_present())
+                    self.driver.switch_to.alert.accept()
+                    print("   Cleared all saved cards via UI.")
+                except TimeoutException:
+                    pass
+            except NoSuchElementException:
+                # If button not found, maybe no cards saved.
+                pass
+        except Exception as e:
+            print(f"   Warning: Failed to clear saved cards: {e}", file=sys.stderr)
+
     def _save_card_to_browser_storage(self):
         """
         Navigates to the Import/Save tab, clicks 'Save Card', and handles the alert.
@@ -534,17 +571,31 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             self.import_save_tab.click()
             
             # Find and click the "Save Card" button
-            # <button class="input margin-bottom" onclick="saveCard();">Save Card</button>
             save_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Save Card')]")))
             save_btn.click()
             
             # Handle the alert/popup
+            # There might be two alerts:
+            # 1. "Saved card to browser storage" (Success)
+            # 2. "Would you like to overwrite..." (If duplicate) -> We should Accept to overwrite
+            
             try:
                 # Wait for alert to be present
                 WebDriverWait(self.driver, 3).until(EC.alert_is_present())
                 alert = self.driver.switch_to.alert
-                # print(f"   Alert text: {alert.text}")
+                alert_text = alert.text
+                # print(f"   Alert text: {alert_text}")
                 alert.accept()
+                
+                # If it was an overwrite prompt, we might get a SECOND alert confirming save?
+                # Let's check briefly for a second alert
+                try:
+                    WebDriverWait(self.driver, 1).until(EC.alert_is_present())
+                    alert2 = self.driver.switch_to.alert
+                    alert2.accept()
+                except TimeoutException:
+                    pass
+                    
                 print("   Saved card to browser storage.")
             except TimeoutException:
                 print("   Warning: No alert appeared after clicking 'Save Card'. It might have saved silently or failed.", file=sys.stderr)
@@ -621,7 +672,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
 
 
 
-    def render_project_file(self, project_file_path, frame_name):
+    def render_project_file(self, project_file_path, frame_name, prime_card_names=None):
         """
         Uploads a .cardconjurer project file and iterates through the saved cards to capture them.
         """
@@ -642,8 +693,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             time.sleep(2) # Wait for processing
             
             # Enable Autofit globally before processing cards
-            # Enable Autofit globally before processing cards
             self.enable_autofit()
+            
+            # Apply Frame (if specified) - usually None for combo mode as it's in the file
+            if frame_name:
+                self.set_frame(frame_name, wait=False)
+
+            # Apply Global Mods (Rules Bounds, Reminder Text) - ONCE before priming/processing
+            self.apply_rules_text_bounds_mods()
+            self.apply_hide_reminder_text()
+            
+            # --- Priming ---
+            if prime_card_names:
+                print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
+                for i, card_name in enumerate(prime_card_names):
+                    print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
+                    self.process_and_capture_card(card_name, is_priming=True)
+                print("--- Renderer Priming Complete ---\n")
             
             # Switch back to Import/Save tab to load cards
             self.import_save_tab.click()
@@ -680,15 +746,6 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 # Select the option to load the card
                 select.select_by_visible_text(card_name)
                 time.sleep(1.5) # Wait for load
-                
-                # 3. Apply Frame
-                if frame_name:
-                    self.set_frame(frame_name, wait=False)
-                    
-                # 4. Apply Global Mods (Rules Bounds, Reminder Text)
-                # Since loading a card might reset these, we should re-apply them.
-                self.apply_rules_text_bounds_mods()
-                self.apply_hide_reminder_text()
                 
                 # 5. Apply White Border (if enabled)
                 if self.apply_white_border_on_capture:
@@ -728,3 +785,34 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 self.driver.quit()
             except:
                 pass
+    def _check_file_exists_on_server(self, filename):
+        """
+        Checks if a file exists on the image server.
+        """
+        if not self.image_server_url or not self.upload_path:
+            return False
+            
+        check_url = urljoin(self.image_server_url, os.path.join(self.upload_path, filename))
+        try:
+            response = requests.head(check_url, timeout=5)
+            return response.status_code == 200
+        except requests.RequestException:
+            return False
+
+    def _get_file_modification_time_on_server(self, filename):
+        """
+        Gets the Last-Modified timestamp of a file on the image server.
+        Returns a datetime object or None.
+        """
+        if not self.image_server_url or not self.upload_path:
+            return None
+            
+        check_url = urljoin(self.image_server_url, os.path.join(self.upload_path, filename))
+        try:
+            response = requests.head(check_url, timeout=5)
+            if response.status_code == 200 and 'Last-Modified' in response.headers:
+                # Parse Last-Modified header (e.g., "Wed, 21 Oct 2015 07:28:00 GMT")
+                return datetime.strptime(response.headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S %Z')
+            return None
+        except (requests.RequestException, ValueError):
+            return None

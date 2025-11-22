@@ -121,15 +121,20 @@ class TextMixin:
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
+    DEFAULT_RULES_BOUNDS_Y = 1707
+    DEFAULT_RULES_BOUNDS_HEIGHT = 767
+
     def apply_rules_text_bounds_mods(self):
         """
         Modifies the Y position and height of the rules text box by opening the
         'Edit Bounds' dialog and adjusting the values.
+        Uses default constants to ensure idempotency (avoids cumulative updates).
         """
         if self.rules_bounds_y is None and self.rules_bounds_height is None:
+            print("   [Debug] Skipping rules bounds mods: both Y and Height are None.")
             return
 
-        print("   Applying rules text bounds modifications...")
+        print(f"   Applying rules text bounds modifications (Y delta={self.rules_bounds_y}, Height delta={self.rules_bounds_height})...")
         try:
             # 1. Navigate to the Text tab and select Rules Text
             self.text_tab.click()
@@ -148,31 +153,41 @@ class TextMixin:
             # 2. Wait for the textbox editor modal to appear.
             textbox_editor_selector = "div#textbox-editor.opened"
             self.wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, textbox_editor_selector)))
-            print("      'Edit Bounds' dialog opened.")
+            # print("      'Edit Bounds' dialog opened.")
 
             # 3. Modify the 'Y' value if provided.
             if self.rules_bounds_y is not None:
                 y_input = self.driver.find_element(By.ID, 'textbox-editor-y')
                 current_y = int(y_input.get_attribute('value') or 0)
-                new_y = current_y + self.rules_bounds_y
                 
-                # Use send_keys to ensure events are triggered and hit Enter
-                y_input.clear()
-                y_input.send_keys(str(new_y))
-                y_input.send_keys(Keys.RETURN)
-                print(f"      Adjusted Rules Bounds Y from {current_y} to {new_y} (delta: {self.rules_bounds_y}).")
+                # Calculate target based on known default to ensure idempotency
+                target_y = self.DEFAULT_RULES_BOUNDS_Y + self.rules_bounds_y
+                
+                if current_y == target_y:
+                    print(f"      Rules Bounds Y already at target {target_y}. Skipping.")
+                else:
+                    # Use send_keys to ensure events are triggered and hit Enter
+                    y_input.clear()
+                    y_input.send_keys(str(target_y))
+                    y_input.send_keys(Keys.RETURN)
+                    print(f"      Adjusted Rules Bounds Y from {current_y} to {target_y} (delta: {self.rules_bounds_y}).")
 
             # 4. Modify the 'Height' value if provided.
             if self.rules_bounds_height is not None:
                 height_input = self.driver.find_element(By.ID, 'textbox-editor-height')
                 current_height = int(height_input.get_attribute('value') or 0)
-                new_height = current_height + self.rules_bounds_height
-
-                # Use send_keys to ensure events are triggered and hit Enter
-                height_input.clear()
-                height_input.send_keys(str(new_height))
-                height_input.send_keys(Keys.RETURN)
-                print(f"      Adjusted Rules Bounds Height from {current_height} to {new_height} (delta: {self.rules_bounds_height}).")
+                
+                # Calculate target based on known default
+                target_height = self.DEFAULT_RULES_BOUNDS_HEIGHT + self.rules_bounds_height
+                
+                if current_height == target_height:
+                    print(f"      Rules Bounds Height already at target {target_height}. Skipping.")
+                else:
+                    # Use send_keys to ensure events are triggered and hit Enter
+                    height_input.clear()
+                    height_input.send_keys(str(target_height))
+                    height_input.send_keys(Keys.RETURN)
+                    print(f"      Adjusted Rules Bounds Height from {current_height} to {target_height} (delta: {self.rules_bounds_height}).")
 
             # Wait for a fraction of a second before closing
             time.sleep(0.5)
@@ -196,6 +211,7 @@ class TextMixin:
         Clicks the 'Hide reminder text' checkbox if the flag is enabled.
         """
         if not self.hide_reminder_text:
+            print("   [Debug] Skipping hide reminder text: flag is False.")
             return
 
         print("   Applying hide reminder text setting...")
