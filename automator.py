@@ -58,10 +58,11 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
-                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None):
+                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
+        self.debug = debug
         self.download_dir = download_dir
         # Only create the directory if a path was actually provided
         if self.download_dir and not os.path.exists(self.download_dir):
@@ -682,7 +683,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 
                 # 3. Apply Frame
                 if frame_name:
-                    self.set_frame(frame_name)
+                    self.set_frame(frame_name, wait=False)
                     
                 # 4. Apply Global Mods (Rules Bounds, Reminder Text)
                 # Since loading a card might reset these, we should re-apply them.

@@ -349,6 +349,12 @@ def main():
     )
 
     parser.add_argument(
+        '--debug',
+        action='store_true',
+        help="Enable verbose debug logging."
+    )
+
+    parser.add_argument(
         '--card-builder',
         choices=['selenium', 'cc-file', 'edit'],
         default='selenium',
@@ -516,13 +522,14 @@ def main():
             save_cc_file=args.save_cc_file,
             overwrite=args.overwrite,
             overwrite_older_than=args.overwrite_older_than,
-            overwrite_newer_than=args.overwrite_newer_than
+            overwrite_newer_than=args.overwrite_newer_than,
+            debug=args.debug
         ) as automator:
             
             # Only apply these mods in selenium mode.
             # For cc-file, render_project_file handles setting the frame and applying mods per card.
             if args.card_builder == 'selenium':
-                automator.set_frame(args.frame)
+                automator.set_frame(args.frame, wait=False)
                 automator.apply_rules_text_bounds_mods()
                 automator.apply_hide_reminder_text()
 
