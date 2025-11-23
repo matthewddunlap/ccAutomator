@@ -476,7 +476,8 @@ def main():
         try:
             # --- Phase 1: Selenium Prep ---
             print("\n--- Phase 1: Selenium Preparation ---")
-            temp_project_file = "combo_prep.cardconjurer"
+            input_path_obj = Path(args.input_file)
+            temp_project_file = f"{input_path_obj.stem}.cardconjurer"
             
             with CardConjurerAutomator(
                 url=args.url,

@@ -7,7 +7,7 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class CanvasMixin:
-    STABILIZE_TIMEOUT = 10
+    STABILIZE_TIMEOUT = 20
     STABILITY_INTERVAL = 0.1
     STABILITY_CHECKS = 3
     def _get_canvas_data_url(self):
