@@ -1,6 +1,9 @@
+
 import json
+import os
 import re
 import sys
+import math
 
 class CcFileEditor:
     """
@@ -31,30 +34,37 @@ class CcFileEditor:
         except Exception as e:
             print(f"Error saving file to '{output_path}': {e}", file=sys.stderr)
 
-    def apply_edits(self, 
-                    title_kerning=None, title_font_size=None, title_shadow=None, title_left=None,
-                    type_kerning=None, type_font_size=None, type_shadow=None, type_left=None,
-                    pt_kerning=None, pt_font_size=None, pt_shadow=None, pt_bold=False, pt_up=None,
-                    flavor_font=None, rules_down=None,
-                    white_border=False, black_border=False):
-        
-        if not isinstance(self.data, list):
-            print("Error: JSON root is not a list. Expected a list of card objects.", file=sys.stderr)
+    def apply_edits(self, pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
+                   title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
+                   type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                   flavor_font=None, rules_down=None, white_border=False, black_border=False,
+                   auto_fit_type=False):
+        """
+        Applies the specified edits to all cards in the project.
+        """
+        if not self.data:
             return
 
+        # Assuming self.data is now the root object, and cards are under a 'cards' key
+        # If self.data is still a list of cards, this needs adjustment.
+        cards = self.data.get('cards', []) if isinstance(self.data, dict) else self.data
+        if not isinstance(cards, list):
+            print("Error: JSON root is not a list of cards or does not contain a 'cards' key with a list. Expected a list of card objects.", file=sys.stderr)
+            return
+
+        print(f"Applied edits to {len(cards)} cards.")
+        
         count = 0
-        for card in self.data:
-            card_data = card.get('data', {})
-            text_dict = card_data.get('text', {})
-            frames_list = card_data.get('frames', [])
+        for card in cards:
+            data = card.get('data', {})
+            text_dict = data.get('text', {})
+            frames_list = data.get('frames', [])
             
             # --- Border Edits ---
             if white_border:
                 # Check if already has white border (heuristic: check first frame name)
                 if not (frames_list and frames_list[0].get('name') == 'White Border'):
                     # Construct White Border Frame Object
-                    # We assume the mask src is standard for 7th edition / regular as seen in the example.
-                    # If this varies by frame, this might be brittle, but it matches the user's request based on the file.
                     white_border_frame = {
                         "name": "White Border",
                         "src": "/img/frames/white.png",
@@ -96,14 +106,73 @@ class CcFileEditor:
                 original_text = t_obj.get('text', '')
                 new_text = original_text
                 
-                if type_kerning is not None:
-                    new_text = self._update_tag(new_text, 'kerning', type_kerning)
-                if type_font_size is not None:
-                    new_text = self._update_tag(new_text, 'fontsize', type_font_size)
+                # --- Auto-Fit Logic ---
+                final_type_fs_tag = ""
+                final_type_kerning_tag = ""
+                
+                if auto_fit_type:
+                    # Strip existing tags to get raw character count
+                    clean_text = re.sub(r'\{[^}]+\}', '', original_text)
+                    char_count = len(clean_text)
+                    
+                    # Get current settings (default to 0 if None)
+                    k = type_kerning if type_kerning is not None else 0
+                    f = type_font_size if type_font_size is not None else 0
+                    
+                    # Calculate Threshold: 34 - k - floor(f * 0.3)
+                    threshold = 34 - k - math.floor(f * 0.3)
+                    
+                    # Calculate Excess
+                    excess = max(0, char_count - threshold)
+                    
+                    if excess > 0:
+                        # Step 1: Reduce Kerning (down to min 1)
+                        # We can drop kerning by at most (k - 1). If k <= 1, available drop is 0.
+                        available_k_drop = max(0, k - 1)
+                        k_drop = min(excess, available_k_drop)
+                        
+                        final_k = k - k_drop
+                        remaining_excess = excess - k_drop
+                        
+                        # Step 2: Reduce Font Size
+                        # Each remaining excess char costs 2.5 font points
+                        f_drop = math.ceil(remaining_excess * 2.5)
+                        final_f = f - f_drop
+                        
+                        # Prepare tags
+                        # Only apply if different from original
+                        if final_k != k:
+                            final_type_kerning_tag = final_k
+                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
+                            
+                        if final_f != f:
+                            final_type_fs_tag = final_f
+                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
+                    else:
+                        # No excess, no changes needed beyond standard args
+                        pass
+
+                # Apply Kerning
+                # If auto-fit calculated a kerning, use it. Otherwise use the standard arg.
+                effective_kerning = final_type_kerning_tag if (auto_fit_type and final_type_kerning_tag != "") else type_kerning
+                
+                if effective_kerning is not None:
+                    new_text = self._update_tag(new_text, 'kerning', effective_kerning)
+                
+                # Apply Shadow
                 if type_shadow is not None:
                     new_text = self._update_tag(new_text, 'shadow', type_shadow)
+                
+                # Apply Left
                 if type_left is not None:
                     new_text = self._update_tag(new_text, 'left', type_left)
+
+                # Apply Font Size
+                # If auto-fit calculated a size, use it. Otherwise use the standard arg.
+                effective_fs = final_type_fs_tag if (auto_fit_type and final_type_fs_tag != "") else type_font_size
+                
+                if effective_fs is not None:
+                    new_text = self._update_tag(new_text, 'fontsize', effective_fs)
                 
                 t_obj['text'] = new_text
 
@@ -122,8 +191,6 @@ class CcFileEditor:
                 if pt_up is not None:
                     new_text = self._update_tag(new_text, 'up', pt_up)
                 if pt_bold:
-                    # Check if wrapped in {bold}...{/bold}
-                    # This is a bit simplistic, assuming the whole string should be bold if flag is set
                     if '{bold}' not in new_text:
                         new_text = f"{{bold}}{new_text}{{/bold}}"
                 
@@ -145,7 +212,6 @@ class CcFileEditor:
                     if len(parts) == 2:
                         pre_flavor = parts[0]
                         flavor_text = parts[1]
-                        # Update fontsize tag at the start of flavor text
                         flavor_text = self._update_tag(flavor_text, 'fontsize', flavor_font)
                         new_text = f"{pre_flavor}{{flavor}}{flavor_text}"
                 

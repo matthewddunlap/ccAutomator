@@ -58,7 +58,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
-                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False):
+                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
+                 auto_fit_type=False):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -147,6 +148,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         self.type_shadow = type_shadow
         self.type_kerning = type_kerning
         self.type_left = type_left
+        self.auto_fit_type = auto_fit_type
+        print(f"DEBUG: CardConjurerAutomator initialized with auto_fit_type={self.auto_fit_type}")
 
         self.app_url = url
         self.image_server_url = image_server
@@ -766,6 +769,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                 # Select the option to load the card
                 select.select_by_visible_text(card_name)
                 time.sleep(1.5) # Wait for load
+                
+                # Apply Text Modifications (Auto-Fit, etc.)
+                self._process_all_text_modifications()
                 
                 # 5. Apply White Border (if enabled)
                 if self.apply_white_border_on_capture:

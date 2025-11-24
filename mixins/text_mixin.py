@@ -1,5 +1,7 @@
 import time
 import sys
+import re
+import math
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -256,12 +258,14 @@ class TextMixin:
         Orchestrator for all text modifications to prevent race conditions.
         Returns True if a modified was successfully made.
         """
+        print(f"   [Debug] Entering _process_all_text_modifications. auto_fit_type={getattr(self, 'auto_fit_type', 'MISSING')}")
+        
         # --- UPDATED: Check for new parameters ---
         has_mods_to_apply = any([
             self.title_font_size, self.title_shadow, self.title_kerning, self.title_left,
             self.type_font_size, self.type_shadow, self.type_kerning, self.type_left,
             self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up,
-            self.flavor_font, self.rules_down
+            self.flavor_font, self.rules_down, getattr(self, 'auto_fit_type', False)
         ])
         if not has_mods_to_apply:
             return False
@@ -269,13 +273,75 @@ class TextMixin:
         self.text_tab.click()
         
         any_text_mod_made = False
+        any_text_mod_made = False
         if self._apply_text_mods("Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left): any_text_mod_made = True
-        if self._apply_text_mods("Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left): any_text_mod_made = True
-        # --- UPDATED: Pass the 'up' parameter for Power/Toughness ---
-        if self._apply_text_mods("Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up): any_text_mod_made = True
-        # --- NEW: Add a call for prepending to Rules Text ---
-        if self._apply_text_mods("Rules Text", down=self.rules_down): any_text_mod_made = True
-        # Flavor font mod is called separately as it has unique logic (inserting, not prepending)
-        if self._apply_flavor_font_mod(): any_text_mod_made = True
         
-        return any_text_mod_made
+        # --- Type Line Logic with Character Count Auto-Fit ---
+        final_type_fs = self.type_font_size
+        
+        is_auto_fit = getattr(self, 'auto_fit_type', False)
+        print(f"   [Debug] Auto-Fit Check: Enabled={is_auto_fit}")
+        
+        if is_auto_fit:
+            try:
+                # Navigate to Type line to measure text
+                self.text_tab.click()
+                field_button_selector = "//h4[text()='Type']"
+                field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+                field_button.click()
+                time.sleep(0.5)
+                
+                text_input = self.wait.until(EC.presence_of_element_located((By.ID, "text-editor")))
+                current_type_text = text_input.get_attribute('value')
+                print(f"   [Debug] Read Type Text: '{current_type_text}'")
+                
+                if current_type_text:
+                    # Strip existing tags to get raw character count
+                    clean_text = re.sub(r'\{[^}]+\}', '', current_type_text)
+                    char_count = len(clean_text)
+                    
+                    # Get current settings (default to 0 if None)
+                    k = self.type_kerning if self.type_kerning is not None else 0
+                    f = self.type_font_size if self.type_font_size is not None else 0
+                    
+                    # Calculate Threshold: 34 - k - floor(f * 0.3)
+                    threshold = 34 - k - math.floor(f * 0.3)
+                    
+                    # Calculate Excess
+                    excess = max(0, char_count - threshold)
+                    
+                    if excess > 0:
+                        # Step 1: Reduce Kerning (down to min 1)
+                        available_k_drop = max(0, k - 1)
+                        k_drop = min(excess, available_k_drop)
+                        
+                        final_k = k - k_drop
+                        remaining_excess = excess - k_drop
+                        
+                        # Step 2: Reduce Font Size
+                        f_drop = math.ceil(remaining_excess * 2.5)
+                        final_f = f - f_drop
+                        
+                        # Apply changes
+                        if final_k != k:
+                            self.type_kerning = final_k
+                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
+                            
+                        if final_f != f:
+                            final_type_fs = final_f
+                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
+                    else:
+                        # We need to prepend this tag to the text.
+                        # Since _apply_text_mods replaces the whole text, we can't easily prepend 
+                        # without modifying _apply_text_mods or doing it manually here.
+                        
+                        # Actually, _apply_text_mods takes `font_size`.
+                        # If we pass `remaining_boost` (e.g. -2) as `font_size`, 
+                        # it will create `{fontsize-2}`.
+                        # This works perfectly!
+                        final_type_fs = remaining_boost
+                        
+            except Exception as e:
+                print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
+
+        if self._apply_text_mods("Type", final_type_fs, self.type_shadow, self.type_kerning, self.type_left): any_text_mod_made = True

@@ -241,6 +241,12 @@ def main():
         '--type-left', type=int, metavar='NUM', help="Add a {left#} tag to the Type text.")
 
     parser.add_argument(
+        '--auto-fit-type',
+        action='store_true',
+        help="Automatically adjust Type line font size based on character count thresholds."
+    )
+
+    parser.add_argument(
         '--flavor-font',
         type=int,
         metavar='NUM',
@@ -448,7 +454,8 @@ def main():
             flavor_font=args.flavor_font,
             rules_down=args.rules_down,
             white_border=args.white_border,
-            black_border=args.black_border
+            black_border=args.black_border,
+            auto_fit_type=args.auto_fit_type
         )
         
         # Determine output filename
@@ -564,7 +571,8 @@ def main():
                 flavor_font=args.flavor_font,
                 rules_down=args.rules_down,
                 white_border=args.white_border,
-                black_border=args.black_border
+                black_border=args.black_border,
+                auto_fit_type=args.auto_fit_type
             )
             editor.save(os.path.join(args.output_dir if args.output_dir else '.', edited_project_file))
             print(f"--- Phase 2 Complete: Edited file saved to {edited_project_file} ---")
@@ -586,7 +594,8 @@ def main():
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
                 overwrite_newer_than=args.overwrite_newer_than,
-                debug=args.debug
+                debug=args.debug,
+                auto_fit_type=False # Disable auto-fit in Phase 3 as it's handled in Phase 2
             ) as automator:
                  edited_file_full_path = os.path.join(args.output_dir if args.output_dir else '.', edited_project_file)
                  
@@ -604,11 +613,12 @@ def main():
                 
         except Exception as e:
             print(f"\nA critical error occurred during combo mode: {e}", file=sys.stderr)
-            sys.exit(1)
-            
         sys.exit(0)
 
     try:
+        # Debug: Print the value of auto_fit_type
+        print(f"DEBUG: args.auto_fit_type = {getattr(args, 'auto_fit_type', 'MISSING')}")
+
         with CardConjurerAutomator(
             url=args.url,
             # Pass the output directory, which might be None if uploading
@@ -658,7 +668,8 @@ def main():
             overwrite=args.overwrite,
             overwrite_older_than=args.overwrite_older_than,
             overwrite_newer_than=args.overwrite_newer_than,
-            debug=args.debug
+            debug=args.debug,
+            auto_fit_type=args.auto_fit_type
         ) as automator:
             
             # Only apply these mods in selenium mode.
