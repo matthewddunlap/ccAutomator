@@ -60,6 +60,14 @@ class CcFileEditor:
             text_dict = data.get('text', {})
             frames_list = data.get('frames', [])
             
+            # Try to get a card name for logging
+            card_name = "Unknown Card"
+            if 'title' in text_dict:
+                card_name = text_dict['title'].get('text', 'Unknown Card')
+            
+            # Clean up card name (remove tags) for cleaner logging
+            clean_card_name = re.sub(r'\{[^}]+\}', '', card_name)
+            
             # --- Border Edits ---
             if white_border:
                 # Check if already has white border (heuristic: check first frame name)
@@ -77,11 +85,13 @@ class CcFileEditor:
                         "noDefaultMask": True
                     }
                     frames_list.insert(0, white_border_frame)
+                    print(f"   [{clean_card_name}] Applied White Border.")
             
             elif black_border:
                 # Remove white border if present
                 if frames_list and frames_list[0].get('name') == 'White Border':
                     frames_list.pop(0)
+                    print(f"   [{clean_card_name}] Removed White Border (Reverted to Black).")
 
             # --- Title Edits ---
             if 'title' in text_dict:
@@ -100,7 +110,9 @@ class CcFileEditor:
                 if title_up is not None:
                     new_text = self._update_tag(new_text, 'up', title_up)
                 
-                t_obj['text'] = new_text
+                if new_text != original_text:
+                    t_obj['text'] = new_text
+                    print(f"   [{clean_card_name}] Updated Title: '{original_text}' -> '{new_text}'")
 
             # --- Type Edits ---
             if 'type' in text_dict:
@@ -145,11 +157,11 @@ class CcFileEditor:
                         # Only apply if different from original
                         if final_k != k:
                             final_type_kerning_tag = final_k
-                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
+                            print(f"   [{clean_card_name}] [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
                             
                         if final_f != f:
                             final_type_fs_tag = final_f
-                            print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
+                            print(f"   [{clean_card_name}] [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
                     else:
                         # No excess, no changes needed beyond standard args
                         pass
@@ -176,7 +188,9 @@ class CcFileEditor:
                 if effective_fs is not None:
                     new_text = self._update_tag(new_text, 'fontsize', effective_fs)
                 
-                t_obj['text'] = new_text
+                if new_text != original_text:
+                    t_obj['text'] = new_text
+                    print(f"   [{clean_card_name}] Updated Type Line: '{original_text}' -> '{new_text}'")
 
             # --- PT Edits ---
             if 'pt' in text_dict:
@@ -196,7 +210,9 @@ class CcFileEditor:
                     if '{bold}' not in new_text:
                         new_text = f"{{bold}}{new_text}{{/bold}}"
                 
-                t_obj['text'] = new_text
+                if new_text != original_text:
+                    t_obj['text'] = new_text
+                    print(f"   [{clean_card_name}] Updated Power/Toughness: '{original_text}' -> '{new_text}'")
 
             # --- Rules/Flavor Edits ---
             if 'rules' in text_dict:
@@ -217,7 +233,9 @@ class CcFileEditor:
                         flavor_text = self._update_tag(flavor_text, 'fontsize', flavor_font)
                         new_text = f"{pre_flavor}{{flavor}}{flavor_text}"
                 
-                t_obj['text'] = new_text
+                if new_text != original_text:
+                    t_obj['text'] = new_text
+                    print(f"   [{clean_card_name}] Updated Rules/Flavor Text: '{original_text}' -> '{new_text}'")
             
             count += 1
             

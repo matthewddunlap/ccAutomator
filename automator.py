@@ -323,7 +323,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             print(f"--- Scryfall Mode for '{card_name}' ---")
             
             # 1. Initial Scryfall Query (with set filters)
-            base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'game:paper', 'not:covered']
+            base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'not:token', '-layout:art-series', 'game:paper', 'not:covered']
             if self.scryfall_filter:
                 base_query_parts.append(self.scryfall_filter)
             query_parts = list(base_query_parts) # Make a copy
@@ -376,6 +376,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     fallback_1_query = " ".join(fallback_1_parts)
                     print(f"   Scryfall fallback query (excludes only): {fallback_1_query}")
                     scryfall_results = self.scryfall_api.search_cards(fallback_1_query, unique="art", order_by="released", direction="asc")
+                    
+                    if scryfall_results:
+                        selection_strategy = self.no_match_selection
+
+                # Fallback Step 1.5: If still no results, try stripping 'not:covered' but KEEP exclude sets
+                if not scryfall_results and current_exclude_sets:
+                    print(f"   Warning: Fallback 1 found no matches. Stripping 'not:covered' but keeping exclude sets...", file=sys.stderr)
+                    fallback_1_5_parts = list(base_query_parts)
+                    if 'not:covered' in fallback_1_5_parts:
+                        fallback_1_5_parts.remove('not:covered')
+                    
+                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                    fallback_1_5_parts.append(f" {exclude_query}")
+                    
+                    fallback_1_5_query = " ".join(fallback_1_5_parts)
+                    print(f"   Scryfall fallback query (excludes only, no not:covered): {fallback_1_5_query}")
+                    scryfall_results = self.scryfall_api.search_cards(fallback_1_5_query, unique="art", order_by="released", direction="asc")
                     
                     if scryfall_results:
                         selection_strategy = self.no_match_selection
