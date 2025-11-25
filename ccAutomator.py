@@ -523,7 +523,8 @@ def main():
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
                 overwrite_newer_than=args.overwrite_newer_than,
-                debug=args.debug
+                debug=args.debug,
+                auto_fit_type=args.auto_fit_type
             ) as automator:
                 
                 # Clear any existing saved cards to start fresh

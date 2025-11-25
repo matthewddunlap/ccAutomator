@@ -2,10 +2,12 @@ import time
 import re
 import os
 import base64
+import base64
 import sys
 import hashlib
 import random
 import requests
+import json
 from urllib.parse import urljoin
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -32,7 +34,7 @@ from automator_utils import (
 )
 
 # Import Mixins
-from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin
+from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin
 
 # Import Scryfall API utilities from the local package
 try:
@@ -41,7 +43,7 @@ except ImportError:
     print("FATAL: Could not import ScryfallAPI from local 'scryfall_utils.py'.", file=sys.stderr)
     sys.exit(1)
 
-class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
+class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin):
     """
     A class to automate interactions with the Card Conjurer web application.
     """
@@ -187,6 +189,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         self.import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
         self.text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
         self.art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Art']")))
+        self.collector_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Collector']")))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -488,6 +491,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
 
             # If prepare_only is True, we stop here and save the card to browser storage
             if prepare_only:
+                # Ensure Collector Info is set before saving
+                self.set_collector_info(print_data['set_name'], print_data['collector_number'])
+                
                 print(f"   [Combo Phase 1] Prepared '{card_name}'. Saving to browser storage...")
                 self._save_card_to_browser_storage()
                 continue
@@ -745,6 +751,28 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             file_input.send_keys(abs_path)
             
             print("   Uploaded project file.")
+            
+            # --- NEW: Parse the project file to get metadata ---
+            card_metadata_list = []
+            try:
+                with open(project_file_path, 'r', encoding='utf-8') as f:
+                    project_data = json.load(f)
+                    
+                # Handle both list of cards and root object with 'cards' key
+                cards_data = project_data.get('cards', []) if isinstance(project_data, dict) else project_data
+                
+                if isinstance(cards_data, list):
+                    for card in cards_data:
+                        data = card.get('data', {})
+                        card_metadata_list.append({
+                            'set_code': data.get('infoSet', 'MTG'),
+                            'collector_number': data.get('infoNumber', '0')
+                        })
+                print(f"   Loaded metadata for {len(card_metadata_list)} cards from file.")
+            except Exception as e:
+                print(f"   Warning: Failed to parse project file for metadata: {e}", file=sys.stderr)
+            # ---------------------------------------------------
+
             time.sleep(2) # Wait for processing
             
             # Enable Autofit globally before processing cards
@@ -825,7 +853,17 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                     header, encoded = img_data_b64.split(",", 1)
                     image_data = base64.b64decode(encoded)
                     
-                    filename = f"{self._generate_safe_filename(card_name)}.png"
+                    # Read Collector Info from the loaded JSON data
+                    # We assume the order in valid_options matches the order in the JSON file (which it should)
+                    set_code = 'MTG'
+                    collector_number = '0'
+                    
+                    if i < len(card_metadata_list):
+                        meta = card_metadata_list[i]
+                        set_code = meta.get('set_code', 'MTG')
+                        collector_number = meta.get('collector_number', '0')
+                    
+                    filename = self._generate_final_filename(card_name, set_code, collector_number)
                     
                     # Upload/Save
                     if self.upload_path:
