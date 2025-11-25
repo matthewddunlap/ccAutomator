@@ -51,7 +51,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
                  card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
                  no_match_selection='earliest', render_delay=1.5, white_border=False,
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
-                 title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
+                 title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                  flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None,
                  hide_reminder_text=False,
@@ -137,6 +137,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         self.title_shadow = title_shadow
         self.title_kerning = title_kerning
         self.title_left = title_left
+        self.title_up = title_up
 
         self.flavor_font = flavor_font
         self.rules_down = rules_down
@@ -288,9 +289,12 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
         # If priming, just select the first available print and return.
         if is_priming:
             if all_cc_prints:
+                initial_hash = self.current_canvas_hash
                 dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
                 dropdown.select_by_value(all_cc_prints[0]['index'])
-                time.sleep(self.render_delay)
+                
+                # Wait for stabilization to ensure fonts load
+                self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
             else:
                 print(f"   Error: No prints found for priming card '{card_name}'.", file=sys.stderr)
             return
@@ -695,6 +699,34 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
 
 
 
+    def _prime_via_scryfall(self, card_name):
+        """
+        Primes the renderer by loading a card from Scryfall.
+        """
+        print(f"   Priming with Scryfall card: '{card_name}'...")
+        try:
+            # Reuse _get_and_filter_prints to find the card
+            # This handles the UI interaction to search Scryfall
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True)
+            
+            if all_cc_prints:
+                initial_hash = self.current_canvas_hash
+                dropdown_element = self.driver.find_element(By.ID, 'import-index')
+                dropdown = Select(dropdown_element)
+                dropdown.select_by_value(all_cc_prints[0]['index'])
+                
+                # Force the change event to ensure the card loads
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", dropdown_element)
+                
+                # Wait for stabilization
+                self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
+                print(f"   Primed with '{card_name}'.")
+            else:
+                print(f"   Warning: Could not find priming card '{card_name}' on Scryfall.", file=sys.stderr)
+                
+        except Exception as e:
+            print(f"   Error during priming with '{card_name}': {e}", file=sys.stderr)
+
     def render_project_file(self, project_file_path, frame_name, prime_card_names=None):
         """
         Uploads a .cardconjurer project file and iterates through the saved cards to capture them.
@@ -726,16 +758,19 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin):
             self.apply_rules_text_bounds_mods()
             self.apply_hide_reminder_text()
             
-            # --- Priming ---
+            # 4. Prime the renderer if requested
             if prime_card_names:
                 print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
                 for i, card_name in enumerate(prime_card_names):
                     print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
-                    self.process_and_capture_card(card_name, is_priming=True)
+                    self._prime_via_scryfall(card_name)
                 print("--- Renderer Priming Complete ---\n")
-            
-            # Switch back to Import/Save tab to load cards
-            self.import_save_tab.click()
+                
+                # After priming, we need to ensure we are back on the Import/Save tab
+                # and looking at the project file's saved cards.
+                # Since _prime_via_scryfall uses the Import tab, we are already there.
+                # But we need to make sure the "Saved Cards" dropdown is visible/refreshed.
+                self.import_save_tab.click()
             
             # 2. Iterate through saved cards using the dropdown
             # <select id="load-card-options" ...>

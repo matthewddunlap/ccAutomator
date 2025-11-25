@@ -34,11 +34,11 @@ class CcFileEditor:
         except Exception as e:
             print(f"Error saving file to '{output_path}': {e}", file=sys.stderr)
 
-    def apply_edits(self, pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
-                   title_font_size=None, title_shadow=None, title_kerning=None, title_left=None,
-                   type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                   flavor_font=None, rules_down=None, white_border=False, black_border=False,
-                   auto_fit_type=False):
+    def apply_edits(self, white_border=False, black_border=False,
+                    pt_font_size=None, pt_kerning=None, pt_up=None, pt_bold=False, pt_shadow=None,
+                    title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
+                    type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                    flavor_font=None, rules_down=None, auto_fit_type=False):
         """
         Applies the specified edits to all cards in the project.
         """
@@ -97,6 +97,8 @@ class CcFileEditor:
                     new_text = self._update_tag(new_text, 'shadow', title_shadow)
                 if title_left is not None:
                     new_text = self._update_tag(new_text, 'left', title_left)
+                if title_up is not None:
+                    new_text = self._update_tag(new_text, 'up', title_up)
                 
                 t_obj['text'] = new_text
 

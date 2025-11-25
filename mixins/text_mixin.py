@@ -261,8 +261,9 @@ class TextMixin:
         print(f"   [Debug] Entering _process_all_text_modifications. auto_fit_type={getattr(self, 'auto_fit_type', 'MISSING')}")
         
         # --- UPDATED: Check for new parameters ---
+        # --- UPDATED: Check for new parameters ---
         has_mods_to_apply = any([
-            self.title_font_size, self.title_shadow, self.title_kerning, self.title_left,
+            self.title_font_size, self.title_shadow, self.title_kerning, self.title_left, self.title_up,
             self.type_font_size, self.type_shadow, self.type_kerning, self.type_left,
             self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up,
             self.flavor_font, self.rules_down, getattr(self, 'auto_fit_type', False)
@@ -273,8 +274,7 @@ class TextMixin:
         self.text_tab.click()
         
         any_text_mod_made = False
-        any_text_mod_made = False
-        if self._apply_text_mods("Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left): any_text_mod_made = True
+        if self._apply_text_mods("Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left, up=self.title_up): any_text_mod_made = True
         
         # --- Type Line Logic with Character Count Auto-Fit ---
         final_type_fs = self.type_font_size

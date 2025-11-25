@@ -229,6 +229,8 @@ def main():
         '--title-kerning', type=int, metavar='NUM', help="Add a {kerning#} tag to the Title text.")
     parser.add_argument(
         '--title-left', type=int, metavar='NUM', help="Add a {left#} tag to the Title text.")
+    parser.add_argument(
+        '--title-up', type=int, metavar='NUM', help="Add a {up#} tag to the Title text.")
 
     # Type Line Arguments
     parser.add_argument(
@@ -442,6 +444,7 @@ def main():
             title_font_size=args.title_font_size,
             title_shadow=args.title_shadow,
             title_left=args.title_left,
+            title_up=args.title_up,
             type_kerning=args.type_kerning,
             type_font_size=args.type_font_size,
             type_shadow=args.type_shadow,
@@ -515,6 +518,7 @@ def main():
                 rules_bounds_y=args.rules_bounds_y,
                 rules_bounds_height=args.rules_bounds_height,
                 hide_reminder_text=args.hide_reminder_text,
+                title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
@@ -564,6 +568,7 @@ def main():
                 title_shadow=args.title_shadow,
                 title_kerning=args.title_kerning,
                 title_left=args.title_left,
+                title_up=args.title_up,
                 type_font_size=args.type_font_size,
                 type_shadow=args.type_shadow,
                 type_kerning=args.type_kerning,
@@ -595,6 +600,7 @@ def main():
                 overwrite_older_than=args.overwrite_older_than,
                 overwrite_newer_than=args.overwrite_newer_than,
                 debug=args.debug,
+                title_up=None,
                 auto_fit_type=False # Disable auto-fit in Phase 3 as it's handled in Phase 2
             ) as automator:
                  edited_file_full_path = os.path.join(args.output_dir if args.output_dir else '.', edited_project_file)
@@ -603,7 +609,7 @@ def main():
                  if args.prime_file:
                      prime_card_names_phase3 = parse_card_file(args.prime_file)
                      
-                 automator.render_project_file(edited_file_full_path, frame_name=None, prime_card_names=prime_card_names_phase3)
+                 automator.render_project_file(edited_file_full_path, frame_name=args.frame, prime_card_names=prime_card_names_phase3)
                  
             print("--- Combo Mode Complete ---")
             
@@ -644,6 +650,7 @@ def main():
             title_shadow=args.title_shadow,
             title_kerning=args.title_kerning,
             title_left=args.title_left,
+            title_up=args.title_up,
             type_font_size=args.type_font_size,
             type_shadow=args.type_shadow,
             type_kerning=args.type_kerning,
