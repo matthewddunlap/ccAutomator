@@ -8,10 +8,15 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class PrintMixin:
-    def _get_and_filter_prints(self, card_name, is_priming=False) -> tuple[list[dict], bool]:
+    def _get_and_filter_prints(self, card_name, is_priming=False, is_token=False) -> tuple[list[dict], bool]:
         """
         Gets all prints from the Card Conjurer UI and filters them based on include/exclude sets.
         Returns the list of prints and a boolean indicating if an include-set filter caused a fallback.
+        
+        Args:
+            card_name: Name of the card to search for
+            is_priming: If True, bypasses all filtering
+            is_token: If True, bypasses set filtering (tokens have 't' prefix sets like 'tblc')
         """
         max_retries = 3
         for attempt in range(max_retries):
@@ -76,6 +81,12 @@ class PrintMixin:
             # If we are only priming, we return all matches immediately without any filtering.
             if is_priming:
                 print("   Bypassing filters for priming.")
+                return all_exact_matches, False
+            
+            # --- Token Logic ---
+            # If searching for tokens, bypass set filtering (tokens have different set codes with 't' prefix)
+            if is_token:
+                print("   Bypassing set filters for token search (tokens use 't' prefix sets).")
                 return all_exact_matches, False
 
             # --- Filtering Logic ---

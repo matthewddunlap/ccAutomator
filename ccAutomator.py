@@ -9,23 +9,42 @@ from cc_file_editor import CcFileEditor
 
 def parse_card_file(filepath):
     """
-    Parses the input file to extract card names, ignoring the leading numbers.
+    Parses the input file to extract card names and categories (e.g., from # Headers).
+    Returns a list of dictionaries: [{'name': 'Card Name', 'category': 'CategoryName'}, ...]
     """
-    card_names = []
+    cards = []
+    current_category = 'deck' # Default category
+    
     try:
         with open(filepath, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line:
                     continue
+                
+                # Check for headers (lines starting with #)
+                if line.startswith('#'):
+                    # It's a header/category change, not just a comment
+                    # Strip the # and whitespace to get category name
+                    # e.g. "# Tokens" -> "tokens"
+                    current_category = line.lstrip('#').strip().lower()
+                    continue
+
                 # Use regex to ignore leading numbers and capture the rest of the line.
                 match = re.match(r'^\d+\s+(.*)', line)
                 if match:
-                    card_names.append(match.group(1).strip())
+                    card_name = match.group(1).strip()
+                    cards.append({'name': card_name, 'category': current_category})
+                else:
+                    # Assume the whole line is the card name if no number prefix
+                    cards.append({'name': line, 'category': current_category})
+                    
     except FileNotFoundError:
         print(f"Error: Input file not found at '{filepath}'", file=sys.stderr)
         sys.exit(1)
-    return card_names
+    return cards
+
+
 
 class CustomArgumentParser(argparse.ArgumentParser):
     """
@@ -469,14 +488,16 @@ def main():
         editor.save(output_path)
         sys.exit(0)
 
+
+
     # For Selenium modes, we need to parse the input file ONLY if it's 'selenium' mode
-    card_names_to_process = []
+    cards_to_process = []
     if args.card_builder in ['selenium', 'combo']:
-        card_names_to_process = parse_card_file(args.input_file)
-        if not card_names_to_process:
+        cards_to_process = parse_card_file(args.input_file)
+        if not cards_to_process:
             print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
             sys.exit(1)
-        print(f"Found {len(card_names_to_process)} cards to process for capture.")
+        print(f"Found {len(cards_to_process)} cards to process for capture.")
     elif args.card_builder == 'cc-file':
         print(f"Mode 'cc-file': Will render project file '{args.input_file}'.")
 
@@ -537,17 +558,20 @@ def main():
                 automator.apply_hide_reminder_text()
                 
                 if args.prime_file:
-                    prime_card_names = parse_card_file(args.prime_file)
-                    print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
-                    for i, card_name in enumerate(prime_card_names):
-                        print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
+                    prime_cards = parse_card_file(args.prime_file)
+                    print(f"--- Starting Renderer Priming with {len(prime_cards)} cards ---")
+                    for i, card_data in enumerate(prime_cards):
+                        card_name = card_data['name']
+                        print(f"Priming card {i+1}/{len(prime_cards)}: '{card_name}'")
                         automator.process_and_capture_card(card_name, is_priming=True)
                     print("--- Renderer Priming Complete ---\n")
 
                 print("--- Starting Main Card Processing (Preparation Only) ---")
-                for i, card_name in enumerate(card_names_to_process):
-                    print(f"--- Processing card {i+1}/{len(card_names_to_process)} ---")
-                    automator.process_and_capture_card(card_name, prepare_only=True)
+                for i, card_data in enumerate(cards_to_process):
+                    card_name = card_data['name']
+                    category = card_data['category']
+                    print(f"--- Processing card {i+1}/{len(cards_to_process)} ---")
+                    automator.process_and_capture_card(card_name, category=category, prepare_only=True)
                 
                 # Download the prepared project file
                 automator.download_saved_cards(temp_project_file)
@@ -608,7 +632,9 @@ def main():
                  
                  prime_card_names_phase3 = []
                  if args.prime_file:
-                     prime_card_names_phase3 = parse_card_file(args.prime_file)
+                     # Parse prime file again, extracting just names for render_project_file
+                     prime_cards_data = parse_card_file(args.prime_file)
+                     prime_card_names_phase3 = [c['name'] for c in prime_cards_data]
                      
                  automator.render_project_file(edited_file_full_path, frame_name=args.frame, prime_card_names=prime_card_names_phase3)
                  
@@ -688,11 +714,12 @@ def main():
                 automator.apply_hide_reminder_text()
 
             if args.prime_file and args.card_builder == 'selenium':
-                prime_card_names = parse_card_file(args.prime_file)
-                if prime_card_names:
-                    print(f"\n--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
-                    for i, card_name in enumerate(prime_card_names, 1):
-                        print(f"Priming card {i}/{len(prime_card_names)}: '{card_name}'")
+                prime_cards = parse_card_file(args.prime_file)
+                if prime_cards:
+                    print(f"\n--- Starting Renderer Priming with {len(prime_cards)} cards ---")
+                    for i, card_data in enumerate(prime_cards, 1):
+                        card_name = card_data['name']
+                        print(f"Priming card {i}/{len(prime_cards)}: '{card_name}'")
                         automator.process_and_capture_card(card_name, is_priming=True)
                     print("--- Renderer Priming Complete ---")
                 else:
@@ -701,9 +728,11 @@ def main():
             print("\n--- Starting Main Card Processing ---")
             # --- Main Processing Loop ---
             if args.card_builder == 'selenium':
-                for i, card_name in enumerate(card_names_to_process, 1):
-                    print(f"--- Processing card {i}/{len(card_names_to_process)} ---")
-                    automator.process_and_capture_card(card_name)
+                for i, card_data in enumerate(cards_to_process, 1):
+                    card_name = card_data['name']
+                    category = card_data['category']
+                    print(f"--- Processing card {i}/{len(cards_to_process)} ---")
+                    automator.process_and_capture_card(card_name, category=category)
             
             elif args.card_builder == 'cc-file':
                 print(f"\n--- Starting CC File Render Mode ---")
