@@ -5,6 +5,9 @@ import re
 import sys
 import math
 
+# Basic land types
+BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
+
 class CcFileEditor:
     """
     Edits an existing .cardconjurer project file (JSON) by modifying text fields
@@ -33,6 +36,14 @@ class CcFileEditor:
             print(f"Saved edited project file to '{output_path}'")
         except Exception as e:
             print(f"Error saving file to '{output_path}': {e}", file=sys.stderr)
+    
+    def is_basic_land(self, card_name):
+        """
+        Check if a card is a basic land by name.
+        Strips formatting tags before checking.
+        """
+        clean_name = re.sub(r'\{[^}]+\}', '', card_name).strip()
+        return clean_name in BASIC_LANDS
 
     def apply_edits(self, white_border=False, black_border=False,
                     pt_font_size=None, pt_kerning=None, pt_up=None, pt_bold=False, pt_shadow=None,
@@ -216,26 +227,30 @@ class CcFileEditor:
 
             # --- Rules/Flavor Edits ---
             if 'rules' in text_dict:
-                t_obj = text_dict['rules']
-                original_text = t_obj.get('text', '')
-                new_text = original_text
-                
-                # Rules Down (Global for rules text)
-                if rules_down is not None:
-                    new_text = self._update_tag(new_text, 'down', rules_down)
-                
-                # Flavor Font
-                if flavor_font is not None and '{flavor}' in new_text:
-                    parts = new_text.split('{flavor}', 1)
-                    if len(parts) == 2:
-                        pre_flavor = parts[0]
-                        flavor_text = parts[1]
-                        flavor_text = self._update_tag(flavor_text, 'fontsize', flavor_font)
-                        new_text = f"{pre_flavor}{{flavor}}{flavor_text}"
-                
-                if new_text != original_text:
-                    t_obj['text'] = new_text
-                    print(f"   [{clean_card_name}] Updated Rules/Flavor Text: '{original_text}' -> '{new_text}'")
+                # Check if this is a basic land - skip rules modifications if so
+                if self.is_basic_land(card_name):
+                    print(f"   [{clean_card_name}] Skipping rules modifications for basic land")
+                else:
+                    t_obj = text_dict['rules']
+                    original_text = t_obj.get('text', '')
+                    new_text = original_text
+                    
+                    # Rules Down (Global for rules text)
+                    if rules_down is not None:
+                        new_text = self._update_tag(new_text, 'down', rules_down)
+                    
+                    # Flavor Font
+                    if flavor_font is not None and '{flavor}' in new_text:
+                        parts = new_text.split('{flavor}', 1)
+                        if len(parts) == 2:
+                            pre_flavor = parts[0]
+                            flavor_text = parts[1]
+                            flavor_text = self._update_tag(flavor_text, 'fontsize', flavor_font)
+                            new_text = f"{pre_flavor}{{flavor}}{flavor_text}"
+                    
+                    if new_text != original_text:
+                        t_obj['text'] = new_text
+                        print(f"   [{clean_card_name}] Updated Rules/Flavor Text: '{original_text}' -> '{new_text}'")
             
             count += 1
             

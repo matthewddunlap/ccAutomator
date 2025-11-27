@@ -91,6 +91,32 @@ class CustomArgumentParser(argparse.ArgumentParser):
         # argparse expects each line to be one argument
         return [arg_line]
 
+BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
+
+def split_basic_lands(cards):
+    """
+    Split a list of cards into basic lands and non-basic cards.
+    
+    Args:
+        cards: List of card dictionaries with 'name' and 'category' keys
+    
+    Returns:
+        Tuple of (non_basic_cards, basic_land_types)
+        - non_basic_cards: List of non-basic card dictionaries
+        - basic_land_types: Set of unique basic land type names
+    """
+    non_basic = []
+    basic_lands = set()
+    
+    for card in cards:
+        card_name = card['name'] if isinstance(card, dict) else card
+        if card_name in BASIC_LANDS:
+            basic_lands.add(card_name)
+        else:
+            non_basic.append(card)
+    
+    return non_basic, basic_lands
+
 def main():
     """
     Main entry point for the script. Parses arguments and orchestrates the automation.
@@ -110,15 +136,15 @@ def main():
         help="The URL for the Card Conjurer web app. Required for 'selenium' and 'cc-file' modes."
     )
     parser.add_argument(
+        'input_file',
+        nargs='?',
+        help="The input file containing card names (for 'selenium' mode) or the .cardconjurer file (for 'cc-file' or 'edit' mode)."
+    )
+    parser.add_argument(
         '--frame',
         help="The name of the frame to select from the dropdown (e.g., 'Seventh'). Required for 'selenium' and 'cc-file' modes."
     )
-    parser.add_argument(
-        'input_file',
-        help="Input file path.\n"
-             "For '--card-builder selenium': A plain text file with a list of card names.\n"
-             "For '--card-builder cc-file' or 'edit': A .cardconjurer project file."
-    )
+
     # --- START OF MODIFIED ARGUMENTS ---
     # Legacy arguments (mutually exclusive with granular arguments)
     legacy_group = parser.add_argument_group('Legacy Filtering Options')
@@ -388,6 +414,13 @@ def main():
         default='selenium',
         help="Choose the card building method."
     )
+    
+    parser.add_argument(
+        '--full-art-basic-land',
+        action='store_true',
+        help="Generate full-art basic lands instead of using Card Conjurer's default basic lands. "
+             "When enabled, basic lands in the deck will be processed separately using a custom template."
+    )
     # --- END OF MODIFIED ARGUMENTS ---
 
     overwrite_group = parser.add_argument_group('Overwrite Options')
@@ -409,7 +442,27 @@ def main():
         help="Overwrite if the server file is NEWER than the given timestamp (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h)."
     )
 
+    # --- Land Generation Arguments ---
+    parser.add_argument('--generate-lands', action='store_true', help="Generate full-art basic lands from a template.")
+    parser.add_argument('--land-types', type=str, help="Comma-separated list of land types (e.g., 'Mountain,Island') for generation.")
+    parser.add_argument('--template', type=str, help="Path to the template .cardconjurer file for land generation.")
+
     args = parser.parse_args()
+
+    # --- Land Generation Mode ---
+    if args.generate_lands:
+        if not args.land_types or not args.template:
+            parser.error("--generate-lands requires --land-types and --template.")
+        
+        from land_generator import generate_lands
+        output_file = args.output_dir if args.output_dir else "generated_lands.cardconjurer"
+        # If output_dir is a directory, join with default filename, else treat as filename
+        if os.path.isdir(output_file):
+            output_file = os.path.join(output_file, "generated_lands.cardconjurer")
+            
+        image_server = args.image_server if args.image_server else "http://mtgproxy:4242"
+        generate_lands(args.template, args.land_types, output_file, image_server)
+        sys.exit(0)
 
     # --- Manual Validation based on Mode ---
     if args.card_builder == 'selenium':
