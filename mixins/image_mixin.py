@@ -174,7 +174,11 @@ class ImageMixin:
             print(f"   Error: No image bytes provided for '{filename}' in '{sub_dir}'. Cannot save empty image.", file=sys.stderr)
             return
 
-        if self.download_dir: # Local save mode
+        if self.image_server_url: # Upload mode
+            print(f"DEBUG: Uploading because image_server_url is set: {self.image_server_url}")
+            self._upload_art_asset(img_bytes, sub_dir, filename)
+        elif self.download_dir: # Local save mode
+            print(f"DEBUG: Saving locally because image_server_url is NOT set. download_dir: {self.download_dir}")
             try:
                 # The art path is relative to the download dir
                 local_save_dir = Path(self.download_dir) / self.art_path.strip('/') / sub_dir.strip('/')
@@ -185,9 +189,6 @@ class ImageMixin:
                 print(f"   Saved image locally to: {local_file_path}")
             except Exception as e:
                 print(f"   Error: Local save error for '{filename}': {e}", file=sys.stderr)
-
-        elif self.image_server_url: # Upload mode
-            self._upload_art_asset(img_bytes, sub_dir, filename)
         else:
             print(f"   Warning: No output destination configured for '{filename}'. Image not saved/uploaded.", file=sys.stderr)
 
@@ -221,9 +222,18 @@ class ImageMixin:
             return None
 
         img_bytes = None
-        # If original_art_path_for_upscaler is a local path (e.g., from self.download_dir)
-        if self.download_dir and original_art_path_for_upscaler.startswith(self.image_server_path.strip('/')):
-            local_path = Path(self.download_dir) / original_art_path_for_upscaler
+        # Determine if we should read from local file or fetch from URL
+        is_url = original_art_path_for_upscaler.startswith(('http://', 'https://'))
+        
+        if not is_url and self.download_dir:
+            # It's a local path. Check if it exists directly or needs to be joined with download_dir
+            candidate_path = Path(original_art_path_for_upscaler)
+            if candidate_path.exists():
+                local_path = candidate_path
+            else:
+                # Try joining with download_dir
+                local_path = Path(self.download_dir) / original_art_path_for_upscaler
+            
             print(f"   Upscaling: Reading original image from local path: {local_path}")
             try:
                 with open(local_path, "rb") as f:
@@ -234,7 +244,7 @@ class ImageMixin:
             except Exception as e:
                 print(f"   Error: Upscaling failed: Could not read local file {local_path}: {e}", file=sys.stderr)
                 return None
-        else: # Assume it's a URL
+        else: # It's a URL
             img_bytes = self._fetch_image_bytes(original_art_path_for_upscaler, "Upscaling with gradio_client")
 
         if not img_bytes:
@@ -351,6 +361,7 @@ class ImageMixin:
         hosted_upscaled_art_url = None
         original_art_bytes_for_pipeline = None
         original_image_mime_type = None
+        local_original_art_path = None
         
         _, initial_ext_guess = os.path.splitext(art_crop_url.split('?')[0])
         if not initial_ext_guess or initial_ext_guess.lower() not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
@@ -384,6 +395,8 @@ class ImageMixin:
                         else:
                             # If no image_server_url, we can't provide a hosted URL, but we know it exists locally
                             hosted_original_art_url = str(local_path_check) # This will be a local file path, not a URL
+                        
+                        local_original_art_path = str(local_path_check)
                         break
         
         # 2. Fetch original art bytes if not already hosted or if upscaling is enabled
@@ -402,6 +415,7 @@ class ImageMixin:
                         hosted_original_art_url = urljoin(self.image_server_url, os.path.join(self.art_path, "original", filename_to_output))
                     elif self.download_dir:
                         hosted_original_art_url = str(Path(self.download_dir) / self.art_path.strip('/') / "original" / filename_to_output)
+                        local_original_art_path = str(Path(self.download_dir) / self.art_path.strip('/') / "original" / filename_to_output)
             else:
                 print(f"   Error: Failed to fetch original art from Scryfall for '{card_name}'. Cannot proceed with art preparation.", file=sys.stderr)
                 return None
@@ -425,7 +439,10 @@ class ImageMixin:
             else:
                 # Determine the path/URL to the original art for the upscaler
                 # If we saved locally, the upscaler can read from a local path
-                original_art_path_for_upscaler = hosted_original_art_url if self.download_dir else art_crop_url
+                if local_original_art_path:
+                    original_art_path_for_upscaler = local_original_art_path
+                else:
+                    original_art_path_for_upscaler = hosted_original_art_url if self.download_dir else art_crop_url
                 
                 upscaled_bytes = self._upscale_image_with_ilaria(original_art_path_for_upscaler, f"{sanitized_card_name}_{set_code_sanitized}_{collector_number_sanitized}", original_image_mime_type, self.upscaler_factor)
                 if upscaled_bytes:

@@ -651,6 +651,7 @@ def main():
     try:
         # Debug: Print the value of auto_fit_type
         print(f"DEBUG: args.auto_fit_type = {getattr(args, 'auto_fit_type', 'MISSING')}")
+        print(f"DEBUG: args.image_server = {getattr(args, 'image_server', 'MISSING')}")
 
         with CardConjurerAutomator(
             url=args.url,
