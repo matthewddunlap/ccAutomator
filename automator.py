@@ -114,15 +114,18 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.wait = WebDriverWait(self.driver, 15)
         self.wait.until(EC.presence_of_element_located((By.ID, 'creator-menu-tabs')))
         
+        # Import helper
+        from automator_utils import parse_set_list
+
         # Legacy filters
-        self.include_sets = {s.strip().lower() for s in include_sets.split(',')} if include_sets else set()
-        self.exclude_sets = {s.strip().lower() for s in exclude_sets.split(',')} if exclude_sets else set()
+        self.include_sets = parse_set_list(include_sets)
+        self.exclude_sets = parse_set_list(exclude_sets)
 
         # Granular filters
-        self.spells_include_sets = {s.strip().lower() for s in spells_include_sets.split(',')} if spells_include_sets else set()
-        self.spells_exclude_sets = {s.strip().lower() for s in spells_exclude_sets.split(',')} if spells_exclude_sets else set()
-        self.basic_land_include_sets = {s.strip().lower() for s in basic_land_include_sets.split(',')} if basic_land_include_sets else set()
-        self.basic_land_exclude_sets = {s.strip().lower() for s in basic_land_exclude_sets.split(',')} if basic_land_exclude_sets else set()
+        self.spells_include_sets = parse_set_list(spells_include_sets)
+        self.spells_exclude_sets = parse_set_list(spells_exclude_sets)
+        self.basic_land_include_sets = parse_set_list(basic_land_include_sets)
+        self.basic_land_exclude_sets = parse_set_list(basic_land_exclude_sets)
         self.card_selection_strategy = card_selection_strategy
         self.set_selection_strategy = set_selection_strategy
         self.no_match_selection = no_match_selection
@@ -537,7 +540,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             # --- NEW: PREPARE AND APPLY CUSTOM ART RIGHT AFTER IMPORT ---
             final_art_url, type_line = None, None
             if self.image_server_url or self.download_dir: # Only prepare art if image server or local download is configured
-                final_art_url, type_line = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
+                # We ignore width/height here as automator uses UI autofit (or none)
+                final_art_url, type_line, _, _ = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
             
             if final_art_url:
                 self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'], final_art_url)

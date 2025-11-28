@@ -97,6 +97,24 @@ def get_image_mime_type_and_extension(image_bytes: bytes) -> tuple[Optional[str]
         if image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'): return "image/gif", ".gif"
         if image_bytes.startswith(b'RIFF') and len(image_bytes) > 12 and image_bytes[8:12] == b'WEBP': return "image/webp", ".webp"
         return "application/octet-stream", ""
+
     except Exception as e:
         print(f"   Error determining image type: {e}")
         return "application/octet-stream", ""
+
+def parse_set_list(sets_arg) -> set:
+    """
+    Parses a set list argument which can be a string (comma-separated), 
+    a list of strings, or None. Returns a set of lowercase set codes.
+    """
+    if not sets_arg:
+        return set()
+    
+    result = set()
+    if isinstance(sets_arg, str):
+        result.update(s.strip().lower() for s in sets_arg.split(',') if s.strip())
+    elif isinstance(sets_arg, (list, tuple, set)):
+        for item in sets_arg:
+            if isinstance(item, str):
+                result.update(s.strip().lower() for s in item.split(',') if s.strip())
+    return result

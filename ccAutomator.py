@@ -545,12 +545,23 @@ def main():
 
     # For Selenium modes, we need to parse the input file ONLY if it's 'selenium' mode
     cards_to_process = []
+    basic_land_types = set()
+    
     if args.card_builder in ['selenium', 'combo']:
-        cards_to_process = parse_card_file(args.input_file)
-        if not cards_to_process:
+        all_cards = parse_card_file(args.input_file)
+        if not all_cards:
             print("No valid card names found in the input file to process. Exiting.", file=sys.stderr)
             sys.exit(1)
-        print(f"Found {len(cards_to_process)} cards to process for capture.")
+        
+        # Split basic lands if full-art mode is enabled
+        if args.full_art_basic_land and args.card_builder == 'selenium':
+            cards_to_process, basic_land_types = split_basic_lands(all_cards)
+            print(f"Full-art basic land mode enabled:")
+            print(f"  - {len(cards_to_process)} non-basic cards to process via Selenium")
+            print(f"  - {len(basic_land_types)} unique basic land types: {', '.join(sorted(basic_land_types))}")
+        else:
+            cards_to_process = all_cards
+            print(f"Found {len(cards_to_process)} cards to process for capture.")
     elif args.card_builder == 'cc-file':
         print(f"Mode 'cc-file': Will render project file '{args.input_file}'.")
 
@@ -808,6 +819,113 @@ def main():
                 input_path = Path(args.input_file)
                 output_filename = f"{input_path.stem}.cardconjurer"
                 automator.download_saved_cards(output_filename)
+
+        # Phase 2: Generate and render full-art basic lands (if enabled)
+        if args.full_art_basic_land and args.card_builder == 'selenium' and basic_land_types:
+            print("\n" + "="*60)
+            print("PHASE 2: Full-Art Basic Land Generation")
+            print("="*60)
+            
+            # Generate the full-art lands JSON
+            from land_generator import generate_fullart_lands
+            
+            temp_lands_file = Path(args.output_dir if args.output_dir else '.') / '_temp_fullart_lands.cardconjurer'
+            
+            print(f"\nGenerating full-art lands for: {', '.join(sorted(basic_land_types))}")
+            
+            try:
+                # Use basic land specific filters if provided, otherwise fall back to general filters
+                include_sets_arg = args.basic_land_include_set if args.basic_land_include_set else args.include_set
+                exclude_sets_arg = args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set
+                
+                # Parse set lists using helper
+                from automator_utils import parse_set_list
+                include_sets = list(parse_set_list(include_sets_arg))
+                exclude_sets = list(parse_set_list(exclude_sets_arg))
+
+                generate_fullart_lands(
+                    land_types=list(basic_land_types),
+                    template_path='templates/full_art_basic_lands.cardconjurer',
+                    output_path=str(temp_lands_file),
+                    image_server_url=args.image_server if args.image_server else 'http://172.17.1.216:4242',
+                    include_sets=include_sets,
+                    exclude_sets=exclude_sets,
+                    set_selection=args.set_selection,
+                    scryfall_filter=args.scryfall_filter,
+                    # Image processing args
+                    image_server_path=args.image_server_path,
+                    art_path=args.art_path,
+                    upscale_art=args.upscale_art,
+                    ilaria_url=args.ilaria_url,
+                    upscaler_model=args.upscaler_model,
+                    upscaler_factor=args.upscaler_factor,
+                    upload_path=args.upload_path,
+                    upload_secret=args.upload_secret,
+                    download_dir=args.output_dir if args.output_dir else '.',
+                    white_border=args.white_border
+                )
+                
+                # Relaunch browser to render the full-art lands
+                print("\n--- Relaunching browser for full-art land rendering ---")
+                
+                with CardConjurerAutomator(
+                    url=args.url,
+                    download_dir=args.output_dir if args.output_dir else '.',
+                    headless=not args.no_headless,
+                    white_border=False, # Disable Selenium white border as it's applied in JSON for full-art lands
+                    pt_bold=False, # Disable P/T mods for basic lands
+                    pt_font_size=None,
+                    pt_kerning=None,
+                    pt_up=None,
+                    pt_shadow=None,
+                    title_font_size=args.title_font_size,
+                    title_shadow=args.title_shadow,
+                    title_kerning=args.title_kerning,
+                    title_left=args.title_left,
+                    title_up=args.title_up,
+                    type_font_size=None, # Disable Type mods for basic lands
+                    type_shadow=None,
+                    type_kerning=None,
+                    type_left=None,
+                    flavor_font=args.flavor_font,
+                    rules_down=args.rules_down,
+                    image_server=args.image_server,
+                    image_server_path=args.image_server_path,
+                    art_path=args.art_path,
+                    autofit_art=args.autofit_art,
+                    upscale_art=args.upscale_art,
+                    ilaria_url=args.ilaria_url,
+                    upscaler_model=args.upscaler_model,
+                    upscaler_factor=args.upscaler_factor,
+                    upload_path=args.upload_path,
+                    upload_secret=args.upload_secret,
+                    scryfall_filter=args.scryfall_filter,
+                    save_cc_file=args.save_cc_file,
+                    overwrite=args.overwrite,
+                    overwrite_older_than=args.overwrite_older_than,
+                    overwrite_newer_than=args.overwrite_newer_than,
+                    debug=args.debug,
+                    auto_fit_type=False # Disable auto-fit for full-art lands to prevent crashes
+                ) as lands_automator:
+                    # Render the full-art lands (skip frame selection - template has frames)
+                    print(f"\n--- Rendering full-art basic lands from {temp_lands_file} ---")
+                    lands_automator.render_project_file(str(temp_lands_file), frame_name=None, prime_card_names=[])
+                
+                # Clean up temp file unless --save-cc-file is set
+                if not args.save_cc_file and temp_lands_file.exists():
+                    temp_lands_file.unlink()
+                    print(f"Cleaned up temporary file: {temp_lands_file}")
+                elif args.save_cc_file:
+                    # Rename to permanent file
+                    final_name = Path(args.output_dir if args.output_dir else '.') / f"{Path(args.input_file).stem}_fullart_lands.cardconjurer"
+                    temp_lands_file.rename(final_name)
+                    print(f"Saved full-art lands project file: {final_name}")
+                    
+            except Exception as e:
+                print(f"\nError during full-art land generation: {e}", file=sys.stderr)
+                if temp_lands_file.exists():
+                    temp_lands_file.unlink()
+                raise
 
             if args.no_close:
                 print("\n--- Execution Paused (--no-close) ---")

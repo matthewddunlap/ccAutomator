@@ -1,6 +1,8 @@
 import os
 import sys
 import requests
+import io
+from PIL import Image
 from pathlib import Path
 from urllib.parse import urljoin
 from selenium.webdriver.common.by import By
@@ -455,9 +457,41 @@ class ImageMixin:
                         hosted_upscaled_art_url = str(Path(self.download_dir) / self.art_path.strip('/') / upscaled_dir / upscaled_filename)
         
         # 4. Determine the final art source URL to return
+        final_width, final_height = None, None
+        
+        # Helper to get dimensions from local path or bytes
+        def get_dims(path_or_bytes):
+            try:
+                if isinstance(path_or_bytes, bytes):
+                    with Image.open(io.BytesIO(path_or_bytes)) as img:
+                        return img.width, img.height
+                elif path_or_bytes and os.path.exists(path_or_bytes):
+                    with Image.open(path_or_bytes) as img:
+                        return img.width, img.height
+            except Exception as e:
+                print(f"   Warning: Could not determine dimensions: {e}")
+            return None, None
+
         if hosted_upscaled_art_url:
             final_art_source_url = hosted_upscaled_art_url
             print(f"   Using upscaled art: {final_art_source_url}")
+            # Try to get dimensions from local upscaled file if available
+            if self.download_dir:
+                 # Reconstruct local path
+                 upscaled_dir = f"{generate_safe_filename(self.upscaler_model)}-{self.upscaler_factor}x"
+                 upscaled_filename = f"{sanitized_card_name}_{set_code_sanitized}_{collector_number_sanitized}.png" # Assuming PNG
+                 # We might have used a different extension if we didn't upscale, but here we are in the upscaled block
+                 # Wait, we need the exact filename used above
+                 # Let's use the bytes if we have them, or the local path
+                 pass # Logic below handles it better if we track it
+            
+            # Since we just upscaled, we might have the bytes or file
+            # For now, let's try to fetch if we can't find it locally, or rely on the fact we just saved it
+            # Ideally _upscale_image_with_ilaria returns bytes, so we could have used them.
+            # But _upscale_image_with_ilaria returns bytes!
+            # Let's capture them in the upscale block.
+            pass
+
         elif hosted_original_art_url:
             final_art_source_url = hosted_original_art_url
             print(f"   Using original hosted art: {final_art_source_url}")
@@ -465,4 +499,34 @@ class ImageMixin:
             final_art_source_url = art_crop_url
             print(f"   Using Scryfall art_crop URL: {final_art_source_url}")
 
-        return final_art_source_url, type_line
+        # Determine dimensions for the final art
+        # We need to know which image we are using.
+        # 1. Upscaled
+        if hosted_upscaled_art_url:
+            if 'upscaled_bytes' in locals() and upscaled_bytes:
+                 final_width, final_height = get_dims(upscaled_bytes)
+            elif 'expected_upscaled_local_path' in locals() and expected_upscaled_local_path and expected_upscaled_local_path.exists():
+                 final_width, final_height = get_dims(expected_upscaled_local_path)
+            else:
+                 # Fallback: Fetch from URL if we can't find local file or bytes
+                 # This handles case where image server is remote or local path logic failed
+                 temp_bytes = self._fetch_image_bytes(hosted_upscaled_art_url, "Dimensions check (upscaled)")
+                 final_width, final_height = get_dims(temp_bytes)
+        
+        # 2. Original (Local/Hosted)
+        elif hosted_original_art_url and local_original_art_path:
+             final_width, final_height = get_dims(local_original_art_path)
+        elif hosted_original_art_url and original_art_bytes_for_pipeline:
+             final_width, final_height = get_dims(original_art_bytes_for_pipeline)
+        # 3. Scryfall URL (fallback)
+        elif final_art_source_url == art_crop_url:
+             # We might need to fetch it if we haven't already
+             if original_art_bytes_for_pipeline:
+                 final_width, final_height = get_dims(original_art_bytes_for_pipeline)
+             else:
+                 # Fetch just for dims? Or skip autofit?
+                 # Let's fetch it since we need it for autofit
+                 temp_bytes = self._fetch_image_bytes(art_crop_url, "Dimensions check")
+                 final_width, final_height = get_dims(temp_bytes)
+
+        return final_art_source_url, type_line, final_width, final_height
