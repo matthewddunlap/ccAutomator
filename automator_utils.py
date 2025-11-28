@@ -118,3 +118,211 @@ def parse_set_list(sets_arg) -> set:
             if isinstance(item, str):
                 result.update(s.strip().lower() for s in item.split(',') if s.strip())
     return result
+
+# ==============================================================================
+# Deck List Parsing Functions
+# ==============================================================================
+
+BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
+
+def parse_card_file(filepath):
+    """
+    Parses the input file to extract card names and categories (e.g., from # Headers).
+    Returns a list of dictionaries: [{'name': 'Card Name', 'category': 'CategoryName'}, ...]
+    """
+    cards = []
+    current_category = 'deck' # Default category
+    
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Check for headers (lines starting with #)
+                if line.startswith('#'):
+                    # It's a header/category change, not just a comment
+                    # Strip the # and whitespace to get category name
+                    # e.g. "# Tokens" -> "tokens"
+                    current_category = line.lstrip('#').strip().lower()
+                    continue
+
+                # Use regex to ignore leading numbers and capture the rest of the line.
+                match = re.match(r'^\d+\s+(.*)', line)
+                if match:
+                    card_name = match.group(1).strip()
+                    cards.append({'name': card_name, 'category': current_category})
+                else:
+                    # Assume the whole line is the card name if no number prefix
+                    cards.append({'name': line, 'category': current_category})
+                    
+    except FileNotFoundError:
+        import sys
+        print(f"Error: Input file not found at '{filepath}'", file=sys.stderr)
+        sys.exit(1)
+    return cards
+
+
+def split_basic_lands(cards):
+    """
+    Split a list of cards into basic lands and non-basic cards.
+    
+    Args:
+        cards: List of card dictionaries with 'name' and 'category' keys
+    
+    Returns:
+        Tuple of (non_basic_cards, basic_land_types)
+        - non_basic_cards: List of non-basic card dictionaries
+        - basic_land_types: Set of unique basic land type names
+    """
+    non_basic = []
+    basic_lands = set()
+    
+    for card in cards:
+        card_name = card['name'] if isinstance(card, dict) else card
+        if card_name in BASIC_LANDS:
+            basic_lands.add(card_name)
+        else:
+            non_basic.append(card)
+    
+    return non_basic, basic_lands
+
+# ==============================================================================
+# Set Filtering Functions
+# ==============================================================================
+
+def apply_set_filters(cards, section, spells_include_set=None, spells_exclude_set=None,
+                     basic_land_include_set=None, basic_land_exclude_set=None):
+    """
+    Apply set inclusion/exclusion filters based on card section.
+    
+    Args:
+        cards: List of card dictionaries
+        section: Section name ('deck', 'land', 'token', etc.)
+        spells_include_set: Whitelist of sets for spells
+        spells_exclude_set: Blacklist of sets for spells
+        basic_land_include_set: Whitelist of sets for basic lands
+        basic_land_exclude_set: Blacklist of sets for basic lands
+    
+    Returns:
+        Filtered list of cards (note: filtering is informational; 
+        actual Scryfall filtering happens in query building)
+    """
+    # This function is a placeholder for now - actual filtering happens
+    # in build_scryfall_query() which adds set filters to the query string
+    # We return all cards here since filtering is done via Scryfall API
+    return cards
+
+# ==============================================================================
+# Scryfall Query Building
+# ==============================================================================
+
+def build_scryfall_query(card_name, section='deck', set_code=None, collector_number=None,
+                        scryfall_filter=None, spells_include_set=None, spells_exclude_set=None,
+                        basic_land_include_set=None, basic_land_exclude_set=None):
+    """
+    Build Scryfall query string based on card section and filters.
+    
+    Different sections use different query modifiers:
+    - 'token': adds 't:token'
+    - 'deck': adds spell-specific filters
+    - 'land': adds land-specific filters
+    
+    Args:
+        card_name: Name of the card
+        section: Section name ('deck', 'land', 'token', etc.)
+        set_code: Optional set code
+        collector_number: Optional collector number
+        scryfall_filter: Additional Scryfall query filters
+        spells_include_set: Whitelist of sets for spells
+        spells_exclude_set: Blacklist of sets for spells
+        basic_land_include_set: Whitelist of sets for basic lands
+        basic_land_exclude_set: Blacklist of sets for basic lands
+    
+    Returns:
+        Scryfall query string
+    """
+    # Start with exact card name match
+    query = f'!"{card_name}"'
+    
+    # Add set code if provided
+    if set_code:
+        query += f" set:{set_code}"
+    
+    # Add collector number if provided
+    if collector_number:
+        query += f" cn:{collector_number}"
+    
+    # Add section-specific modifiers
+    section_lower = section.lower()
+    
+    if section_lower == 'token' or section_lower == 'tokens':
+        query += " t:token"
+    
+    # Add set filters based on section
+    if section_lower == 'land':
+        # Basic land filters
+        if basic_land_include_set:
+            include_sets = parse_set_list(basic_land_include_set)
+            if include_sets:
+                set_query = " OR ".join(f"set:{s}" for s in include_sets)
+                query += f" ({set_query})"
+        
+        if basic_land_exclude_set:
+            exclude_sets = parse_set_list(basic_land_exclude_set)
+            for s in exclude_sets:
+                query += f" -set:{s}"
+    
+    elif section_lower == 'deck':
+        # Spell filters
+        if spells_include_set:
+            include_sets = parse_set_list(spells_include_set)
+            if include_sets:
+                set_query = " OR ".join(f"set:{s}" for s in include_sets)
+                query += f" ({set_query})"
+        
+        if spells_exclude_set:
+            exclude_sets = parse_set_list(spells_exclude_set)
+            for s in exclude_sets:
+                query += f" -set:{s}"
+    
+    # Add additional Scryfall filters
+    if scryfall_filter:
+        query += f" {scryfall_filter}"
+    
+    return query
+
+# ==============================================================================
+# Output File Saving
+# ==============================================================================
+
+def save_cardconjurer_file(cards_data, output_filename, output_dir='downloads'):
+    """
+    Save .cardconjurer JSON file locally.
+    
+    Args:
+        cards_data: List of card JSON objects
+        output_filename: Base filename (without extension)
+        output_dir: Directory to save to
+    
+    Returns:
+        Full path to saved file
+    """
+    import os
+    import json
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Add .cardconjurer extension if not present
+    if not output_filename.endswith('.cardconjurer'):
+        output_filename += '.cardconjurer'
+    
+    output_path = os.path.join(output_dir, output_filename)
+    
+    # Save JSON array
+    with open(output_path, 'w') as f:
+        json.dump(cards_data, f, indent=2)
+    
+    return output_path

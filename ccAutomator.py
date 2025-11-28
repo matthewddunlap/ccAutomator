@@ -6,45 +6,14 @@ import json
 from pathlib import Path
 from automator import CardConjurerAutomator
 from cc_file_editor import CcFileEditor
-
-def parse_card_file(filepath):
-    """
-    Parses the input file to extract card names and categories (e.g., from # Headers).
-    Returns a list of dictionaries: [{'name': 'Card Name', 'category': 'CategoryName'}, ...]
-    """
-    cards = []
-    current_category = 'deck' # Default category
-    
-    try:
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Check for headers (lines starting with #)
-                if line.startswith('#'):
-                    # It's a header/category change, not just a comment
-                    # Strip the # and whitespace to get category name
-                    # e.g. "# Tokens" -> "tokens"
-                    current_category = line.lstrip('#').strip().lower()
-                    continue
-
-                # Use regex to ignore leading numbers and capture the rest of the line.
-                match = re.match(r'^\d+\s+(.*)', line)
-                if match:
-                    card_name = match.group(1).strip()
-                    cards.append({'name': card_name, 'category': current_category})
-                else:
-                    # Assume the whole line is the card name if no number prefix
-                    cards.append({'name': line, 'category': current_category})
-                    
-    except FileNotFoundError:
-        print(f"Error: Input file not found at '{filepath}'", file=sys.stderr)
-        sys.exit(1)
-    return cards
-
-
+from automator_utils import (
+    parse_card_file,
+    split_basic_lands,
+    apply_set_filters,
+    build_scryfall_query,
+    save_cardconjurer_file,
+    BASIC_LANDS
+)
 
 class CustomArgumentParser(argparse.ArgumentParser):
     """
@@ -90,32 +59,6 @@ class CustomArgumentParser(argparse.ArgumentParser):
         # Return the argument as a single item
         # argparse expects each line to be one argument
         return [arg_line]
-
-BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
-
-def split_basic_lands(cards):
-    """
-    Split a list of cards into basic lands and non-basic cards.
-    
-    Args:
-        cards: List of card dictionaries with 'name' and 'category' keys
-    
-    Returns:
-        Tuple of (non_basic_cards, basic_land_types)
-        - non_basic_cards: List of non-basic card dictionaries
-        - basic_land_types: Set of unique basic land type names
-    """
-    non_basic = []
-    basic_lands = set()
-    
-    for card in cards:
-        card_name = card['name'] if isinstance(card, dict) else card
-        if card_name in BASIC_LANDS:
-            basic_lands.add(card_name)
-        else:
-            non_basic.append(card)
-    
-    return non_basic, basic_lands
 
 def main():
     """
@@ -410,9 +353,9 @@ def main():
 
     parser.add_argument(
         '--card-builder',
-        choices=['selenium', 'cc-file', 'edit', 'combo'],
+        choices=['selenium', 'cc-file', 'edit', 'combo', 'json'],
         default='selenium',
-        help="Choose the card building method."
+        help="Choose the card building method. 'json' generates .cardconjurer files directly without Selenium."
     )
     
     parser.add_argument(
@@ -481,6 +424,13 @@ def main():
         # Frame is optional for cc-file (defaults to what's in the file)
         if not (args.output_dir or args.upload_path):
             parser.error("One of --output-dir or --upload-path is required for 'cc-file' mode.")
+    
+    elif args.card_builder == 'json':
+        if not args.input_file:
+            parser.error("input_file is required for 'json' mode.")
+        if not args.output_dir:
+            # Default to downloads if not specified
+            args.output_dir = 'downloads'
             
     # 'edit' mode does not require frame, card-selection, or output options (it saves to file)
 
@@ -541,6 +491,76 @@ def main():
         editor.save(output_path)
         sys.exit(0)
 
+    # Handle 'json' mode - generate .cardconjurer files directly
+    if args.card_builder == 'json':
+        print(f"--- Starting JSON Mode for '{args.input_file}' ---")
+        
+        # Parse deck list
+        all_cards = parse_card_file(args.input_file)
+        if not all_cards:
+            print("No valid card names found in the input file. Exiting.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Group cards by section
+        from collections import defaultdict
+        cards_by_section = defaultdict(list)
+        for card in all_cards:
+            cards_by_section[card['category']].append(card)
+        
+        # Initialize generator
+        from seventh_generator import SeventhGenerator
+        generator = SeventhGenerator(
+            image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242",
+            download_dir=args.download_dir if hasattr(args, 'download_dir') else 'downloads',
+            upload_secret=args.upload_secret,
+            art_path=args.art_path
+        )
+        generator.upscale_art = args.upscale_art if args.upscale_art else False
+        generator.ilaria_url = args.ilaria_url if args.ilaria_url else None
+        
+        # Process each section
+        generated_cards = []
+        total_cards = len(all_cards)
+        failed_cards = []
+        
+        for section, section_cards in cards_by_section.items():
+            print(f"\nProcessing section: {section} ({len(section_cards)} cards)")
+            
+            for card in section_cards:
+                card_name = card['name']
+                try:
+                    # Build Scryfall query with section-specific filters
+                    # Note: SeventhGenerator.generate_card() builds its own query,
+                    # so we just pass the card name and let it handle the query
+                    card_json = generator.generate_card(card_name)
+                    
+                    if card_json:
+                        generated_cards.append(card_json)
+                        print(f"  ✓ {card_name}")
+                    else:
+                        failed_cards.append(card_name)
+                        print(f"  ✗ {card_name} (generation failed)")
+                        
+                except Exception as e:
+                    failed_cards.append(card_name)
+                    print(f"  ✗ {card_name}: {e}")
+        
+        # Save output file
+        deck_name = Path(args.input_file).stem
+        output_path = save_cardconjurer_file(
+            generated_cards,
+            deck_name,
+            args.output_dir
+        )
+        
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"Generated {len(generated_cards)}/{total_cards} cards")
+        if failed_cards:
+            print(f"Failed cards ({len(failed_cards)}): {', '.join(failed_cards)}")
+        print(f"Output: {output_path}")
+        print(f"{'='*60}")
+        sys.exit(0)
 
 
     # For Selenium modes, we need to parse the input file ONLY if it's 'selenium' mode

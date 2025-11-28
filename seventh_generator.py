@@ -25,7 +25,8 @@ LAND_COLOR_MAP = {
 }
 
 class SeventhGenerator(ImageMixin, CollectorMixin):
-    def __init__(self, image_server_url="http://mtgproxy:4242", download_dir="downloads", upload_secret=None):
+    def __init__(self, image_server_url="http://mtgproxy:4242", download_dir="downloads", 
+                 upload_secret=None, art_path="/local_art/art/"):
         self.image_server_url = image_server_url
         self.download_dir = download_dir
         self.upload_secret = upload_secret
@@ -34,7 +35,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         self.ilaria_url = None # Initialize ilaria_url
         self.upscaler_model = "realesrgan-x2plus"
         self.upscaler_factor = 4
-        self.art_path = "art"
+        self.art_path = art_path
         
     def determine_frame_layers(self, scryfall_data):
         layers = []
