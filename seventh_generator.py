@@ -7,17 +7,20 @@ sys.modules['gradio_client'] = MagicMock()
 
 import requests
 from pathlib import Path
-from automator_utils import generate_safe_filename
-
+from automator_utils import (
+    generate_safe_filename,
+    get_image_mime_type_and_extension,
+    DEFAULT_UPSCALER_MODEL
+)
 # Add parent directory to path to import mixins
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from mixins.image_mixin import ImageMixin
 from mixins.collector_mixin import CollectorMixin
 
-# Frame Mappings
+# Color Maps
 COLOR_MAP = {
     'W': 'w', 'U': 'u', 'B': 'b', 'R': 'r', 'G': 'g',
-    'M': 'm', 'A': 'a', 'L': 'l', 'C': 'c'
+    'M': 'm', 'C': 'c', 'A': 'a', 'L': 'l'
 }
 
 LAND_COLOR_MAP = {
@@ -26,16 +29,17 @@ LAND_COLOR_MAP = {
 
 class SeventhGenerator(ImageMixin, CollectorMixin):
     def __init__(self, image_server_url="http://mtgproxy:4242", download_dir="downloads", 
-                 upload_secret=None, art_path="/local_art/art/"):
+                 upload_secret=None, art_path="/local_art/art/", upscaler_model=DEFAULT_UPSCALER_MODEL):
         self.image_server_url = image_server_url
         self.download_dir = download_dir
         self.upload_secret = upload_secret
         self.driver = None # Not needed for generation
         self.upscale_art = True # Corrected name
         self.ilaria_url = None # Initialize ilaria_url
-        self.upscaler_model = "realesrgan-x2plus"
+        self.upscaler_model = upscaler_model
         self.upscaler_factor = 4
         self.art_path = art_path
+        self.app_url = None  # No Selenium app URL in JSON mode, prevents art URL trimming
         
     def determine_frame_layers(self, scryfall_data):
         layers = []
@@ -248,16 +252,43 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             "data": {
                 "width": 2010,
                 "height": 2814,
+                "marginX": 0,
+                "marginY": 0,
                 "frames": frames,
                 "artSource": final_art_url,
-                "artX": 0.116, # Default center-ish
+                "artX": 0.116,
                 "artY": 0.099,
                 "artZoom": 0.67,
                 "setSymbolSource": set_symbol_url,
                 "setSymbolX": 0.852,
                 "setSymbolY": 0.555,
                 "setSymbolZoom": 0.132,
+                "artRotate": 0,
+                "watermarkSource": "",
+                "watermarkX": 0.5,
+                "watermarkY": 0.76,
+                "watermarkZoom": 1,
+                "watermarkOpacity": 0.15,
+                "watermarkLeft": 0,
+                "watermarkRight": 0,
+                "margins": False,
+                "onload": None,
+                "hideBottomInfoBorder": False,
+                "showsFlavorBar": False,
+                "bottomInfoTranslate": {"x": 0, "y": 0},
+                "bottomInfoRotate": 0,
+                "bottomInfoZoom": 1,
+                "bottomInfoColor": "white",
+                "manaSymbols": [],
+                "version": "seventh",
                 "text": {
+                    "mana": {
+                        "name": "Mana Cost",
+                        "text": mana_cost,
+                        "x": 0.1067, "y": 0.0539, "width": 0.8174, "height": 0.034,
+                        "oneLine": True, "size": 0.044, "align": "right",
+                        "manaCost": True
+                    },
                     "title": {
                         "name": "Title",
                         "text": title,
@@ -284,21 +315,43 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                         "x": 0.8074, "y": 0.9043, "width": 0.1367, "height": 0.0429,
                         "size": 0.0429, "oneLine": True, "align": "center",
                         "color": "white", "shadowX": 0.002, "shadowY": 0.0015
+                    }
+                },
+                "bottomInfo": {
+                    "top": {
+                        "text": "Illus. {elemidinfo-artist}",
+                        "x": 0.1, "y": 0.9085714285714286, "width": 0.8, "height": 0.0267,
+                        "oneLine": True, "size": 0.0267, "align": "center",
+                        "shadowX": 0.0021, "shadowY": 0.0015, "color": "white"
                     },
-                    "mana": {
-                        "name": "Mana Cost",
-                        "text": mana_cost,
-                        "x": 0.1067, "y": 0.0539, "width": 0.8174, "height": 0.034,
-                        "oneLine": True, "size": 0.044, "align": "right",
-                        "manaCost": True
+                    "wizards": {
+                        "name": "wizards",
+                        "text": "™ & © {elemidinfo-year} Wizards of the Coast, Inc. {elemidinfo-number}",
+                        "x": 0.1, "y": 0.9204761904761904, "width": 0.8, "height": 0.0172,
+                        "oneLine": True, "size": 0.0172, "align": "center",
+                        "shadowX": 0.0014, "shadowY": 0.001, "color": "white"
+                    },
+                    "bottom": {
+                        "text": "NOT FOR SALE   CardConjurer.com",
+                        "x": 0.1, "y": 0.9395238095238095, "width": 0.8, "height": 0.012380952380952381,
+                        "oneLine": True, "size": 0.012380952380952381,
+                        "align": "center",
+                        "shadowX": 0.0014, "shadowY": 0.001, "color": "white"
                     }
                 },
                 "infoYear": data.get('released_at', '')[:4],
                 "infoNumber": data['collector_number'],
+                "infoRarity": rarity_code.upper(),
                 "infoSet": data['set'].upper(),
+                "infoLanguage": "EN",
                 "infoArtist": data.get('artist', ''),
-                # Autofit logic needed?
-                "artBounds": {"x": 0.12, "y": 0.0991, "width": 0.7667, "height": 0.4429}
+                "infoNote": "",
+                "artBounds": {"x": 0.12, "y": 0.0991, "width": 0.7667, "height": 0.4429},
+                "setSymbolBounds": {
+                    "x": 0.9, "y": 0.5739, "width": 0.12, "height": 0.0372,
+                    "vertical": "center", "horizontal": "right"
+                },
+                "watermarkBounds": {"x": 0.18, "y": 0.64, "width": 0.64, "height": 0.24}
             }
         }
         

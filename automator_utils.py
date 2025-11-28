@@ -13,6 +13,9 @@ BASIC_LAND_NAMES = {
     'Snow-Covered Plains', 'Snow-Covered Swamp'
 }
 
+# Default Configuration
+DEFAULT_UPSCALER_MODEL = 'RealESRGAN_x2plus'
+
 def parse_time_string(time_str: str) -> Optional[datetime]:
     """Parses a timestamp string (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h) into a timezone-aware datetime object (UTC)."""
     if not time_str:
@@ -323,6 +326,6 @@ def save_cardconjurer_file(cards_data, output_filename, output_dir='downloads'):
     
     # Save JSON array
     with open(output_path, 'w') as f:
-        json.dump(cards_data, f, indent=2)
+        json.dump(cards_data, f, separators=(',', ':'))
     
     return output_path

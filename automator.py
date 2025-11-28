@@ -31,6 +31,7 @@ from automator_utils import (
     check_server_file_details,
     generate_safe_filename,
     get_image_mime_type_and_extension,
+    DEFAULT_UPSCALER_MODEL
 )
 
 # Import Mixins
@@ -58,7 +59,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None,
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
-                 upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
+                 upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
                  auto_fit_type=False):

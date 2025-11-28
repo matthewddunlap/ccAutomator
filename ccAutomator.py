@@ -12,7 +12,8 @@ from automator_utils import (
     apply_set_filters,
     build_scryfall_query,
     save_cardconjurer_file,
-    BASIC_LANDS
+    BASIC_LANDS,
+    DEFAULT_UPSCALER_MODEL
 )
 
 class CustomArgumentParser(argparse.ArgumentParser):
@@ -513,7 +514,8 @@ def main():
             image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242",
             download_dir=args.download_dir if hasattr(args, 'download_dir') else 'downloads',
             upload_secret=args.upload_secret,
-            art_path=args.art_path
+            art_path=args.art_path,
+            upscaler_model=args.upscaler_model if args.upscaler_model else DEFAULT_UPSCALER_MODEL
         )
         generator.upscale_art = args.upscale_art if args.upscale_art else False
         generator.ilaria_url = args.ilaria_url if args.ilaria_url else None
