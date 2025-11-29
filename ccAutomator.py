@@ -520,6 +520,12 @@ def main():
         generator.upscale_art = args.upscale_art if args.upscale_art else False
         generator.ilaria_url = args.ilaria_url if args.ilaria_url else None
         
+        # Map legacy filters to granular filters if needed
+        spells_include = args.spells_include_set if args.spells_include_set else args.include_set
+        spells_exclude = args.spells_exclude_set if args.spells_exclude_set else args.exclude_set
+        land_include = args.basic_land_include_set if args.basic_land_include_set else args.include_set
+        land_exclude = args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set
+        
         # Process each section
         generated_cards = []
         total_cards = len(all_cards)
@@ -531,10 +537,16 @@ def main():
             for card in section_cards:
                 card_name = card['name']
                 try:
-                    # Build Scryfall query with section-specific filters
-                    # Note: SeventhGenerator.generate_card() builds its own query,
-                    # so we just pass the card name and let it handle the query
-                    card_json = generator.generate_card(card_name)
+                    # Generate card with section-specific filtering
+                    card_json = generator.generate_card(
+                        card_name=card_name,
+                        section=section,
+                        scryfall_filter=args.scryfall_filter,
+                        spells_include_set=spells_include,
+                        spells_exclude_set=spells_exclude,
+                        basic_land_include_set=land_include,
+                        basic_land_exclude_set=land_exclude
+                    )
                     
                     if card_json:
                         generated_cards.append(card_json)

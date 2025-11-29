@@ -225,21 +225,21 @@ def build_scryfall_query(card_name, section='deck', set_code=None, collector_num
                         scryfall_filter=None, spells_include_set=None, spells_exclude_set=None,
                         basic_land_include_set=None, basic_land_exclude_set=None):
     """
-    Build Scryfall query string based on card section and filters.
+    Build Scryfall query string based on card name and filters.
     
-    Different sections use different query modifiers:
-    - 'token': adds 't:token'
-    - 'deck': adds spell-specific filters
-    - 'land': adds land-specific filters
+    Filtering is based on card name:
+    - Basic lands (Island, Forest, etc.) use basic_land filters
+    - Everything else (including non-basic lands) uses spell filters
+    - Token section adds 't:token' modifier
     
     Args:
         card_name: Name of the card
-        section: Section name ('deck', 'land', 'token', etc.)
+        section: Section name ('deck', 'land', 'token', etc.) - only used for token detection
         set_code: Optional set code
         collector_number: Optional collector number
         scryfall_filter: Additional Scryfall query filters
-        spells_include_set: Whitelist of sets for spells
-        spells_exclude_set: Blacklist of sets for spells
+        spells_include_set: Whitelist of sets for spells (non-basic lands + spells)
+        spells_exclude_set: Blacklist of sets for spells (non-basic lands + spells)
         basic_land_include_set: Whitelist of sets for basic lands
         basic_land_exclude_set: Blacklist of sets for basic lands
     
@@ -257,14 +257,16 @@ def build_scryfall_query(card_name, section='deck', set_code=None, collector_num
     if collector_number:
         query += f" cn:{collector_number}"
     
-    # Add section-specific modifiers
+    # Add token modifier if in token section
     section_lower = section.lower()
-    
     if section_lower == 'token' or section_lower == 'tokens':
         query += " t:token"
     
-    # Add set filters based on section
-    if section_lower == 'land':
+    # Determine if this is a basic land based on card name
+    is_basic_land = card_name in BASIC_LAND_NAMES
+    
+    # Add set filters based on card name (basic land vs spell)
+    if is_basic_land:
         # Basic land filters
         if basic_land_include_set:
             include_sets = parse_set_list(basic_land_include_set)
@@ -276,9 +278,8 @@ def build_scryfall_query(card_name, section='deck', set_code=None, collector_num
             exclude_sets = parse_set_list(basic_land_exclude_set)
             for s in exclude_sets:
                 query += f" -set:{s}"
-    
-    elif section_lower == 'deck':
-        # Spell filters
+    else:
+        # Spell filters (applies to everything that's not a basic land)
         if spells_include_set:
             include_sets = parse_set_list(spells_include_set)
             if include_sets:
@@ -295,6 +296,219 @@ def build_scryfall_query(card_name, section='deck', set_code=None, collector_num
         query += f" {scryfall_filter}"
     
     return query
+
+def scryfall_query_with_fallback(card_name, section='deck', set_code=None, collector_number=None,
+                                 scryfall_filter=None, spells_include_set=None, spells_exclude_set=None,
+                                 basic_land_include_set=None, basic_land_exclude_set=None):
+    """
+    Query Scryfall with multi-step fallback logic.
+    
+    Tries progressively broader queries:
+    1. Full query with all filters
+    2. Remove include filters, keep exclude filters
+    3. Remove 'not:covered', keep exclude filters  
+    4. Remove all filters (broadest search)
+    
+    Args:
+        Same as build_scryfall_query
+        
+    Returns:
+        Scryfall card data dict if found, None otherwise
+    """
+    import sys
+    
+    # Determine which filters to use based on card name
+    is_basic_land = card_name in BASIC_LAND_NAMES
+    current_include_set = basic_land_include_set if is_basic_land else spells_include_set
+    current_exclude_set = basic_land_exclude_set if is_basic_land else spells_exclude_set
+    
+    data = None
+    
+    # Try 1: Full query with all filters
+    query = build_scryfall_query(
+        card_name=card_name,
+        section=section,
+        set_code=set_code,
+        collector_number=collector_number,
+        scryfall_filter=scryfall_filter,
+        spells_include_set=spells_include_set,
+        spells_exclude_set=spells_exclude_set,
+        basic_land_include_set=basic_land_include_set,
+        basic_land_exclude_set=basic_land_exclude_set
+    )
+    
+    print(f"   Scryfall query (with filters): {query}")
+    try:
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': query})
+        if resp.status_code == 200:
+            results = resp.json().get('data', [])
+            if results:
+                return results[0]
+    except Exception as e:
+        print(f"   Warning: Query failed: {e}", file=sys.stderr)
+    
+    # Fallback 1: Remove include filters, keep exclude filters
+    if current_include_set and current_exclude_set:
+        print(f"   Warning: Initial query found no matches. Stripping include sets but keeping exclude sets...", file=sys.stderr)
+        fallback_query = build_scryfall_query(
+            card_name=card_name,
+            section=section,
+            set_code=set_code,
+            collector_number=collector_number,
+            scryfall_filter=scryfall_filter,
+            spells_include_set=None,
+            spells_exclude_set=spells_exclude_set if not is_basic_land else None,
+            basic_land_include_set=None,
+            basic_land_exclude_set=basic_land_exclude_set if is_basic_land else None
+        )
+        print(f"   Scryfall fallback query (excludes only): {fallback_query}")
+        try:
+            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_query})
+            if resp.status_code == 200:
+                results = resp.json().get('data', [])
+                if results:
+                    return results[0]
+        except Exception as e:
+            print(f"   Warning: Fallback query failed: {e}", file=sys.stderr)
+    
+    # Fallback 2: Remove 'not:covered', keep exclude filters
+    if current_exclude_set:
+        print(f"   Warning: Fallback 1 found no matches. Stripping 'not:covered' but keeping exclude sets...", file=sys.stderr)
+        # Build a simpler query without not:covered
+        base_query = f'!"{card_name}"'
+        if set_code:
+            base_query += f" set:{set_code}"
+        if collector_number:
+            base_query += f" cn:{collector_number}"
+        if section.lower() in ['token', 'tokens']:
+            base_query += " t:token"
+        
+        # Add exclude filters
+        if current_exclude_set:
+            exclude_sets = parse_set_list(current_exclude_set)
+            for s in exclude_sets:
+                base_query += f" -set:{s}"
+        
+        if scryfall_filter:
+            base_query += f" {scryfall_filter}"
+        
+        print(f"   Scryfall fallback query (excludes only, no not:covered): {base_query}")
+        try:
+            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': base_query})
+            if resp.status_code == 200:
+                results = resp.json().get('data', [])
+                if results:
+                    return results[0]
+        except Exception as e:
+            print(f"   Warning: Fallback query 2 failed: {e}", file=sys.stderr)
+    
+    # Fallback 3: Strip ALL filters
+    print(f"   Warning: Query found no matches. Stripping ALL set filters and retrying a broader Scryfall search.", file=sys.stderr)
+    simple_query = f'!"{card_name}"'
+    if set_code:
+        simple_query += f" set:{set_code}"
+    if collector_number:
+        simple_query += f" cn:{collector_number}"
+    if section.lower() in ['token', 'tokens']:
+        simple_query += " t:token"
+    
+    print(f"   Scryfall fallback query (no filters): {simple_query}")
+    try:
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': simple_query})
+        if resp.status_code == 200:
+            results = resp.json().get('data', [])
+            if results:
+                return results[0]
+    except Exception as e:
+        print(f"   Warning: Final fallback query failed: {e}", file=sys.stderr)
+    
+    return None
+
+def autofit_art_position(art_width, art_height, card_data):
+    """
+    Calculate optimal art position and zoom to fit within artBounds.
+    
+    Translated from Card Conjurer JavaScript autoFitArt() function.
+    
+    Args:
+        art_width: Width of the art image in pixels
+        art_height: Height of the art image in pixels
+        card_data: Card data dict containing width, height, artBounds, marginX, marginY
+        
+    Returns:
+        Dict with artX, artY, artZoom, artRotate (all normalized values for JSON)
+        Returns None if required data is missing
+    """
+    if not art_width or not art_height:
+        return None
+        
+    if 'artBounds' not in card_data:
+        return None
+    
+    try:
+        # Card dimensions
+        card_width = card_data.get('width', 2010)
+        card_height = card_data.get('height', 2814)
+        
+        # Art bounds (normalized 0-1)
+        bounds = card_data['artBounds']
+        bounds_x = bounds.get('x', 0)
+        bounds_y = bounds.get('y', 0)
+        bounds_w = bounds.get('width', 1)
+        bounds_h = bounds.get('height', 1)
+        
+        # Margins (normalized 0-1)
+        margin_x = card_data.get('marginX', 0)
+        margin_y = card_data.get('marginY', 0)
+        
+        # Scale functions (convert normalized to pixels)
+        def scale_x(val): return val * card_width
+        def scale_y(val): return val * card_height
+        def scale_w(val): return val * card_width
+        def scale_h(val): return val * card_height
+        
+        # Calculate aspect ratios
+        art_ratio = art_width / art_height
+        bounds_ratio = scale_w(bounds_w) / scale_h(bounds_h)
+        
+        # JavaScript logic:
+        # if (art.width / art.height > scaleWidth(card.artBounds.width) / scaleHeight(card.artBounds.height))
+        if art_ratio > bounds_ratio:
+            # Art is wider than bounds -> Fit to HEIGHT
+            # JS: document.querySelector('#art-y').value = Math.round(scaleY(card.artBounds.y) - scaleHeight(card.marginY));
+            art_y_pixels = round(scale_y(bounds_y) - scale_h(margin_y))
+            
+            # JS: document.querySelector('#art-zoom').value = (scaleHeight(card.artBounds.height) / art.height * 100).toFixed(1);
+            zoom = scale_h(bounds_h) / art_height
+            
+            # JS: document.querySelector('#art-x').value = Math.round(scaleX(card.artBounds.x) - (document.querySelector('#art-zoom').value / 100 * art.width - scaleWidth(card.artBounds.width)) / 2 - scaleWidth(card.marginX));
+            # Note: zoom input is percentage, so zoom/100 is the factor
+            scaled_art_width = zoom * art_width
+            art_x_pixels = round(scale_x(bounds_x) - (scaled_art_width - scale_w(bounds_w)) / 2 - scale_w(margin_x))
+        else:
+            # Art is taller/narrower than bounds -> Fit to WIDTH
+            # JS: document.querySelector('#art-x').value = Math.round(scaleX(card.artBounds.x) - scaleWidth(card.marginX));
+            art_x_pixels = round(scale_x(bounds_x) - scale_w(margin_x))
+            
+            # JS: document.querySelector('#art-zoom').value = (scaleWidth(card.artBounds.width) / art.width * 100).toFixed(1);
+            zoom = scale_w(bounds_w) / art_width
+            
+            # JS: document.querySelector('#art-y').value = Math.round(scaleY(card.artBounds.y) - (document.querySelector('#art-zoom').value / 100 * art.height - scaleHeight(card.artBounds.height)) / 2 - scaleHeight(card.marginY));
+            scaled_art_height = zoom * art_height
+            art_y_pixels = round(scale_y(bounds_y) - (scaled_art_height - scale_h(bounds_h)) / 2 - scale_h(margin_y))
+        
+        # Convert pixels back to normalized values for JSON
+        # Card Conjurer JSON stores normalized values (0-1)
+        return {
+            'artX': art_x_pixels / card_width,
+            'artY': art_y_pixels / card_height,
+            'artZoom': zoom,
+            'artRotate': 0
+        }
+        
+    except Exception as e:
+        print(f"   Warning: Autofit calculation failed: {e}", file=sys.stderr)
+        return None
 
 # ==============================================================================
 # Output File Saving

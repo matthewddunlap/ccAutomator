@@ -190,20 +190,44 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 
         return text
 
-    def generate_card(self, card_name, set_code=None, collector_number=None):
-        # ... (fetching data) ...
-        # 1. Get Scryfall Data
-        print(f"Fetching data for {card_name}...")
-        query = f'!"{card_name}"'
-        if set_code: query += f" set:{set_code}"
-        if collector_number: query += f" cn:{collector_number}"
+    def generate_card(self, card_name, section='deck', set_code=None, collector_number=None,
+                     scryfall_filter=None, spells_include_set=None, spells_exclude_set=None,
+                     basic_land_include_set=None, basic_land_exclude_set=None):
+        """
+        Generate a card JSON for Card Conjurer.
         
-        try:
-            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': query})
-            resp.raise_for_status()
-            data = resp.json()['data'][0]
-        except Exception as e:
-            print(f"Error fetching {card_name}: {e}")
+        Args:
+            card_name: Name of the card
+            section: Section type ('deck', 'land', 'token') for filtering
+            set_code: Optional specific set code
+            collector_number: Optional specific collector number
+            scryfall_filter: Additional Scryfall query filters
+            spells_include_set: Set whitelist for spells
+            spells_exclude_set: Set blacklist for spells
+            basic_land_include_set: Set whitelist for basic lands
+            basic_land_exclude_set: Set blacklist for basic lands
+        """
+        # 1. Get Scryfall Data with fallback logic
+        print(f"Fetching data for {card_name}...")
+        
+        # Use modular fallback function from automator_utils
+        from automator_utils import scryfall_query_with_fallback
+        import sys
+        
+        data = scryfall_query_with_fallback(
+            card_name=card_name,
+            section=section,
+            set_code=set_code,
+            collector_number=collector_number,
+            scryfall_filter=scryfall_filter,
+            spells_include_set=spells_include_set,
+            spells_exclude_set=spells_exclude_set,
+            basic_land_include_set=basic_land_include_set,
+            basic_land_exclude_set=basic_land_exclude_set
+        )
+        
+        if not data:
+            print(f"Error: Could not find '{card_name}' on Scryfall after all fallback attempts", file=sys.stderr)
             return None
 
         # 2. Prepare Art
@@ -357,9 +381,15 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         
         # Apply Autofit if dimensions available
         if art_width and art_height:
-            # Re-use autofit logic from land_generator
-            # ... (Implement autofit here) ...
-            pass
+            from automator_utils import autofit_art_position
+            
+            autofit_result = autofit_art_position(art_width, art_height, card_json['data'])
+            if autofit_result:
+                card_json['data']['artX'] = autofit_result['artX']
+                card_json['data']['artY'] = autofit_result['artY']
+                card_json['data']['artZoom'] = autofit_result['artZoom']
+                card_json['data']['artRotate'] = autofit_result['artRotate']
+                print(f"   Autofit applied: X={autofit_result['artX']:.4f}, Y={autofit_result['artY']:.4f}, Zoom={autofit_result['artZoom']:.4f}")
             
         return card_json
 
