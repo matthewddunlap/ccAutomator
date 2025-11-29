@@ -6,6 +6,14 @@ import requests
 from PIL import Image
 import io
 
+# Optional dependency for SVG parsing
+try:
+    from lxml import etree
+    HAS_LXML = True
+except ImportError:
+    HAS_LXML = False
+    etree = None
+
 # Basic Land Names
 BASIC_LAND_NAMES = {
     'Island', 'Forest', 'Mountain', 'Plains', 'Swamp',
@@ -499,6 +507,8 @@ def autofit_art_position(art_width, art_height, card_data):
         
         # Convert pixels back to normalized values for JSON
         # Card Conjurer JSON stores normalized values (0-1)
+        # Note: Card Conjurer JSON stores zoom as the UI percentage value / 100
+        # But based on testing, it seems to store the percentage value directly
         return {
             'artX': art_x_pixels / card_width,
             'artY': art_y_pixels / card_height,
@@ -508,6 +518,155 @@ def autofit_art_position(art_width, art_height, card_data):
         
     except Exception as e:
         print(f"   Warning: Autofit calculation failed: {e}", file=sys.stderr)
+        return None
+
+def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
+    """
+    Calculate optimal set symbol position and zoom based on SVG dimensions.
+    
+    Translated from Card Conjurer JavaScript resetSetSymbol() function.
+    
+    Args:
+        set_symbol_url: URL or path to the set symbol SVG
+        card_data: Card data dict containing width, height, setSymbolBounds, marginX, marginY
+        image_server_url: Base URL for fetching SVG (if set_symbol_url is relative)
+        
+    Returns:
+        Dict with setSymbolX, setSymbolY, setSymbolZoom (all normalized values for JSON)
+        Returns None if required data is missing or SVG cannot be fetched
+    """
+    import sys
+    
+    # Check if lxml is available
+    if not HAS_LXML:
+        print(f"   Warning: lxml not available, skipping set symbol autofit. Install lxml for automatic set symbol positioning.", file=sys.stderr)
+        return None
+    
+    if 'setSymbolBounds' not in card_data:
+        return None
+    
+    try:
+        # Fetch SVG to get dimensions
+        svg_url = set_symbol_url
+        if set_symbol_url.startswith('/') and image_server_url:
+            svg_url = f"{image_server_url.rstrip('/')}{set_symbol_url}"
+        
+        try:
+            resp = requests.get(svg_url, timeout=10)
+            resp.raise_for_status()
+            svg_content = resp.content
+        except Exception as e:
+            print(f"   Warning: Could not fetch set symbol SVG from {svg_url}: {e}", file=sys.stderr)
+            return None
+        
+        # Parse SVG to get dimensions
+        try:
+            parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+            svg_root = etree.fromstring(svg_content, parser=parser)
+            
+            viewbox = svg_root.get("viewBox")
+            width_str = svg_root.get("width")
+            height_str = svg_root.get("height")
+            
+            svg_width, svg_height = None, None
+            
+            # IMPORTANT: Prioritize explicit width/height attributes over viewBox
+            # This matches how browsers render SVGs and how Card Conjurer's JavaScript gets dimensions
+            if width_str and not width_str.endswith('%'):
+                import re
+                svg_width = float(re.sub(r'[^\d\.\-e]', '', width_str))
+            if height_str and not height_str.endswith('%'):
+                import re
+                svg_height = float(re.sub(r'[^\d\.\-e]', '', height_str))
+            
+            # Fallback to viewBox only if width/height not available
+            if (svg_width is None or svg_height is None) and viewbox:
+                import re
+                parts = [float(x) for x in re.split(r'[,\s]+', viewbox.strip())]
+                if len(parts) == 4:
+                    if svg_width is None:
+                        svg_width = parts[2]
+                    if svg_height is None:
+                        svg_height = parts[3]
+            
+            if not svg_width or not svg_height or svg_width <= 0 or svg_height <= 0:
+                print(f"   Warning: Could not parse valid SVG dimensions", file=sys.stderr)
+                return None
+                
+        except Exception as e:
+            print(f"   Warning: Could not parse SVG: {e}", file=sys.stderr)
+            return None
+        
+        # Card dimensions
+        card_width = card_data.get('width', 2010)
+        card_height = card_data.get('height', 2814)
+        
+        # Set symbol bounds (normalized 0-1)
+        bounds = card_data['setSymbolBounds']
+        bounds_x = bounds.get('x', 0)
+        bounds_y = bounds.get('y', 0)
+        bounds_w = bounds.get('width', 0.12)
+        bounds_h = bounds.get('height', 0.0372)
+        
+        # Margins (normalized 0-1)
+        margin_x = card_data.get('marginX', 0)
+        margin_y = card_data.get('marginY', 0)
+        
+        # Alignment
+        horizontal = bounds.get('horizontal', 'left')
+        vertical = bounds.get('vertical', 'top')
+        
+        # Scale functions
+        def scale_x(val): return val * card_width
+        def scale_y(val): return val * card_height
+        def scale_w(val): return val * card_width
+        def scale_h(val): return val * card_height
+        
+        # Calculate zoom (fit to bounds)
+        # JS: if (setSymbol.width / setSymbol.height > scaleWidth(card.setSymbolBounds.width) / scaleHeight(card.setSymbolBounds.height))
+        # Calculate zoom (fit to bounds)
+        # JS: if (setSymbol.width / setSymbol.height > scaleWidth(card.setSymbolBounds.width) / scaleHeight(card.setSymbolBounds.height))
+        symbol_ratio = svg_width / svg_height
+        bounds_ratio = scale_w(bounds_w) / scale_h(bounds_h)
+        
+        if symbol_ratio > bounds_ratio:
+            # Symbol is wider -> fit to width
+            zoom = scale_w(bounds_w) / svg_width
+        else:
+            # Symbol is taller -> fit to height
+            zoom = scale_h(bounds_h) / svg_height
+        
+        # Initial position (top-left of bounds)
+        symbol_x_pixels = round(scale_x(bounds_x))
+        symbol_y_pixels = round(scale_y(bounds_y))
+        
+        # Adjust for horizontal alignment
+        scaled_symbol_width = svg_width * zoom
+        if horizontal == 'center':
+            # JS: document.querySelector('#setSymbol-x').value = Math.round(scaleX(card.setSymbolBounds.x) - (setSymbol.width * setSymbolZoom / 100) / 2 - scaleWidth(card.marginX));
+            symbol_x_pixels = round(scale_x(bounds_x) - scaled_symbol_width / 2 - scale_w(margin_x))
+        elif horizontal == 'right':
+            # JS: document.querySelector('#setSymbol-x').value = Math.round(scaleX(card.setSymbolBounds.x) - (setSymbol.width * setSymbolZoom / 100) - scaleWidth(card.marginX));
+            symbol_x_pixels = round(scale_x(bounds_x) - scaled_symbol_width - scale_w(margin_x))
+        
+        # Adjust for vertical alignment
+        scaled_symbol_height = svg_height * zoom
+        if vertical == 'center':
+            # JS: document.querySelector('#setSymbol-y').value = Math.round(scaleY(card.setSymbolBounds.y) - (setSymbol.height * setSymbolZoom / 100) / 2 - scaleHeight(card.marginY));
+            symbol_y_pixels = round(scale_y(bounds_y) - scaled_symbol_height / 2 - scale_h(margin_y))
+        elif vertical == 'bottom':
+            # JS: document.querySelector('#setSymbol-y').value = Math.round(scaleY(card.setSymbolBounds.y) - (setSymbol.height * setSymbolZoom / 100) - scaleHeight(card.marginY));
+            symbol_y_pixels = round(scale_y(bounds_y) - scaled_symbol_height - scale_h(margin_y))
+        
+        # Convert to normalized values for JSON
+        return {
+            'setSymbolX': symbol_x_pixels / card_width,
+            'setSymbolY': symbol_y_pixels / card_height,
+            'setSymbolZoom': zoom
+        }
+        
+    except Exception as e:
+        print(f"   Warning: Set symbol autofit failed: {e}", file=sys.stderr)
         return None
 
 # ==============================================================================

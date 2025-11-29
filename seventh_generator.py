@@ -390,6 +390,16 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 card_json['data']['artZoom'] = autofit_result['artZoom']
                 card_json['data']['artRotate'] = autofit_result['artRotate']
                 print(f"   Autofit applied: X={autofit_result['artX']:.4f}, Y={autofit_result['artY']:.4f}, Zoom={autofit_result['artZoom']:.4f}")
+        
+        # Apply set symbol autofit
+        from automator_utils import autofit_set_symbol
+        
+        set_symbol_result = autofit_set_symbol(set_symbol_url, card_json['data'], self.image_server_url)
+        if set_symbol_result:
+            card_json['data']['setSymbolX'] = set_symbol_result['setSymbolX']
+            card_json['data']['setSymbolY'] = set_symbol_result['setSymbolY']
+            card_json['data']['setSymbolZoom'] = set_symbol_result['setSymbolZoom']
+            print(f"   Set symbol autofit: X={set_symbol_result['setSymbolX']:.4f}, Y={set_symbol_result['setSymbolY']:.4f}, Zoom={set_symbol_result['setSymbolZoom']:.4f}")
             
         return card_json
 
