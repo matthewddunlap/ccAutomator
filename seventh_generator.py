@@ -221,7 +221,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         # 4. Set Symbol
         rarity_map = {'common': 'c', 'uncommon': 'u', 'rare': 'r', 'mythic': 'm', 'special': 'r', 'bonus': 'm'}
         rarity_code = rarity_map.get(data['rarity'], 'c')
-        set_symbol_url = f"{self.image_server_url}/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
+        set_symbol_url = f"/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
         
         # 5. Text Processing
         title = data['name']
