@@ -310,6 +310,9 @@ class TextMixin:
                     # Calculate Excess
                     excess = max(0, char_count - threshold)
                     
+                    # Initialize final_type_fs with current setting
+                    final_type_fs = self.type_font_size
+
                     if excess > 0:
                         # Step 1: Reduce Kerning (down to min 1)
                         available_k_drop = max(0, k - 1)
@@ -330,16 +333,6 @@ class TextMixin:
                         if final_f != f:
                             final_type_fs = final_f
                             print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
-                    else:
-                        # We need to prepend this tag to the text.
-                        # Since _apply_text_mods replaces the whole text, we can't easily prepend 
-                        # without modifying _apply_text_mods or doing it manually here.
-                        
-                        # Actually, _apply_text_mods takes `font_size`.
-                        # If we pass `remaining_boost` (e.g. -2) as `font_size`, 
-                        # it will create `{fontsize-2}`.
-                        # This works perfectly!
-                        final_type_fs = remaining_boost
                         
             except Exception as e:
                 print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
