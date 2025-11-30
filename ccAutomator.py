@@ -545,7 +545,22 @@ def main():
                         spells_include_set=spells_include,
                         spells_exclude_set=spells_exclude,
                         basic_land_include_set=land_include,
-                        basic_land_exclude_set=land_exclude
+                        basic_land_exclude_set=land_exclude,
+                        # Text modifications
+                        title_font_size=args.title_font_size,
+                        title_shadow=args.title_shadow,
+                        title_kerning=args.title_kerning,
+                        title_left=args.title_left,
+                        title_up=args.title_up,
+                        type_font_size=args.type_font_size,
+                        type_shadow=args.type_shadow,
+                        type_kerning=args.type_kerning,
+                        type_left=args.type_left,
+                        pt_font_size=args.pt_font_size,
+                        pt_shadow=args.pt_shadow,
+                        pt_kerning=args.pt_kerning,
+                        pt_up=args.pt_up,
+                        pt_bold=args.pt_bold
                     )
                     
                     if card_json:

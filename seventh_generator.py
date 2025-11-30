@@ -10,7 +10,8 @@ from pathlib import Path
 from automator_utils import (
     generate_safe_filename,
     get_image_mime_type_and_extension,
-    DEFAULT_UPSCALER_MODEL
+    DEFAULT_UPSCALER_MODEL,
+    scryfall_query_with_fallback
 )
 # Add parent directory to path to import mixins
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -192,27 +193,16 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
 
     def generate_card(self, card_name, section='deck', set_code=None, collector_number=None,
                      scryfall_filter=None, spells_include_set=None, spells_exclude_set=None,
-                     basic_land_include_set=None, basic_land_exclude_set=None):
+                     basic_land_include_set=None, basic_land_exclude_set=None,
+                     # Text modifications
+                     title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
+                     type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                     pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False):
         """
-        Generate a card JSON for Card Conjurer.
-        
-        Args:
-            card_name: Name of the card
-            section: Section type ('deck', 'land', 'token') for filtering
-            set_code: Optional specific set code
-            collector_number: Optional specific collector number
-            scryfall_filter: Additional Scryfall query filters
-            spells_include_set: Set whitelist for spells
-            spells_exclude_set: Set blacklist for spells
-            basic_land_include_set: Set whitelist for basic lands
-            basic_land_exclude_set: Set blacklist for basic lands
+        Generates a single card JSON object.
         """
         # 1. Get Scryfall Data with fallback logic
         print(f"Fetching data for {card_name}...")
-        
-        # Use modular fallback function from automator_utils
-        from automator_utils import scryfall_query_with_fallback
-        import sys
         
         data = scryfall_query_with_fallback(
             card_name=card_name,
@@ -251,6 +241,25 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         title = data['name']
         type_line = data['type_line']
         
+        # Apply Title Mods
+        title_mods = ""
+        if title_font_size: title_mods += f"{{fontsize{title_font_size}}}"
+        if title_shadow: title_mods += f"{{shadow{title_shadow}}}"
+        if title_kerning: title_mods += f"{{kerning{title_kerning}}}"
+        if title_left: title_mods += f"{{left{title_left}}}"
+        if title_up: title_mods += f"{{up{title_up}}}"
+        if title_mods:
+            title = f"{title_mods}{title}"
+            
+        # Apply Type Mods
+        type_mods = ""
+        if type_font_size: type_mods += f"{{fontsize{type_font_size}}}"
+        if type_shadow: type_mods += f"{{shadow{type_shadow}}}"
+        if type_kerning: type_mods += f"{{kerning{type_kerning}}}"
+        if type_left: type_mods += f"{{left{type_left}}}"
+        if type_mods:
+            type_line = f"{type_mods}{type_line}"
+        
         oracle_text = data.get('oracle_text', '')
         flavor_text = data.get('flavor_text', '')
         
@@ -269,6 +278,18 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         pt = ""
         if 'power' in data and 'toughness' in data:
             pt = f"{data['power']}/{data['toughness']}"
+            
+            # Apply P/T Mods
+            pt_mods = ""
+            if pt_bold: pt_mods += "{bold}"
+            if pt_font_size: pt_mods += f"{{fontsize{pt_font_size}}}"
+            if pt_shadow: pt_mods += f"{{shadow{pt_shadow}}}"
+            if pt_kerning: pt_mods += f"{{kerning{pt_kerning}}}"
+            if pt_up: pt_mods += f"{{up{pt_up}}}"
+            
+            if pt_mods:
+                pt = f"{pt_mods}{pt}"
+                if pt_bold: pt += "{/bold}"
             
         # 6. Construct JSON
         card_json = {
