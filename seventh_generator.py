@@ -155,7 +155,13 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 if isinstance(item, tuple):
                     name, src, mask_name = item
                     if mask_name == 'Border':
-                        new_layers.append(('White Border', '/img/frames/white.png', 'Border'))
+                        # Match reference structure: use dict with noDefaultMask
+                        new_layers.append({
+                            "name": "White Border",
+                            "src": "/img/frames/white.png",
+                            "masks": [{"src": "/img/frames/seventh/regular/border.svg", "name": "Border"}],
+                            "noDefaultMask": True
+                        })
                     else:
                         new_layers.append(item)
                 else:
@@ -452,7 +458,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 card_json['data']['artY'] = autofit_result['artY']
                 card_json['data']['artZoom'] = autofit_result['artZoom']
                 card_json['data']['artRotate'] = autofit_result['artRotate']
-                print(f"   Autofit applied: X={autofit_result['artX']:.4f}, Y={autofit_result['artY']:.4f}, Zoom={autofit_result['artZoom']:.4f}")
+                print(f"   Art Autofit applied: X={autofit_result['artX']:.4f}, Y={autofit_result['artY']:.4f}, Zoom={autofit_result['artZoom']:.4f}")
         
         # Apply set symbol autofit
         from automator_utils import autofit_set_symbol
