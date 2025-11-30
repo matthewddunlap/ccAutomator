@@ -2,6 +2,7 @@ import json
 import os
 import re
 import sys
+import math
 from unittest.mock import MagicMock
 sys.modules['gradio_client'] = MagicMock()
 
@@ -42,7 +43,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         self.art_path = art_path
         self.app_url = None  # No Selenium app URL in JSON mode, prevents art URL trimming
         
-    def determine_frame_layers(self, scryfall_data):
+    def determine_frame_layers(self, scryfall_data, white_border=False):
         layers = []
         
         # Extract attributes
@@ -147,6 +148,20 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             for mask in ['Pinline', 'Rules', 'Frame', 'Textbox Pinline', 'Border']:
                 layers.append((FRAME_NAMES.get(code, f'{code.upper()} Frame'), f'regular/{code}.png', mask))
 
+        # Apply White Border if requested
+        if white_border:
+            new_layers = []
+            for item in layers:
+                if isinstance(item, tuple):
+                    name, src, mask_name = item
+                    if mask_name == 'Border':
+                        new_layers.append(('White Border', '/img/frames/white.png', 'Border'))
+                    else:
+                        new_layers.append(item)
+                else:
+                    new_layers.append(item)
+            layers = new_layers
+
         # Convert to final JSON structure
         final_frames = []
         for item in layers:
@@ -197,7 +212,8 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                      # Text modifications
                      title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                      type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                     pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False):
+                     pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False,
+                     white_border=False, auto_fit_type=False):
         """
         Generates a single card JSON object.
         """
@@ -219,7 +235,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         if not data:
             print(f"Error: Could not find '{card_name}' on Scryfall after all fallback attempts", file=sys.stderr)
             return None
-
+            
         # 2. Prepare Art
         print(f"Processing art for {card_name}...")
         final_art_url, _, art_width, art_height = self._prepare_art_asset(
@@ -230,7 +246,10 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         )
         
         # 3. Determine Frames
-        frames = self.determine_frame_layers(data)
+        # We need to map colors/type to frame images.
+        # We can use the logic from analyze_seventh_frames.py or similar.
+        
+        frames = self.determine_frame_layers(data, white_border=white_border)
         
         # 4. Set Symbol
         rarity_map = {'common': 'c', 'uncommon': 'u', 'rare': 'r', 'mythic': 'm', 'special': 'r', 'bonus': 'm'}
@@ -240,6 +259,29 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         # 5. Text Processing
         title = data['name']
         type_line = data['type_line']
+        
+        # Auto-Fit Type Logic
+        if auto_fit_type:
+            char_count = len(type_line)
+            
+            k = type_kerning if type_kerning is not None else 0
+            f = type_font_size if type_font_size is not None else 0
+            
+            # Threshold calculation from TextMixin
+            threshold = 34 - k - math.floor(f * 0.3)
+            excess = max(0, char_count - threshold)
+            
+            if excess > 0:
+                available_k_drop = max(0, k - 1)
+                k_drop = min(excess, available_k_drop)
+                
+                type_kerning = k - k_drop
+                remaining_excess = excess - k_drop
+                
+                f_drop = math.ceil(remaining_excess * 2.5)
+                type_font_size = f - f_drop
+                
+                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Adjusted Type: Kerning {k}->{type_kerning}, Size {f}->{type_font_size}")
         
         # Apply Title Mods
         title_mods = ""

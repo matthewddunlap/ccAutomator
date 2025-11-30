@@ -560,7 +560,9 @@ def main():
                         pt_shadow=args.pt_shadow,
                         pt_kerning=args.pt_kerning,
                         pt_up=args.pt_up,
-                        pt_bold=args.pt_bold
+                        pt_bold=args.pt_bold,
+                        white_border=args.white_border,
+                        auto_fit_type=args.auto_fit_type
                     )
                     
                     if card_json:
@@ -853,7 +855,8 @@ def main():
                 
                 prime_card_names_ccfile = []
                 if args.prime_file:
-                    prime_card_names_ccfile = parse_card_file(args.prime_file)
+                    prime_cards = parse_card_file(args.prime_file)
+                    prime_card_names_ccfile = [c['name'] for c in prime_cards]
 
                 # Render
                 automator.render_project_file(args.input_file, frame_name=args.frame, prime_card_names=prime_card_names_ccfile)
