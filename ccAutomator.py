@@ -88,6 +88,10 @@ def main():
         '--frame',
         help="The name of the frame to select from the dropdown (e.g., 'Seventh'). Required for 'selenium' and 'cc-file' modes."
     )
+    parser.add_argument(
+        '--prime-frame',
+        help="The name of the frame to select ONLY during priming (e.g., 'Seventh'). Useful for cc-file mode where main frame is baked in."
+    )
 
     # --- START OF MODIFIED ARGUMENTS ---
     # Legacy arguments (mutually exclusive with granular arguments)
@@ -859,7 +863,12 @@ def main():
                     prime_card_names_ccfile = [c['name'] for c in prime_cards]
 
                 # Render
-                automator.render_project_file(args.input_file, frame_name=args.frame, prime_card_names=prime_card_names_ccfile)
+                automator.render_project_file(
+                    args.input_file, 
+                    frame_name=args.frame, 
+                    prime_card_names=prime_card_names_ccfile,
+                    prime_frame_name=args.prime_frame
+                )
 
             if args.save_cc_file and args.card_builder == 'selenium':
                 # In JSON mode, we already generated the file, but maybe the user wants the *final* state

@@ -803,7 +803,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         except Exception as e:
             print(f"   Error during priming with '{card_name}': {e}", file=sys.stderr)
 
-    def render_project_file(self, project_file_path, frame_name, prime_card_names=None):
+    def render_project_file(self, project_file_path, frame_name=None, prime_card_names=None, prime_frame_name=None):
         """
         Uploads a .cardconjurer project file and iterates through the saved cards to capture them.
         """
@@ -822,6 +822,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             print("   Uploaded project file.")
             
+            # --- NEW: Parse the project file to get metadata ---
+            card_metadata_list = []
             # --- NEW: Parse the project file to get metadata ---
             card_metadata_list = []
             try:
@@ -858,11 +860,25 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             # 4. Prime the renderer if requested
             if prime_card_names:
+                # Apply Prime Frame if specified
+                if prime_frame_name:
+                    print(f"   Setting prime frame to '{prime_frame_name}'...")
+                    self.set_frame(prime_frame_name, wait=True)
+                
                 print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
                 for i, card_name in enumerate(prime_card_names):
                     print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
                     self._prime_via_scryfall(card_name)
                 print("--- Renderer Priming Complete ---\n")
+                
+                # Revert Frame if prime frame was used
+                if prime_frame_name:
+                    if frame_name:
+                        print(f"   Reverting frame to '{frame_name}'...")
+                        self.set_frame(frame_name, wait=True)
+                    else:
+                        print("   Disabling frame after priming...")
+                        self.set_frame("false", wait=True)
                 
                 # After priming, we need to ensure we are back on the Import/Save tab
                 # and looking at the project file's saved cards.
