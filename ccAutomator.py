@@ -390,6 +390,9 @@ def main():
         help="Overwrite if the server file is NEWER than the given timestamp (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h)."
     )
 
+    # New arguments added here
+    parser.add_argument('--flavor-font-size', type=int, help='Font size for flavor text')
+
     # --- Land Generation Arguments ---
     parser.add_argument('--generate-lands', action='store_true', help="Generate full-art basic lands from a template.")
     parser.add_argument('--land-types', type=str, help="Comma-separated list of land types (e.g., 'Mountain,Island') for generation.")
@@ -565,6 +568,7 @@ def main():
                         pt_kerning=args.pt_kerning,
                         pt_up=args.pt_up,
                         pt_bold=args.pt_bold,
+                        flavor_font_size=args.flavor_font_size,
                         white_border=args.white_border,
                         auto_fit_type=args.auto_fit_type
                     )

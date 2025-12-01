@@ -551,14 +551,22 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
         if set_symbol_url.startswith('/') and image_server_url:
             svg_url = f"{image_server_url.rstrip('/')}{set_symbol_url}"
         
-        try:
-            resp = requests.get(svg_url, timeout=10)
-            resp.raise_for_status()
-            svg_content = resp.content
-        except Exception as e:
-            print(f"   Warning: Could not fetch set symbol SVG from {svg_url}: {e}", file=sys.stderr)
-            return None
+        svg_content = None
+        for attempt in range(3):
+            try:
+                resp = requests.get(svg_url, timeout=10)
+                resp.raise_for_status()
+                svg_content = resp.content
+                break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"   Warning: Could not fetch set symbol SVG from {svg_url} after 3 attempts: {e}", file=sys.stderr)
+                    return None
+                time.sleep(1)
         
+        if not svg_content:
+            return None
+            
         # Parse SVG to get dimensions
         try:
             parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
@@ -572,12 +580,42 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
             
             # IMPORTANT: Prioritize explicit width/height attributes over viewBox
             # This matches how browsers render SVGs and how Card Conjurer's JavaScript gets dimensions
-            if width_str and not width_str.endswith('%'):
+            
+            def parse_dimension(dim_str):
+                if not dim_str or dim_str.endswith('%'):
+                    return None
+                
+                # Normalize
+                dim_str = dim_str.strip().lower()
+                
+                # Extract value and unit
                 import re
-                svg_width = float(re.sub(r'[^\d\.\-e]', '', width_str))
-            if height_str and not height_str.endswith('%'):
-                import re
-                svg_height = float(re.sub(r'[^\d\.\-e]', '', height_str))
+                match = re.match(r'^([\d\.\-e]+)([a-z]*)$', dim_str)
+                if not match:
+                    return None
+                    
+                value = float(match.group(1))
+                unit = match.group(2)
+                
+                # Convert to pixels (assuming 96 DPI)
+                if unit == 'mm':
+                    return value * 3.7795
+                elif unit == 'cm':
+                    return value * 37.795
+                elif unit == 'in':
+                    return value * 96.0
+                elif unit == 'pt':
+                    return value * 1.3333
+                elif unit == 'pc':
+                    return value * 16.0
+                else:
+                    # 'px' or no unit
+                    return value
+
+            if width_str:
+                svg_width = parse_dimension(width_str)
+            if height_str:
+                svg_height = parse_dimension(height_str)
             
             # Fallback to viewBox only if width/height not available
             if (svg_width is None or svg_height is None) and viewbox:
@@ -590,9 +628,11 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
                         svg_height = parts[3]
             
             if not svg_width or not svg_height or svg_width <= 0 or svg_height <= 0:
-                print(f"   Warning: Could not parse valid SVG dimensions", file=sys.stderr)
+                print(f"   Warning: Could not parse valid SVG dimensions (W={svg_width}, H={svg_height})", file=sys.stderr)
                 return None
-                
+            
+            # print(f"   [Debug] Parsed SVG dimensions: {svg_width}x{svg_height}")
+                 
         except Exception as e:
             print(f"   Warning: Could not parse SVG: {e}", file=sys.stderr)
             return None

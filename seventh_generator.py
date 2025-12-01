@@ -150,23 +150,13 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
 
         # Apply White Border if requested
         if white_border:
-            new_layers = []
-            for item in layers:
-                if isinstance(item, tuple):
-                    name, src, mask_name = item
-                    if mask_name == 'Border':
-                        # Match reference structure: use dict with noDefaultMask
-                        new_layers.append({
-                            "name": "White Border",
-                            "src": "/img/frames/white.png",
-                            "masks": [{"src": "/img/frames/seventh/regular/border.svg", "name": "Border"}],
-                            "noDefaultMask": True
-                        })
-                    else:
-                        new_layers.append(item)
-                else:
-                    new_layers.append(item)
-            layers = new_layers
+            wb_layer = {
+                "name": "White Border",
+                "src": "/img/frames/white.png",
+                "masks": [{"src": "/img/frames/seventh/regular/border.svg", "name": "Border"}],
+                "noDefaultMask": True
+            }
+            layers.insert(0, wb_layer)
 
         # Convert to final JSON structure
         final_frames = []
@@ -208,7 +198,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         text = text.replace("'", "'")
         
         # Convert all newlines to {lns} (applies to both oracle and flavor text)
-        text = text.replace('\n', '{lns}')
+        # text = text.replace('\n', '{lns}')
                 
         return text
 
@@ -219,6 +209,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                      title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                      type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                      pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False,
+                     flavor_font_size=None,
                      white_border=False, auto_fit_type=False):
         """
         Generates a single card JSON object.
@@ -317,7 +308,9 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         full_text = self._format_text(oracle_text, is_basic_land=is_basic)
         if flavor_text:
             formatted_flavor = self._format_text(flavor_text, is_flavor=True)
-            full_text += f"{{flavor}}{formatted_flavor}"
+            flavor_mods = ""
+            if flavor_font_size: flavor_mods += f"{{fontsize{flavor_font_size}}}"
+            full_text += f"{{flavor}}{flavor_mods}{formatted_flavor}"
             
         # Mana Cost
         mana_cost = data.get('mana_cost', '')
@@ -469,6 +462,8 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             card_json['data']['setSymbolY'] = set_symbol_result['setSymbolY']
             card_json['data']['setSymbolZoom'] = set_symbol_result['setSymbolZoom']
             print(f"   Set symbol autofit: X={set_symbol_result['setSymbolX']:.4f}, Y={set_symbol_result['setSymbolY']:.4f}, Zoom={set_symbol_result['setSymbolZoom']:.4f}")
+        else:
+            print(f"   Warning: Set symbol autofit failed for {set_symbol_url}. Using defaults.", file=sys.stderr)
             
         return card_json
 
