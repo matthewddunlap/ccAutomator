@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import requests
 from PIL import Image
 import io
+import time
 
 # Optional dependency for SVG parsing
 try:
@@ -552,17 +553,31 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
             svg_url = f"{image_server_url.rstrip('/')}{set_symbol_url}"
         
         svg_content = None
-        for attempt in range(3):
+        
+        # Handle Data URI
+        if svg_url.startswith('data:image/svg+xml;base64,'):
             try:
-                resp = requests.get(svg_url, timeout=10)
-                resp.raise_for_status()
-                svg_content = resp.content
-                break
+                import base64
+                b64_data = svg_url.split(',', 1)[1]
+                svg_content = base64.b64decode(b64_data)
             except Exception as e:
-                if attempt == 2:
-                    print(f"   Warning: Could not fetch set symbol SVG from {svg_url} after 3 attempts: {e}", file=sys.stderr)
-                    return None
-                time.sleep(1)
+                display_url = svg_url if len(svg_url) < 100 else svg_url[:97] + "..."
+                print(f"   Warning: Failed to decode Data URI for set symbol: {e}", file=sys.stderr)
+                return None
+        else:
+            # Fetch from URL
+            for attempt in range(3):
+                try:
+                    resp = requests.get(svg_url, timeout=10)
+                    resp.raise_for_status()
+                    svg_content = resp.content
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        display_url = svg_url if len(svg_url) < 100 else svg_url[:97] + "..."
+                        print(f"   Warning: Failed to fetch set symbol SVG from {display_url}: {e}", file=sys.stderr)
+                        return None
+                    time.sleep(1)
         
         if not svg_content:
             return None
@@ -708,6 +723,59 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
     except Exception as e:
         print(f"   Warning: Set symbol autofit failed: {e}", file=sys.stderr)
         return None
+
+def fetch_and_fix_svg_source(url: str) -> str:
+    """
+    Fetches an SVG from the given URL.
+    If the SVG has percentage dimensions (e.g. width="100%"), it replaces them with
+    the viewBox dimensions (in pixels) and returns a Data URI.
+    Otherwise, returns the original URL.
+    """
+    if not HAS_LXML:
+        return url
+        
+    try:
+        # Fetch SVG
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return url
+            
+        content = resp.content
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+        svg_root = etree.fromstring(content, parser=parser)
+        
+        width = svg_root.get("width")
+        height = svg_root.get("height")
+        viewbox = svg_root.get("viewBox")
+        
+        needs_fix = False
+        if width and '%' in width: needs_fix = True
+        if height and '%' in height: needs_fix = True
+        
+        if needs_fix and viewbox:
+            # Extract dimensions from viewBox
+            import re
+            parts = [x for x in re.split(r'[,\s]+', viewbox.strip()) if x]
+            if len(parts) == 4:
+                vb_width = parts[2]
+                vb_height = parts[3]
+                
+                # print(f"   [Fix] Replacing percentage dimensions with {vb_width}x{vb_height} for {url}")
+                svg_root.set("width", vb_width)
+                svg_root.set("height", vb_height)
+                
+                # Serialize back to string
+                fixed_content = etree.tostring(svg_root, encoding='utf-8')
+                
+                # Convert to Data URI
+                import base64
+                b64 = base64.b64encode(fixed_content).decode('utf-8')
+                return f"data:image/svg+xml;base64,{b64}"
+                
+    except Exception as e:
+        print(f"   Warning: Failed to fix SVG source: {e}", file=sys.stderr)
+        
+    return url
 
 # ==============================================================================
 # Output File Saving

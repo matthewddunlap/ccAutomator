@@ -570,7 +570,8 @@ def main():
                         pt_bold=args.pt_bold,
                         flavor_font_size=args.flavor_font_size,
                         white_border=args.white_border,
-                        auto_fit_type=args.auto_fit_type
+                        auto_fit_type=args.auto_fit_type,
+                        image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242"
                     )
                     
                     if card_json:

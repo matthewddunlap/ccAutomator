@@ -210,7 +210,8 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                      type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                      pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False,
                      flavor_font_size=None,
-                     white_border=False, auto_fit_type=False):
+                     white_border=False, auto_fit_type=False,
+                     image_server_url=None):
         """
         Generates a single card JSON object.
         """
@@ -251,7 +252,16 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         # 4. Set Symbol
         rarity_map = {'common': 'c', 'uncommon': 'u', 'rare': 'r', 'mythic': 'm', 'special': 'r', 'bonus': 'm'}
         rarity_code = rarity_map.get(data['rarity'], 'c')
-        set_symbol_url = f"/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
+        # 4. Set Symbol
+        # Use absolute URL if image_server_url is available
+        if image_server_url:
+            set_symbol_url = f"{image_server_url}/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
+        else:
+            set_symbol_url = f"/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
+            
+        # Fix SVG if it has percentage dimensions (returns Data URI if fixed, else original URL)
+        from automator_utils import fetch_and_fix_svg_source
+        set_symbol_url = fetch_and_fix_svg_source(set_symbol_url)
         
         # 5. Text Processing
         title = data['name']
@@ -463,7 +473,8 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             card_json['data']['setSymbolZoom'] = set_symbol_result['setSymbolZoom']
             print(f"   Set symbol autofit: X={set_symbol_result['setSymbolX']:.4f}, Y={set_symbol_result['setSymbolY']:.4f}, Zoom={set_symbol_result['setSymbolZoom']:.4f}")
         else:
-            print(f"   Warning: Set symbol autofit failed for {set_symbol_url}. Using defaults.", file=sys.stderr)
+            display_url = set_symbol_url if len(set_symbol_url) < 100 else set_symbol_url[:97] + "..."
+            print(f"   Warning: Set symbol autofit failed for {display_url}. Using defaults.", file=sys.stderr)
             
         return card_json
 
