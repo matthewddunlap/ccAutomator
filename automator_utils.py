@@ -6,6 +6,7 @@ import requests
 from PIL import Image
 import io
 import time
+import sys
 
 # Optional dependency for SVG parsing
 try:
@@ -582,75 +583,88 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
         if not svg_content:
             return None
             
-        # Parse SVG to get dimensions
-        try:
-            parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
-            svg_root = etree.fromstring(svg_content, parser=parser)
-            
-            viewbox = svg_root.get("viewBox")
-            width_str = svg_root.get("width")
-            height_str = svg_root.get("height")
-            
-            svg_width, svg_height = None, None
-            
-            # IMPORTANT: Prioritize explicit width/height attributes over viewBox
-            # This matches how browsers render SVGs and how Card Conjurer's JavaScript gets dimensions
-            
-            def parse_dimension(dim_str):
-                if not dim_str or dim_str.endswith('%'):
-                    return None
-                
-                # Normalize
-                dim_str = dim_str.strip().lower()
-                
-                # Extract value and unit
-                import re
-                match = re.match(r'^([\d\.\-e]+)([a-z]*)$', dim_str)
-                if not match:
-                    return None
-                    
-                value = float(match.group(1))
-                unit = match.group(2)
-                
-                # Convert to pixels (assuming 96 DPI)
-                if unit == 'mm':
-                    return value * 3.7795
-                elif unit == 'cm':
-                    return value * 37.795
-                elif unit == 'in':
-                    return value * 96.0
-                elif unit == 'pt':
-                    return value * 1.3333
-                elif unit == 'pc':
-                    return value * 16.0
-                else:
-                    # 'px' or no unit
-                    return value
-
-            if width_str:
-                svg_width = parse_dimension(width_str)
-            if height_str:
-                svg_height = parse_dimension(height_str)
-            
-            # Fallback to viewBox only if width/height not available
-            if (svg_width is None or svg_height is None) and viewbox:
-                import re
-                parts = [float(x) for x in re.split(r'[,\s]+', viewbox.strip())]
-                if len(parts) == 4:
-                    if svg_width is None:
-                        svg_width = parts[2]
-                    if svg_height is None:
-                        svg_height = parts[3]
-            
-            if not svg_width or not svg_height or svg_width <= 0 or svg_height <= 0:
-                print(f"   Warning: Could not parse valid SVG dimensions (W={svg_width}, H={svg_height})", file=sys.stderr)
+        # Parse dimensions based on file type
+        svg_width, svg_height = None, None
+        
+        # Check if it's a PNG (based on extension or content header if available)
+        is_png = svg_url.lower().endswith('.png')
+        
+        if is_png:
+            try:
+                img = Image.open(io.BytesIO(svg_content))
+                svg_width, svg_height = img.size
+                # print(f"   [Debug] Parsed PNG dimensions: {svg_width}x{svg_height}")
+            except Exception as e:
+                print(f"   Warning: Could not parse PNG: {e}", file=sys.stderr)
                 return None
-            
-            # print(f"   [Debug] Parsed SVG dimensions: {svg_width}x{svg_height}")
-                 
-        except Exception as e:
-            print(f"   Warning: Could not parse SVG: {e}", file=sys.stderr)
-            return None
+        else:
+            # Assume SVG
+            try:
+                parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+                svg_root = etree.fromstring(svg_content, parser=parser)
+                
+                viewbox = svg_root.get("viewBox")
+                width_str = svg_root.get("width")
+                height_str = svg_root.get("height")
+                
+                # IMPORTANT: Prioritize explicit width/height attributes over viewBox
+                # This matches how browsers render SVGs and how Card Conjurer's JavaScript gets dimensions
+                
+                def parse_dimension(dim_str):
+                    if not dim_str or dim_str.endswith('%'):
+                        return None
+                    
+                    # Normalize
+                    dim_str = dim_str.strip().lower()
+                    
+                    # Extract value and unit
+                    import re
+                    match = re.match(r'^([\d\.\-e]+)([a-z]*)$', dim_str)
+                    if not match:
+                        return None
+                        
+                    value = float(match.group(1))
+                    unit = match.group(2)
+                    
+                    # Convert to pixels (assuming 96 DPI)
+                    if unit == 'mm':
+                        return value * 3.7795
+                    elif unit == 'cm':
+                        return value * 37.795
+                    elif unit == 'in':
+                        return value * 96.0
+                    elif unit == 'pt':
+                        return value * 1.3333
+                    elif unit == 'pc':
+                        return value * 16.0
+                    else:
+                        # 'px' or no unit
+                        return value
+
+                if width_str:
+                    svg_width = parse_dimension(width_str)
+                if height_str:
+                    svg_height = parse_dimension(height_str)
+                
+                # Fallback to viewBox only if width/height not available
+                if (svg_width is None or svg_height is None) and viewbox:
+                    import re
+                    parts = [float(x) for x in re.split(r'[,\s]+', viewbox.strip())]
+                    if len(parts) == 4:
+                        if svg_width is None:
+                            svg_width = parts[2]
+                        if svg_height is None:
+                            svg_height = parts[3]
+                
+                if not svg_width or not svg_height or svg_width <= 0 or svg_height <= 0:
+                    print(f"   Warning: Could not parse valid SVG dimensions (W={svg_width}, H={svg_height})", file=sys.stderr)
+                    return None
+                
+                # print(f"   [Debug] Parsed SVG dimensions: {svg_width}x{svg_height}")
+                     
+            except Exception as e:
+                print(f"   Warning: Could not parse SVG: {e}", file=sys.stderr)
+                return None
         
         # Card dimensions
         card_width = card_data.get('width', 2010)
@@ -734,6 +748,10 @@ def fetch_and_fix_svg_source(url: str) -> str:
     if not HAS_LXML:
         return url
         
+    # Ignore PNGs
+    if url.lower().endswith('.png'):
+        return url
+        
     try:
         # Fetch SVG
         resp = requests.get(url, timeout=10)
@@ -743,6 +761,9 @@ def fetch_and_fix_svg_source(url: str) -> str:
         content = resp.content
         parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
         svg_root = etree.fromstring(content, parser=parser)
+        
+        if svg_root is None:
+            return url
         
         width = svg_root.get("width")
         height = svg_root.get("height")

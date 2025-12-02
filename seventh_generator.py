@@ -255,11 +255,30 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         # 4. Set Symbol
         # Use absolute URL if image_server_url is available
         if image_server_url:
-            set_symbol_url = f"{image_server_url}/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
+            base_url = f"{image_server_url}/img/setSymbols/official/{data['set']}-{rarity_code}"
+            svg_url = f"{base_url}.svg"
+            png_url = f"{base_url}.png"
+            
+            set_symbol_url = svg_url
+            
+            # Check if SVG exists, if not try PNG
+            try:
+                # Use a short timeout for the check
+                resp = requests.head(svg_url, timeout=2)
+                if resp.status_code == 404:
+                    # SVG not found, try PNG
+                    resp_png = requests.head(png_url, timeout=2)
+                    if resp_png.status_code == 200:
+                        set_symbol_url = png_url
+                        # print(f"   [Info] SVG not found, using PNG for set symbol: {png_url}")
+            except Exception as e:
+                # On network error, default to SVG
+                pass
         else:
             set_symbol_url = f"/img/setSymbols/official/{data['set']}-{rarity_code}.svg"
             
         # Fix SVG if it has percentage dimensions (returns Data URI if fixed, else original URL)
+        # If it's a PNG, fetch_and_fix_svg_source will return the URL as is (because lxml parse fails)
         from automator_utils import fetch_and_fix_svg_source
         set_symbol_url = fetch_and_fix_svg_source(set_symbol_url)
         
