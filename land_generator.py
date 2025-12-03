@@ -97,6 +97,7 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
             query_parts.append(scryfall_filter)
         
         query = ' '.join(query_parts)
+        print(f"   Scryfall query: {query}")
         cards = scryfall.search_cards(query)
         
         if not cards:
@@ -327,9 +328,12 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
     
     if not generated_cards:
         print("Warning: No cards were generated!")
-        return
+        return []
     
-    print(f"Saving {len(generated_cards)} cards to {output_path}...")
-    with open(output_path, 'w') as f:
-        json.dump(generated_cards, f, indent=2)
-    print("Done.")
+    if output_path:
+        print(f"Saving {len(generated_cards)} cards to {output_path}...")
+        with open(output_path, 'w') as f:
+            json.dump(generated_cards, f, indent=2)
+        print("Done.")
+        
+    return generated_cards

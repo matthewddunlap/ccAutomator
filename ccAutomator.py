@@ -12,9 +12,10 @@ from automator_utils import (
     apply_set_filters,
     build_scryfall_query,
     save_cardconjurer_file,
-    BASIC_LANDS,
+    BASIC_LAND_NAMES,
     DEFAULT_UPSCALER_MODEL
 )
+import land_generator
 
 class CustomArgumentParser(argparse.ArgumentParser):
     """
@@ -508,6 +509,42 @@ def main():
         if not all_cards:
             print("No valid card names found in the input file. Exiting.", file=sys.stderr)
             sys.exit(1)
+            
+        full_art_lands = []
+        if args.full_art_basic_land:
+            print("--- Full-Art Basic Land Mode Enabled ---")
+            # Identify basic lands
+            basic_land_cards = [c for c in all_cards if c['name'] in BASIC_LAND_NAMES]
+            non_basic_cards = [c for c in all_cards if c['name'] not in BASIC_LAND_NAMES]
+            
+            if basic_land_cards:
+                unique_land_types = sorted(list(set(c['name'] for c in basic_land_cards)))
+                print(f"Found basic lands: {', '.join(unique_land_types)}")
+                print("Generating full-art basic lands separately...")
+                
+                try:
+                    full_art_lands = land_generator.generate_fullart_lands(
+                        land_types=unique_land_types,
+                        template_path='templates/full_art_basic_lands.cardconjurer',
+                        output_path=None, # Return list instead of saving
+                        set_selection='all', # Generate ALL matching full-art lands
+                        image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242",
+                        image_server_path=args.image_server_path,
+                        art_path=args.art_path,
+                        upscale_art=args.upscale_art,
+                        ilaria_url=args.ilaria_url,
+                        upscaler_model=args.upscaler_model,
+                        upscaler_factor=args.upscaler_factor,
+                        white_border=args.white_border
+                    )
+                    print(f"Generated {len(full_art_lands)} full-art basic land cards.")
+                except Exception as e:
+                    print(f"Error generating full-art lands: {e}", file=sys.stderr)
+                
+                # Update all_cards to only include non-basics for the main generator
+                all_cards = non_basic_cards
+            else:
+                print("No basic lands found in deck list.")
         
         # Group cards by section
         from collections import defaultdict
@@ -534,8 +571,8 @@ def main():
         land_exclude = args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set
         
         # Process each section
-        generated_cards = []
-        total_cards = len(all_cards)
+        generated_cards = list(full_art_lands) # Start with full art lands
+        total_cards = len(all_cards) + len(full_art_lands)
         failed_cards = []
         
         for section, section_cards in cards_by_section.items():
