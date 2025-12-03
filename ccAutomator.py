@@ -527,7 +527,10 @@ def main():
                         land_types=unique_land_types,
                         template_path='templates/full_art_basic_lands.cardconjurer',
                         output_path=None, # Return list instead of saving
-                        set_selection='all', # Generate ALL matching full-art lands
+                        set_selection=args.set_selection if args.set_selection else 'all',
+                        include_sets=args.basic_land_include_set if args.basic_land_include_set else args.include_set,
+                        exclude_sets=args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set,
+                        scryfall_filter=args.scryfall_filter,
                         image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242",
                         image_server_path=args.image_server_path,
                         art_path=args.art_path,
