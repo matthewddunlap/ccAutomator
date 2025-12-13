@@ -13,7 +13,8 @@ from automator_utils import (
     build_scryfall_query,
     save_cardconjurer_file,
     BASIC_LAND_NAMES,
-    DEFAULT_UPSCALER_MODEL
+    DEFAULT_UPSCALER_MODEL,
+    parse_set_list
 )
 import land_generator
 
@@ -528,8 +529,8 @@ def main():
                         template_path='templates/full_art_basic_lands.cardconjurer',
                         output_path=None, # Return list instead of saving
                         set_selection=args.set_selection if args.set_selection else 'all',
-                        include_sets=args.basic_land_include_set if args.basic_land_include_set else args.include_set,
-                        exclude_sets=args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set,
+                        include_sets=list(parse_set_list(args.basic_land_include_set if args.basic_land_include_set else args.include_set)),
+                        exclude_sets=list(parse_set_list(args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set)),
                         scryfall_filter=args.scryfall_filter,
                         image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242",
                         image_server_path=args.image_server_path,
@@ -538,7 +539,12 @@ def main():
                         ilaria_url=args.ilaria_url,
                         upscaler_model=args.upscaler_model,
                         upscaler_factor=args.upscaler_factor,
-                        white_border=args.white_border
+                        white_border=args.white_border,
+                        # Text formatting args
+                        pt_font_size=args.pt_font_size, pt_kerning=args.pt_kerning, pt_up=args.pt_up, pt_bold=args.pt_bold, pt_shadow=args.pt_shadow,
+                        title_font_size=args.title_font_size, title_shadow=args.title_shadow, title_kerning=args.title_kerning, title_left=args.title_left, title_up=args.title_up,
+                        type_font_size=args.type_font_size, type_shadow=args.type_shadow, type_kerning=args.type_kerning, type_left=args.type_left,
+                        flavor_font=args.flavor_font, rules_down=args.rules_down
                     )
                     print(f"Generated {len(full_art_lands)} full-art basic land cards.")
                 except Exception as e:
@@ -945,7 +951,7 @@ def main():
                 exclude_sets_arg = args.basic_land_exclude_set if args.basic_land_exclude_set else args.exclude_set
                 
                 # Parse set lists using helper
-                from automator_utils import parse_set_list
+                # from automator_utils import parse_set_list # Imported at top level
                 include_sets = list(parse_set_list(include_sets_arg))
                 exclude_sets = list(parse_set_list(exclude_sets_arg))
 
