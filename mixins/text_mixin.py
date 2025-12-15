@@ -40,7 +40,7 @@ class TextMixin:
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
-                self.driver.execute_script("textEdited()")
+                # self.driver.execute_script("textEdited()")
                 print(f"      Found {{flavor}} tag. Injected font size tag.")
                 
                 time.sleep(self.render_delay)
@@ -59,48 +59,76 @@ class TextMixin:
             return
 
         print(f"   Applying text modifications to '{field_name}'...")
-        try:
-            self.text_tab.click()
-            
-            field_button_selector = f"//h4[text()='{field_name}']"
-            text_editor_id = "text-editor"
-
-            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
-            field_button.click()
-            
-            # Brief pause to let the textarea populate
-            time.sleep(0.5)
-
-            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
-            current_text = text_input.get_attribute('value')
-
-            # Build the prefix tags
-            tags = []
-            if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
-            if shadow is not None: tags.append(f"{{shadow{shadow}}}")
-            if kerning is not None: tags.append(f"{{kerning{kerning}}}")
-            if left is not None: tags.append(f"{{left{left}}}")
-            if up is not None: tags.append(f"{{up{up}}}")
-            if down is not None: tags.append(f"{{down{down}}}")
-            if bold: tags.append("{bold}")
-            
-            prefix = "".join(tags)
-            suffix = "{/bold}" if bold else ""
-
-            if current_text and current_text.strip():
-                new_text = f"{prefix}{current_text}{suffix}"
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # print(f"      [Debug] Attempt {attempt+1}: Clicking text tab...")
+                # Re-find the tab to avoid stale element issues
+                text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
+                text_tab.click()
                 
-                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
-                self.driver.execute_script("textEdited()")
-                print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
+                field_button_selector = f"//h4[text()='{field_name}']"
+                text_editor_id = "text-editor"
 
-            # Wait for the change to render on a canvas
-            time.sleep(self.render_delay)
+                # print(f"      [Debug] Waiting for field button '{field_name}'...")
+                # Use presence first, then scroll, then click. This is more robust than element_to_be_clickable alone.
+                field_button = self.wait.until(EC.presence_of_element_located((By.XPATH, field_button_selector)))
+                
+                # Scroll into view to ensure it's clickable
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field_button)
+                time.sleep(0.2) # Small pause after scroll
+                
+                field_button.click()
+                
+                # Brief pause to let the textarea populate
+                time.sleep(0.5)
 
-        except Exception as e:
-            print(f"      An error occurred while applying mods to '{field_name}': {e}", file=sys.stderr)
+                # print(f"      [Debug] Waiting for text editor...")
+                # Use visibility instead of presence to ensure it's actually shown
+                text_input = self.wait.until(EC.visibility_of_element_located((By.ID, text_editor_id)))
+                current_text = text_input.get_attribute('value')
+                # print(f"      [Debug] Current text: '{current_text}'")
+
+                # Build the prefix tags
+                tags = []
+                if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
+                if shadow is not None: tags.append(f"{{shadow{shadow}}}")
+                if kerning is not None: tags.append(f"{{kerning{kerning}}}")
+                if left is not None: tags.append(f"{{left{left}}}")
+                if up is not None: tags.append(f"{{up{up}}}")
+                if down is not None: tags.append(f"{{down{down}}}")
+                if bold: tags.append("{bold}")
+                
+                prefix = "".join(tags)
+                suffix = "{/bold}" if bold else ""
+
+                if current_text and current_text.strip():
+                    # Check if already applied to avoid double application on retry
+                    if prefix in current_text:
+                         print(f"      '{field_name}' already has modifications. Skipping.")
+                         return
+
+                    new_text = f"{prefix}{current_text}{suffix}"
+                    
+                    # print(f"      [Debug] Executing JS to update text...")
+                    self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                    self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+                    self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+                    # self.driver.execute_script("textEdited()")
+                    print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
+
+                # Wait for the change to render on a canvas
+                time.sleep(self.render_delay)
+                return # Success, exit loop
+
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f"      Attempt {attempt+1}/{max_retries} failed for '{field_name}': {e}", file=sys.stderr)
+                print(f"      Traceback: {tb}", file=sys.stderr)
+                if attempt == max_retries - 1:
+                    print(f"      An error occurred while applying mods to '{field_name}' after {max_retries} attempts.", file=sys.stderr)
+                time.sleep(1) # Wait before retrying
 
     def _set_rules_text(self, new_text: str):
         """
@@ -123,7 +151,7 @@ class TextMixin:
             self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
-            self.driver.execute_script("textEdited()")
+            # self.driver.execute_script("textEdited()")
             
             time.sleep(self.render_delay)
         except Exception as e:

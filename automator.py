@@ -302,9 +302,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         3. Captures the image (unless prepare_only is True).
         """
         # Check if we should skip this card based on overwrite logic (only if not priming)
-        if not is_priming and not prepare_only:
-            if self._should_skip_card(card_name):
-                return
+        # NOTE: Overwrite logic is handled per-print inside the loop, so we don't check here.
+        # if not is_priming and not prepare_only:
+        #     if self._should_skip_card(card_name):
+        #         return
 
         # --- Canvas Stabilization (Priming) ---
         if is_priming:
