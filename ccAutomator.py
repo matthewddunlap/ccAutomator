@@ -989,10 +989,19 @@ def main():
                                 print(f"      Error loading placeholder '{placeholder_name}': {e}")
                                 continue
                                 
-                            # 1.5 Force a new ID to prevent overwriting the placeholder when saving
-                            # If we don't do this, CC might update the existing saved card (the placeholder)
-                            # instead of creating a new one, causing subsequent iterations to fail.
-                            automator.driver.execute_script("if (window.card) { card.id = Date.now().toString() + Math.random().toString(); }")
+                            # 1.5 Force a new unique ID to prevent overwriting the placeholder when saving
+                            # We check against existing saved cards to ensure no collisions, addressing the user's concern.
+                            automator.driver.execute_script("""
+                                if (window.card) {
+                                    var savedCards = JSON.parse(localStorage.getItem('cardConjurerSavedCards') || '[]');
+                                    var existingIds = new Set(savedCards.map(c => c.id));
+                                    var newId;
+                                    do {
+                                        newId = Date.now().toString() + Math.random().toString();
+                                    } while (existingIds.has(newId));
+                                    card.id = newId;
+                                }
+                            """)
 
                             # 2. Process and Capture (Set Art, Text, Save)
                             # A. Prepare Art
