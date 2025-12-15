@@ -125,7 +125,16 @@ class TextMixin:
                 import traceback
                 tb = traceback.format_exc()
                 print(f"      Attempt {attempt+1}/{max_retries} failed for '{field_name}': {e}", file=sys.stderr)
-                print(f"      Traceback: {tb}", file=sys.stderr)
+                
+                # DEBUG: List all available h4 elements to see what's actually there
+                try:
+                    h4s = self.driver.find_elements(By.XPATH, "//h4")
+                    available_fields = [h.text for h in h4s]
+                    print(f"      [Debug] Available text fields: {available_fields}", file=sys.stderr)
+                except:
+                    pass
+
+                # print(f"      Traceback: {tb}", file=sys.stderr)
                 if attempt == max_retries - 1:
                     print(f"      An error occurred while applying mods to '{field_name}' after {max_retries} attempts.", file=sys.stderr)
                 time.sleep(1) # Wait before retrying

@@ -908,11 +908,32 @@ def main():
                     print(f"Warning: Prime file '{args.prime_file}' was provided but contained no valid card names.", file=sys.stderr)
 
             # --- Full-Art Basic Land Generation (Single Session) ---
+            # Full-Art Basic Land Generation moved to end of workflow
+
+
+            print("\n--- Starting Main Card Processing ---")
+            # --- Main Processing Loop ---
+            if args.card_builder == 'selenium':
+                for i, card_data in enumerate(cards_to_process, 1):
+                    card_name = card_data['name']
+                    category = card_data['category']
+                    print(f"--- Processing card {i}/{len(cards_to_process)} ---")
+                    automator.process_and_capture_card(card_name, category=category)
+
+            # --- Full-Art Basic Land Generation (Single Session) ---
+            # Moved to end of workflow to prevent template masks from affecting main cards
             if args.full_art_basic_land and args.card_builder == 'selenium' and basic_land_types and temp_lands_file:
                 print("\n" + "="*60)
                 print("PHASE: Full-Art Basic Land Generation")
                 print("="*60)
                 
+                # Explicitly disable the frame as requested by the user to ensure a clean slate
+                try:
+                    print("Disabling frame before full-art generation...")
+                    automator.set_frame('false', wait=True)
+                except Exception as e:
+                    print(f"Warning: Could not disable frame (value='false'): {e}")
+
                 try:
                     from scryfall_utils import ScryfallAPI
                     
@@ -1039,15 +1060,6 @@ def main():
                     if temp_lands_file and temp_lands_file.exists():
                         temp_lands_file.unlink()
                         print(f"Cleaned up temporary file: {temp_lands_file}")
-
-            print("\n--- Starting Main Card Processing ---")
-            # --- Main Processing Loop ---
-            if args.card_builder == 'selenium':
-                for i, card_data in enumerate(cards_to_process, 1):
-                    card_name = card_data['name']
-                    category = card_data['category']
-                    print(f"--- Processing card {i}/{len(cards_to_process)} ---")
-                    automator.process_and_capture_card(card_name, category=category)
             
             elif args.card_builder == 'cc-file':
                 print(f"\n--- Starting CC File Render Mode ---")
