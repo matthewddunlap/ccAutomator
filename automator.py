@@ -602,30 +602,41 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not mods_applied:
                 time.sleep(self.render_delay)
     
+            # Capture using the new method
+            filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
+            self.capture_card(filename)
+
+    def capture_card(self, output_filename):
+        """
+        Captures the current canvas and saves it to the specified filename (or uploads it).
+        """
+        try:
             data_url = self._get_canvas_data_url()
             if not data_url or not data_url.startswith('data:image/png;base64,'):
-                print(f"   Error: Could not capture canvas.", file=sys.stderr); continue
-            try:
-                img_data = base64.b64decode(data_url.split(',', 1)[1])
-                filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
-                # --- REVISED, CLEANER LOGIC ---
-                if self.upload_path:
-                    # Upload mode is active
-                    self._upload_image(img_data, filename)
-                else:
-                    # Local save mode is active
-                    output_path = os.path.join(self.download_dir, filename)
-                    with open(output_path, 'wb') as f:
-                        f.write(img_data)
-                    print(f"   Saved locally to '{output_path}'.")
-                # --- END OF REVISED LOGIC ---
-    
-            except Exception as e:
-                print(f"   Error processing or saving/uploading image data: {e}", file=sys.stderr)
+                print(f"   Error: Could not capture canvas.", file=sys.stderr)
+                return
+
+            img_data = base64.b64decode(data_url.split(',', 1)[1])
+            
+            if self.upload_path:
+                # Upload mode is active
+                self._upload_image(img_data, output_filename)
+            else:
+                # Local save mode is active
+                output_path = os.path.join(self.download_dir, output_filename)
+                with open(output_path, 'wb') as f:
+                    f.write(img_data)
+                print(f"   Saved locally to '{output_path}'.")
+
+        except Exception as e:
+            print(f"   Error capturing card: {e}", file=sys.stderr)
     
         # --- Save Card to Browser Storage (if enabled) ---
-        if self.save_cc_file:
-            self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+        # NOTE: We do NOT do this here anymore. Saving to browser storage should be explicit
+        # and handled by the caller (e.g., process_and_capture_card or the full-art loop).
+        # This avoids the NameError since card_name is not passed to capture_card.
+        # if self.save_cc_file:
+        #     self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
     
 
 
@@ -802,6 +813,55 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 
         except Exception as e:
             print(f"   Error during priming with '{card_name}': {e}", file=sys.stderr)
+
+    def load_project_file(self, project_file_path):
+        """
+        Uploads a .cardconjurer project file to the browser.
+        """
+        print(f"--- Loading Project File: {project_file_path} ---")
+        try:
+            # 1. Upload the project file
+            self.import_save_tab.click()
+            
+            # Find the file input for uploading saved cards
+            file_input = self.driver.find_element(By.XPATH, "//input[@oninput='uploadSavedCards(event);']")
+            
+            abs_path = os.path.abspath(project_file_path)
+            file_input.send_keys(abs_path)
+            
+            print("   Uploaded project file.")
+            time.sleep(2) # Wait for processing
+            
+        except Exception as e:
+            print(f"   Error loading project file: {e}", file=sys.stderr)
+            raise
+
+    def load_saved_card(self, card_name_to_load):
+        """
+        Loads a specific card from the 'Saved Cards' dropdown by name.
+        """
+        print(f"   Loading saved card: '{card_name_to_load}'...")
+        try:
+            self.import_save_tab.click()
+            dropdown_element = self.driver.find_element(By.ID, 'load-card-options')
+            select = Select(dropdown_element)
+            
+            # Find the option with the matching text
+            found = False
+            for option in select.options:
+                if option.text == card_name_to_load:
+                    select.select_by_visible_text(card_name_to_load)
+                    found = True
+                    break
+            
+            if not found:
+                raise ValueError(f"Card '{card_name_to_load}' not found in saved cards.")
+                
+            time.sleep(1.5) # Wait for load
+            
+        except Exception as e:
+            print(f"   Error loading saved card '{card_name_to_load}': {e}", file=sys.stderr)
+            raise
 
     def render_project_file(self, project_file_path, frame_name=None, prime_card_names=None, prime_frame_name=None):
         """

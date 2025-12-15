@@ -40,6 +40,7 @@ class TextMixin:
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+                self.driver.execute_script("textEdited()")
                 print(f"      Found {{flavor}} tag. Injected font size tag.")
                 
                 time.sleep(self.render_delay)
@@ -92,6 +93,7 @@ class TextMixin:
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+                self.driver.execute_script("textEdited()")
                 print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
 
             # Wait for the change to render on a canvas
@@ -121,6 +123,7 @@ class TextMixin:
             self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            self.driver.execute_script("textEdited()")
             
             time.sleep(self.render_delay)
         except Exception as e:

@@ -404,3 +404,46 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
         print("Done.")
         
     return generated_cards
+
+def generate_template_project(template_path, output_path):
+    """
+    Generates a template project containing placeholders for the 5 basic land types.
+    These placeholders have the correct frames but no specific art or text modifications.
+    """
+    print(f"Loading template from {template_path}...")
+    with open(template_path, 'r') as f:
+        templates = json.load(f)
+    
+    # Create a mapping of land type to template
+    template_map = {}
+    for card in templates:
+        title = card['data']['text']['title']['text']
+        if title in LAND_CONFIG:
+            template_map[title] = card
+            
+    generated_cards = []
+    
+    # Generate one placeholder for each basic land type
+    for land_type in BASIC_LANDS:
+        if land_type == 'Wastes': continue # Skip Wastes for now unless requested
+        
+        if land_type not in template_map:
+            print(f"Warning: No template found for '{land_type}', skipping...")
+            continue
+            
+        # Clone template
+        new_card = json.loads(json.dumps(template_map[land_type]))
+        
+        # Set generic key
+        new_card['key'] = f"fullArt-{land_type}"
+        
+        generated_cards.append(new_card)
+        print(f"Generated template placeholder: {new_card['key']}")
+        
+    if output_path:
+        print(f"Saving {len(generated_cards)} template cards to {output_path}...")
+        with open(output_path, 'w') as f:
+            json.dump(generated_cards, f, indent=2)
+        print("Done.")
+        
+    return generated_cards
