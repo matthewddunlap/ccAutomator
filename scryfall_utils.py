@@ -75,3 +75,40 @@ class ScryfallAPI:
         if page_num > 2 or (page_num == 2 and not current_search_url): # Log only if multiple pages or only one full page
              logger.info(f"Found {len(all_cards)} total cards across {page_num-1} page(s) for query: {query}")
         return all_cards
+
+    def get_token_sets_for_parents(self, parent_set_codes: set) -> set:
+        """
+        Given a set of parent set codes (e.g., {'blb', 'woe'}), returns a set of corresponding
+        token set codes (e.g., {'tblb', 'twoe'}).
+        """
+        if not parent_set_codes:
+            return set()
+            
+        token_sets = set()
+        # Scryfall doesn't have a direct "get token set for parent" endpoint, but we can search for sets.
+        # Or simpler: search for *cards* that are tokens and have the parent set code? No, that's circular.
+        # Better: Search for sets where set_type:token. But we can't filter sets by parent_set_code in the /sets endpoint easily?
+        # Actually, the /sets endpoint returns all sets. We could fetch all sets and filter locally, but that's heavy.
+        # Alternatively, we can guess: usually 't' + parent_code. But not always (e.g. 't' + 'dom' -> 'tdom'?).
+        # Let's try to be smart. We can query for *any* card in the token sets that links to the parent set?
+        # No, that's complicated.
+        
+        # Let's fetch ALL sets once (it's not that huge, ~500 sets) and cache it? 
+        # Or just fetch sets and filter.
+        
+        # Actually, Scryfall has a /sets endpoint.
+        try:
+            response = requests.get(f"{self.base_url}/sets", timeout=20)
+            response.raise_for_status()
+            all_sets = response.json().get('data', [])
+            
+            for s in all_sets:
+                if s.get('set_type') == 'token' and s.get('parent_set_code') in parent_set_codes:
+                    token_sets.add(s.get('code'))
+                    
+            logger.info(f"Mapped parent sets {parent_set_codes} to token sets {token_sets}")
+            return token_sets
+            
+        except Exception as e:
+            logger.error(f"Error fetching/mapping token sets: {e}")
+            return set()

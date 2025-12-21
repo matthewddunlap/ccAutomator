@@ -207,17 +207,22 @@ class CanvasMixin:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
 
-    def set_frame_color(self, colors):
+    def set_frame_color(self, colors, type_line=None):
         """
         Sets the frame color based on the provided list of color codes (e.g., ['W', 'U']).
         Uses the Seventh Edition frame picker structure.
+        Also handles Artifacts if type_line is provided.
         """
-        print(f"   Setting frame color for colors: {colors}...")
+        print(f"   Setting frame color for colors: {colors}, type_line: {type_line}...")
         
         target_thumb_suffix = "cThumb.png" # Default to Colorless
         
         if not colors:
-            target_thumb_suffix = "cThumb.png" # Colorless/Artifact
+            # Check for Artifact
+            if type_line and "Artifact" in type_line:
+                target_thumb_suffix = "aThumb.png" # Artifact
+            else:
+                target_thumb_suffix = "cThumb.png" # Colorless/Land
         elif len(colors) > 1:
             target_thumb_suffix = "mThumb.png" # Multicolor
         else:

@@ -404,11 +404,41 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             # Add include/exclude set filters for the initial query
             if current_include_sets:
-                include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                # --- NEW: Token Set Auto-Mapping ---
+                if is_token:
+                    # If searching for tokens, map the include sets (which are likely parent sets) to token sets
+                    mapped_token_sets = self.scryfall_api.get_token_sets_for_parents(current_include_sets)
+                    if mapped_token_sets:
+                        print(f"   Mapped include sets {current_include_sets} to token sets {mapped_token_sets}")
+                        include_query = " OR ".join([f"set:{s}" for s in mapped_token_sets])
+                    else:
+                        print(f"   Warning: Could not map include sets {current_include_sets} to any token sets. Using original sets.")
+                        include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                else:
+                    include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                
                 query_parts.append(f"({include_query})")
+
             if current_exclude_sets:
-                exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
-                query_parts.append(f" {exclude_query}")
+                # For excludes, we might also want to map? 
+                # If user excludes 'blb', they probably want to exclude 'tblb' too.
+                # But let's stick to explicit excludes or maybe map them too?
+                # The user request focused on "Token would only include tokens... based on token sets matching spell set equivalents".
+                # Let's map excludes too for consistency if it's a token search.
+                if is_token:
+                     mapped_exclude_token_sets = self.scryfall_api.get_token_sets_for_parents(current_exclude_sets)
+                     # We should probably exclude BOTH the parent and the token set to be safe, or just the token set.
+                     # Let's exclude the mapped token sets.
+                     if mapped_exclude_token_sets:
+                         exclude_query = " ".join([f"-set:{s}" for s in mapped_exclude_token_sets])
+                         query_parts.append(f" {exclude_query}")
+                     
+                     # Also keep the original excludes? Probably doesn't hurt.
+                     exclude_query_orig = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                     query_parts.append(f" {exclude_query_orig}")
+                else:
+                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                    query_parts.append(f" {exclude_query}")
     
             full_query = " ".join(query_parts)
             print(f"   Scryfall query (with filters): {full_query}")
@@ -622,7 +652,12 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                      # Use first face colors
                      colors = scryfall_data['card_faces'][0].get('colors', [])
 
-                self.set_frame_color(colors)
+                # Get type_line for artifact check
+                type_line = scryfall_data.get('type_line')
+                if not type_line and 'card_faces' in scryfall_data:
+                    type_line = scryfall_data['card_faces'][0].get('type_line')
+
+                self.set_frame_color(colors, type_line=type_line)
                 
                 mods_applied = True
 
