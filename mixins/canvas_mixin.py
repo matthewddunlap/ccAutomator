@@ -206,3 +206,64 @@ class CanvasMixin:
         except Exception as e:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
+
+    def set_frame_color(self, colors):
+        """
+        Sets the frame color based on the provided list of color codes (e.g., ['W', 'U']).
+        Uses the Seventh Edition frame picker structure.
+        """
+        print(f"   Setting frame color for colors: {colors}...")
+        
+        target_thumb_suffix = "cThumb.png" # Default to Colorless
+        
+        if not colors:
+            target_thumb_suffix = "cThumb.png" # Colorless/Artifact
+        elif len(colors) > 1:
+            target_thumb_suffix = "mThumb.png" # Multicolor
+        else:
+            # Map single colors to their thumb filenames
+            # Based on user provided HTML: wThumb.png, uThumb.png, etc.
+            color_map = {
+                'W': 'wThumb.png',
+                'U': 'uThumb.png',
+                'B': 'bThumb.png',
+                'R': 'rThumb.png',
+                'G': 'gThumb.png'
+            }
+            target_thumb_suffix = color_map.get(colors[0], "cThumb.png")
+            
+        print(f"   Target frame thumbnail suffix: {target_thumb_suffix}")
+        
+        try:
+            # 1. Navigate to the Frame tab
+            frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
+            frame_tab.click()
+            
+            # 2. Find the thumbnail
+            # We look for an image whose src ends with the target suffix
+            # Using contains() with the slash to be safer: e.g. '/wThumb.png'
+            
+            thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{target_thumb_suffix}')]"
+            
+            thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))
+            
+            # 3. Scroll and Click
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", thumb)
+            time.sleep(0.5)
+            
+            # Double click to be safe
+            self.driver.execute_script("arguments[0].click();", thumb)
+            self.driver.execute_script("arguments[0].click();", thumb)
+            
+            print(f"   Applied frame color using '{target_thumb_suffix}'.")
+            time.sleep(self.render_delay)
+            
+        except Exception as e:
+            print(f"   Error setting frame color: {e}", file=sys.stderr)
+            # Debug: print available thumbs
+            try:
+                images = self.driver.find_elements(By.XPATH, "//div[@id='frame-picker']//img")
+                srcs = [img.get_attribute('src') for img in images]
+                print(f"      Available thumbnails: {srcs}", file=sys.stderr)
+            except:
+                pass

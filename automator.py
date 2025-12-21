@@ -271,9 +271,22 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                             if cc_print.get('set_name', '').lower() == ir_set.lower() and cc_print.get('collector_number', '').lower() == str(ir_cn).lower():
                                 # Avoid duplicates if we already matched this print
                                 if cc_print not in matched_prints:
+                                    # Attach Scryfall data to the print object
+                                    cc_print['scryfall_data'] = ir
                                     matched_prints.append(cc_print)
                                     # print(f"      -> Found cross-reference match: {cc_print['text']}")
         
+        # Also attach for direct matches
+        for cc_print in matched_prints:
+             if 'scryfall_data' not in cc_print:
+                 # Find the scryfall result that matched
+                 # This is a bit inefficient but safe
+                 for sr in scryfall_results:
+                     if sr.get('set', '').lower() == cc_print.get('set_name', '').lower() and \
+                        str(sr.get('collector_number', '')).lower() == cc_print.get('collector_number', '').lower():
+                         cc_print['scryfall_data'] = sr
+                         break
+
         return matched_prints
 
     def _format_mana_cost(self, mana_cost):
@@ -594,6 +607,25 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 self._apply_flavor_font_mod()
+            # --- NEW: Clear Mana Cost for Tokens ---
+            if category and 'token' in category.lower():
+                self.clear_mana_cost()
+                
+                # --- NEW: Fix Frame Color for Tokens ---
+                # Tokens often default to colorless when mana cost is cleared.
+                # We force the frame color based on Scryfall data.
+                scryfall_data = print_data.get('scryfall_data', {})
+                colors = scryfall_data.get('colors', [])
+                
+                # Also check card_faces if colors is missing (e.g. transform tokens?)
+                if not colors and 'card_faces' in scryfall_data:
+                     # Use first face colors
+                     colors = scryfall_data['card_faces'][0].get('colors', [])
+
+                self.set_frame_color(colors)
+                
+                mods_applied = True
+
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True

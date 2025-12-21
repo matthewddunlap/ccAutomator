@@ -295,6 +295,34 @@ class TextMixin:
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_hide_reminder_text: {e}", file=sys.stderr)
 
+    def clear_mana_cost(self):
+        """
+        Clears the Mana Cost field.
+        """
+        print("   Clearing Mana Cost...")
+        try:
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Mana Cost']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            
+            self.driver.execute_script("arguments[0].value = '';", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            
+            print("      Mana Cost cleared.")
+            time.sleep(self.render_delay)
+
+        except Exception as e:
+            print(f"      An error occurred while clearing Mana Cost: {e}", file=sys.stderr)
+
 
     def _process_all_text_modifications(self):
         """
