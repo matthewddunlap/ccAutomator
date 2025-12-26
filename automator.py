@@ -670,6 +670,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not mods_applied:
                 time.sleep(self.render_delay)
     
+            # Save to browser storage if enabled (for .cardconjurer export)
+            if self.save_cc_file:
+                self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+
             # Capture using the new method
             filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
             self.capture_card(filename)
