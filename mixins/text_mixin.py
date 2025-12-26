@@ -166,20 +166,20 @@ class TextMixin:
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
-    DEFAULT_RULES_BOUNDS_Y = 1707
-    DEFAULT_RULES_BOUNDS_HEIGHT = 767
-
     def apply_rules_text_bounds_mods(self):
         """
-        Modifies the Y position and height of the rules text box by opening the
-        'Edit Bounds' dialog and adjusting the values.
-        Uses default constants to ensure idempotency (avoids cumulative updates).
+        Modifies the Y position, Height, X position, and Width of the rules text box
+        by opening the 'Edit Bounds' dialog and adjusting the values relative to the
+        current values found in the UI.
+        
+        Note: This applies a relative delta. If called multiple times without resetting
+        the frame, the changes will be cumulative.
         """
-        if self.rules_bounds_y is None and self.rules_bounds_height is None:
-            print("   [Debug] Skipping rules bounds mods: both Y and Height are None.")
+        if self.rules_bounds_y is None and self.rules_bounds_height is None and self.rules_bounds_x is None and self.rules_bounds_width is None:
+            print("   [Debug] Skipping rules bounds mods: all bounds args are None.")
             return
 
-        print(f"   Applying rules text bounds modifications (Y delta={self.rules_bounds_y}, Height delta={self.rules_bounds_height})...")
+        print(f"   Applying rules text bounds modifications (Y delta={self.rules_bounds_y}, Height delta={self.rules_bounds_height}, X delta={self.rules_bounds_x}, Width delta={self.rules_bounds_width})...")
         try:
             # 1. Navigate to the Text tab and select Rules Text
             self.text_tab.click()
@@ -205,39 +205,59 @@ class TextMixin:
                 y_input = self.driver.find_element(By.ID, 'textbox-editor-y')
                 current_y = int(y_input.get_attribute('value') or 0)
                 
-                # Calculate target based on known default to ensure idempotency
-                target_y = self.DEFAULT_RULES_BOUNDS_Y + self.rules_bounds_y
+                # Calculate target relative to CURRENT value
+                target_y = current_y + self.rules_bounds_y
                 
-                if current_y == target_y:
-                    print(f"      Rules Bounds Y already at target {target_y}. Skipping.")
-                else:
-                    # Use send_keys to ensure events are triggered and hit Enter
-                    y_input.clear()
-                    y_input.send_keys(str(target_y))
-                    y_input.send_keys(Keys.RETURN)
-                    print(f"      Adjusted Rules Bounds Y from {current_y} to {target_y} (delta: {self.rules_bounds_y}).")
+                # Use send_keys to ensure events are triggered and hit Enter
+                y_input.clear()
+                y_input.send_keys(str(target_y))
+                y_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Y from {current_y} to {target_y} (delta: {self.rules_bounds_y}).")
 
             # 4. Modify the 'Height' value if provided.
             if self.rules_bounds_height is not None:
                 height_input = self.driver.find_element(By.ID, 'textbox-editor-height')
                 current_height = int(height_input.get_attribute('value') or 0)
                 
-                # Calculate target based on known default
-                target_height = self.DEFAULT_RULES_BOUNDS_HEIGHT + self.rules_bounds_height
+                # Calculate target relative to CURRENT value
+                target_height = current_height + self.rules_bounds_height
                 
-                if current_height == target_height:
-                    print(f"      Rules Bounds Height already at target {target_height}. Skipping.")
-                else:
-                    # Use send_keys to ensure events are triggered and hit Enter
-                    height_input.clear()
-                    height_input.send_keys(str(target_height))
-                    height_input.send_keys(Keys.RETURN)
-                    print(f"      Adjusted Rules Bounds Height from {current_height} to {target_height} (delta: {self.rules_bounds_height}).")
+                # Use send_keys to ensure events are triggered and hit Enter
+                height_input.clear()
+                height_input.send_keys(str(target_height))
+                height_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Height from {current_height} to {target_height} (delta: {self.rules_bounds_height}).")
+
+            # 5. Modify the 'X' value if provided.
+            if self.rules_bounds_x is not None:
+                x_input = self.driver.find_element(By.ID, 'textbox-editor-x')
+                current_x = int(x_input.get_attribute('value') or 0)
+                
+                # Calculate target relative to CURRENT value
+                target_x = current_x + self.rules_bounds_x
+                
+                x_input.clear()
+                x_input.send_keys(str(target_x))
+                x_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds X from {current_x} to {target_x} (delta: {self.rules_bounds_x}).")
+
+            # 6. Modify the 'Width' value if provided.
+            if self.rules_bounds_width is not None:
+                width_input = self.driver.find_element(By.ID, 'textbox-editor-width')
+                current_width = int(width_input.get_attribute('value') or 0)
+                
+                # Calculate target relative to CURRENT value
+                target_width = current_width + self.rules_bounds_width
+                
+                width_input.clear()
+                width_input.send_keys(str(target_width))
+                width_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Width from {current_width} to {target_width} (delta: {self.rules_bounds_width}).")
 
             # Wait for a fraction of a second before closing
             time.sleep(0.5)
 
-            # 5. Close the textbox editor.
+            # 7. Close the textbox editor.
             close_button_selector = "h2.textbox-editor-close"
             close_button = self.driver.find_element(By.CSS_SELECTOR, close_button_selector)
             close_button.click()

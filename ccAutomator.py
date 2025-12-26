@@ -272,6 +272,20 @@ def main():
     )
 
     parser.add_argument(
+        '--rules-bounds-x',
+        type=int,
+        metavar='NUM',
+        help="Adjust the X position of the rules text box by this amount."
+    )
+
+    parser.add_argument(
+        '--rules-bounds-width',
+        type=int,
+        metavar='NUM',
+        help="Adjust the width of the rules text box by this amount."
+    )
+
+    parser.add_argument(
         '--hide-reminder-text',
         action='store_true',
         help="Check the 'Hide reminder text' checkbox."
@@ -706,8 +720,11 @@ def main():
                 upload_path=args.upload_path,
                 upload_secret=args.upload_secret,
                 scryfall_filter=args.scryfall_filter,
+
                 rules_bounds_y=args.rules_bounds_y,
                 rules_bounds_height=args.rules_bounds_height,
+                rules_bounds_x=args.rules_bounds_x,
+                rules_bounds_width=args.rules_bounds_width,
                 hide_reminder_text=args.hide_reminder_text,
                 title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
@@ -857,6 +874,8 @@ def main():
             rules_down=args.rules_down,
             rules_bounds_y=args.rules_bounds_y,
             rules_bounds_height=args.rules_bounds_height,
+            rules_bounds_x=args.rules_bounds_x,
+            rules_bounds_width=args.rules_bounds_width,
             hide_reminder_text=args.hide_reminder_text,
             image_server=args.image_server,
             image_server_path=args.image_server_path,

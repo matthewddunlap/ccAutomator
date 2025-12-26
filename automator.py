@@ -56,7 +56,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                 flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None,
+                 flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None, rules_bounds_x=None, rules_bounds_width=None,
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
@@ -149,6 +149,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.rules_down = rules_down
         self.rules_bounds_y = rules_bounds_y
         self.rules_bounds_height = rules_bounds_height
+        self.rules_bounds_x = rules_bounds_x
+        self.rules_bounds_width = rules_bounds_width
         self.hide_reminder_text = hide_reminder_text
 
         self.type_font_size = type_font_size
