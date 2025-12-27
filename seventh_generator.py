@@ -208,7 +208,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                      # Text modifications
                      title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                      type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                     pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_bold=False,
+                     pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False,
                      flavor_font_size=None,
                      white_border=False, auto_fit_type=False,
                      image_server_url=None):
@@ -356,6 +356,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             if pt_shadow: pt_mods += f"{{shadow{pt_shadow}}}"
             if pt_kerning: pt_mods += f"{{kerning{pt_kerning}}}"
             if pt_up: pt_mods += f"{{up{pt_up}}}"
+            if pt_left: pt_mods += f"{{left{pt_left}}}"
             
             if pt_mods:
                 pt = f"{pt_mods}{pt}"

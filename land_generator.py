@@ -50,7 +50,7 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
                            upload_path=None, upload_secret=None, download_dir='.',
                            white_border=False,
                            # Text formatting args
-                           pt_font_size=None, pt_kerning=None, pt_up=None, pt_bold=False, pt_shadow=None,
+                           pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False, pt_shadow=None,
                            title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                            type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                            flavor_font=None, rules_down=None):
@@ -373,6 +373,7 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
                 if pt_font_size is not None: new_text = _update_tag(new_text, 'fontsize', pt_font_size)
                 if pt_shadow is not None: new_text = _update_tag(new_text, 'shadow', pt_shadow)
                 if pt_up is not None: new_text = _update_tag(new_text, 'up', pt_up)
+                if pt_left is not None: new_text = _update_tag(new_text, 'left', pt_left)
                 if pt_bold and '{bold}' not in new_text: new_text = f"{{bold}}{new_text}{{/bold}}"
                 t_obj['text'] = new_text
 

@@ -53,7 +53,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  basic_land_include_sets=None, basic_land_exclude_sets=None,
                  card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
                  no_match_selection='earliest', render_delay=1.5, white_border=False,
-                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
+                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                  flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None, rules_bounds_x=None, rules_bounds_width=None,
@@ -138,6 +138,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.pt_font_size = pt_font_size
         self.pt_kerning = pt_kerning
         self.pt_up = pt_up
+        self.pt_left = pt_left
 
         self.title_font_size = title_font_size
         self.title_shadow = title_shadow
@@ -614,7 +615,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 "Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left)
     
             self._apply_text_mods(
-                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up)
+                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left)
     
             # --- NEW: Basic Land Rules Text Handling ---
             is_basic_land = False

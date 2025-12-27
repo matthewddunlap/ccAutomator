@@ -251,6 +251,15 @@ def main():
     )
 
     parser.add_argument(
+        '--pt-left',
+        type=int,
+        metavar='NUM',
+        help="Add a {left#} tag to the Power/Toughness."
+    )
+
+
+
+    parser.add_argument(
         '--rules-down',
         type=int,
         metavar='NUM',
@@ -496,10 +505,12 @@ def main():
             type_shadow=args.type_shadow,
             type_left=args.type_left,
             pt_kerning=args.pt_kerning,
+            pt_left=args.pt_left,
+            pt_up=args.pt_up,
             pt_font_size=args.pt_font_size,
             pt_shadow=args.pt_shadow,
             pt_bold=args.pt_bold,
-            pt_up=args.pt_up,
+
             flavor_font=args.flavor_font,
             rules_down=args.rules_down,
             white_border=args.white_border,
@@ -555,7 +566,7 @@ def main():
                         upscaler_factor=args.upscaler_factor,
                         white_border=args.white_border,
                         # Text formatting args
-                        pt_font_size=args.pt_font_size, pt_kerning=args.pt_kerning, pt_up=args.pt_up, pt_bold=args.pt_bold, pt_shadow=args.pt_shadow,
+                        pt_font_size=args.pt_font_size, pt_kerning=args.pt_kerning, pt_up=args.pt_up, pt_left=args.pt_left, pt_bold=args.pt_bold, pt_shadow=args.pt_shadow,
                         title_font_size=args.title_font_size, title_shadow=args.title_shadow, title_kerning=args.title_kerning, title_left=args.title_left, title_up=args.title_up,
                         type_font_size=args.type_font_size, type_shadow=args.type_shadow, type_kerning=args.type_kerning, type_left=args.type_left,
                         flavor_font=args.flavor_font, rules_down=args.rules_down
@@ -627,6 +638,7 @@ def main():
                         pt_shadow=args.pt_shadow,
                         pt_kerning=args.pt_kerning,
                         pt_up=args.pt_up,
+                        pt_left=args.pt_left,
                         pt_bold=args.pt_bold,
                         flavor_font_size=args.flavor_font_size,
                         white_border=args.white_border,
@@ -725,6 +737,8 @@ def main():
                 rules_bounds_height=args.rules_bounds_height,
                 rules_bounds_x=args.rules_bounds_x,
                 rules_bounds_width=args.rules_bounds_width,
+                pt_left=args.pt_left,
+                pt_up=args.pt_up,
                 hide_reminder_text=args.hide_reminder_text,
                 title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
@@ -776,6 +790,7 @@ def main():
                 pt_font_size=args.pt_font_size,
                 pt_kerning=args.pt_kerning,
                 pt_up=args.pt_up,
+                pt_left=args.pt_left,
                 title_font_size=args.title_font_size,
                 title_shadow=args.title_shadow,
                 title_kerning=args.title_kerning,
@@ -861,6 +876,7 @@ def main():
             pt_font_size=args.pt_font_size,
             pt_kerning=args.pt_kerning,
             pt_up=args.pt_up,
+            pt_left=args.pt_left,
             title_font_size=args.title_font_size,
             title_shadow=args.title_shadow,
             title_kerning=args.title_kerning,
