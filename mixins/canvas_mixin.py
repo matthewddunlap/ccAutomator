@@ -322,11 +322,11 @@ class CanvasMixin:
                     mask_source_suffix = "mThumb.png"
                 else:
                     color_map = {
-                        'W': 'wThumb.png',
-                        'U': 'uThumb.png',
-                        'B': 'bThumb.png',
-                        'R': 'rThumb.png',
-                        'G': 'gThumb.png'
+                        'W': 'wlThumb.png',
+                        'U': 'ulThumb.png',
+                        'B': 'blThumb.png',
+                        'R': 'rlThumb.png',
+                        'G': 'glThumb.png'
                     }
                     mask_source_suffix = color_map.get(colors[0], "cThumb.png")
                 
