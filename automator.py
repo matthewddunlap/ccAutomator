@@ -707,20 +707,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not type_line and 'card_faces' in scryfall_data:
                 type_line = scryfall_data['card_faces'][0].get('type_line')
 
+            # We pass mana_cost now to support dual-colored artifact logic (order matters)
+            mana_cost = scryfall_data.get('mana_cost', '')
+
             if category and 'token' in category.lower():
                 self.clear_mana_cost()
                 
                 # --- NEW: Fix Frame Color for Tokens ---
                 # Tokens often default to colorless when mana cost is cleared.
                 # We force the frame color based on Scryfall data.
-                self.set_frame_color(colors, type_line=type_line)
+                self.set_frame_color(colors, type_line=type_line, mana_cost=mana_cost)
                 mods_applied = True
 
             else:
                 # --- NEW: Fix Frame Color for Colored Artifacts (Non-Token) ---
                 # We now have logic in set_frame_color (canvas_mixin.py) to handle
                 # Colored Artifacts by prioritizing the Artifact frame and applying masks.
-                self.set_frame_color(colors, type_line=type_line)
+                self.set_frame_color(colors, type_line=type_line, mana_cost=mana_cost)
                 mods_applied = True
 
             if self.apply_white_border_on_capture:
