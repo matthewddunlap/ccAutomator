@@ -707,16 +707,6 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not type_line and 'card_faces' in scryfall_data:
                 type_line = scryfall_data['card_faces'][0].get('type_line')
 
-            # Special handling for Artifacts:
-            # If an artifact is colorless (colors=[]) but has a color_identity (e.g. Bosh, Iron Golem),
-            # we use the color_identity to drive the "Colored Artifact" frame logic if the user desires it.
-            # This aligns with the "Colored Artifact" frame style which is often used for identity.
-            if type_line and "Artifact" in type_line and not colors:
-                color_identity = scryfall_data.get('color_identity', [])
-                if color_identity:
-                    print(f"   [Artifact] Using color_identity {color_identity} for frame color (colors was empty).")
-                    colors = color_identity
-
             if category and 'token' in category.lower():
                 self.clear_mana_cost()
                 
