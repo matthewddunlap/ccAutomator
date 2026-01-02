@@ -133,8 +133,82 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
 
         elif is_artifact:
             # Artifact Logic
-            for mask in ['Pinline', 'Rules', 'Frame', 'Textbox Pinline', 'Border']:
-                layers.append((FRAME_NAMES['a'], f'regular/a.png', mask))
+            # Check for colors to support Colored Artifacts
+            # Ensure WUBRG order for colors
+            wubrg_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
+            
+            # Use colors if present, otherwise fallback to color_identity
+            target_colors = colors
+            if not target_colors:
+                target_colors = scryfall_data.get('color_identity', [])
+                
+            sorted_colors = sorted([c for c in target_colors if c in wubrg_order], key=lambda x: wubrg_order.get(x, 99))
+            
+            if not sorted_colors:
+                # Colorless Artifact (Standard)
+                code = 'a'
+                layers = [
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Pinline'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Rules'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Frame'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Textbox Pinline'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Border')
+                ]
+            elif len(sorted_colors) == 1:
+                # Single Color Artifact
+                # Base: Artifact (a)
+                # Rules/Pinline: Colored Land (xl)
+                c = sorted_colors[0]
+                code = LAND_COLOR_MAP.get(c, 'l') # e.g., 'rl' for Red
+                base_code = 'a'
+                
+                layers = [
+                    (FRAME_NAMES.get(code, 'Land Frame'), f'regular/{code}.png', 'Pinline'),
+                    (FRAME_NAMES.get(code, 'Land Frame'), f'regular/{code}.png', 'Rules'),
+                    (FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Frame'),
+                    (FRAME_NAMES.get(code, 'Land Frame'), f'regular/{code}.png', 'Textbox Pinline'),
+                    (FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Border')
+                ]
+            elif len(sorted_colors) == 2:
+                # Dual Color Artifact
+                # Base: Artifact (a)
+                # Rules: Split (Right Color + Left Color)
+                # Pinline: Artifact (a) - matching Bayou example which used 'l' (generic)
+                c1 = sorted_colors[0]
+                c2 = sorted_colors[1]
+                code1 = LAND_COLOR_MAP.get(c1, 'l')
+                code2 = LAND_COLOR_MAP.get(c2, 'l')
+                base_code = 'a'
+                
+                layers.append((FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Pinline'))
+                
+                # Split Rules Box
+                layers.append({
+                    "name": FRAME_NAMES.get(code2, 'Land Frame'),
+                    "src": f"/img/frames/seventh/regular/{code2}.png",
+                    "masks": [
+                        {"src": "/img/frames/seventh/regular/rules.svg", "name": "Rules"},
+                        {"src": "/img/frames/maskRightHalf.png", "name": "Right Half"}
+                    ]
+                })
+                
+                layers.append((FRAME_NAMES.get(code1, 'Land Frame'), f'regular/{code1}.png', 'Rules'))
+                
+                layers.append((FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Frame'))
+                layers.append((FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Textbox Pinline'))
+                layers.append((FRAME_NAMES.get(base_code, 'Artifact Frame'), f'regular/{base_code}.png', 'Border'))
+                
+            else:
+                # 3+ Colors Artifact
+                # Treat as Standard Artifact (matching City of Brass example which used 'l')
+                code = 'a'
+                layers = [
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Pinline'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Rules'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Frame'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Textbox Pinline'),
+                    (FRAME_NAMES.get(code, 'Artifact Frame'), f'regular/{code}.png', 'Border')
+                ]
                 
         else:
             # Regular Card

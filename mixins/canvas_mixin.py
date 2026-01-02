@@ -207,6 +207,52 @@ class CanvasMixin:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
 
+    def apply_mask(self, frame_suffix, mask_names):
+        """
+        Applies specific masks from a given frame group.
+        1. Single-clicks the frame (by suffix) to load its masks.
+        2. Double-clicks each mask in the mask picker matching the mask_names.
+        """
+        print(f"   Applying masks {mask_names} from frame '{frame_suffix}'...")
+        try:
+            # 1. Find the frame thumbnail
+            thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{frame_suffix}')]"
+            thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))
+            
+            # 2. Single Click to load masks (do NOT double click)
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", thumb)
+            time.sleep(0.5)
+            self.driver.execute_script("arguments[0].click();", thumb)
+            time.sleep(1.0) # Wait for mask picker to populate (increased from 0.5)
+            
+            # 3. Apply each mask
+            for mask_name in mask_names:
+                # Map mask names to src substrings (Thumbnails are .png)
+                mask_src_map = {
+                    'Pinline': 'pinlineThumb',
+                    'Rules': 'rulesThumb',
+                    'Textbox Pinline': 'trimThumb',
+                    'Right Half': 'maskRightHalf',
+                    'Frame': 'frameThumb',
+                    'Border': 'borderThumb'
+                }
+                
+                target_src = mask_src_map.get(mask_name, mask_name.lower())
+                
+                # Find mask in picker
+                mask_selector = f"//div[@id='mask-picker']//img[contains(@src, '{target_src}')]"
+                mask_thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, mask_selector)))
+                
+                # Double click to apply
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", mask_thumb)
+                self.driver.execute_script("arguments[0].click();", mask_thumb)
+                self.driver.execute_script("arguments[0].click();", mask_thumb)
+                print(f"      Applied mask: {mask_name}")
+                time.sleep(0.2)
+                
+        except Exception as e:
+            print(f"   Error applying masks: {e}", file=sys.stderr)
+
     def set_frame_color(self, colors, type_line=None):
         """
         Sets the frame color based on the provided list of color codes (e.g., ['W', 'U']).
@@ -216,13 +262,16 @@ class CanvasMixin:
         print(f"   Setting frame color for colors: {colors}, type_line: {type_line}...")
         
         target_thumb_suffix = "cThumb.png" # Default to Colorless
+        is_colored_artifact = False
         
-        if not colors:
-            # Check for Artifact
-            if type_line and "Artifact" in type_line:
-                target_thumb_suffix = "aThumb.png" # Artifact
-            else:
-                target_thumb_suffix = "cThumb.png" # Colorless/Land
+        # Prioritize Artifacts to ensure they always get the Artifact frame (aThumb.png)
+        # regardless of their colors (e.g. Colored Artifacts).
+        if type_line and "Artifact" in type_line:
+            target_thumb_suffix = "aThumb.png"
+            if colors:
+                is_colored_artifact = True
+        elif not colors:
+            target_thumb_suffix = "cThumb.png" # Colorless/Land
         elif len(colors) > 1:
             target_thumb_suffix = "mThumb.png" # Multicolor
         else:
@@ -244,7 +293,30 @@ class CanvasMixin:
             frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
             frame_tab.click()
             
-            # 2. Find the thumbnail
+            # 4. Handle Colored Artifacts (Apply Masks FIRST)
+            # We apply masks first because apply_mask clicks the color frame (setting the base to color).
+            # We then switch the base frame to Artifact, assuming masks are preserved.
+            if is_colored_artifact:
+                print(f"   [Colored Artifact] Applying colored masks for {colors}...")
+                
+                # Determine the color frame to pull masks from
+                mask_source_suffix = "cThumb.png"
+                if len(colors) > 1:
+                    mask_source_suffix = "mThumb.png"
+                else:
+                    color_map = {
+                        'W': 'wThumb.png',
+                        'U': 'uThumb.png',
+                        'B': 'bThumb.png',
+                        'R': 'rThumb.png',
+                        'G': 'gThumb.png'
+                    }
+                    mask_source_suffix = color_map.get(colors[0], "cThumb.png")
+                
+                # Apply Pinline and Rules masks from that color
+                self.apply_mask(mask_source_suffix, ['Pinline', 'Rules', 'Textbox Pinline'])
+
+            # 2. Find the thumbnail (Base Frame)
             # We look for an image whose src ends with the target suffix
             # Using contains() with the slash to be safer: e.g. '/wThumb.png'
             
@@ -256,11 +328,12 @@ class CanvasMixin:
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", thumb)
             time.sleep(0.5)
             
-            # Double click to be safe
+            # Double click to be safe (Sets the Base Frame)
             self.driver.execute_script("arguments[0].click();", thumb)
             self.driver.execute_script("arguments[0].click();", thumb)
             
             print(f"   Applied frame color using '{target_thumb_suffix}'.")
+            
             time.sleep(self.render_delay)
             
         except Exception as e:

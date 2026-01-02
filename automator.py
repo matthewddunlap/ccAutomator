@@ -697,27 +697,40 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 self._apply_flavor_font_mod()
             # --- NEW: Clear Mana Cost for Tokens ---
+            # Extract Scryfall data for frame color logic
+            scryfall_data = print_data.get('scryfall_data', {})
+            colors = scryfall_data.get('colors', [])
+            if not colors and 'card_faces' in scryfall_data:
+                 colors = scryfall_data['card_faces'][0].get('colors', [])
+
+            type_line = scryfall_data.get('type_line')
+            if not type_line and 'card_faces' in scryfall_data:
+                type_line = scryfall_data['card_faces'][0].get('type_line')
+
+            # Special handling for Artifacts:
+            # If an artifact is colorless (colors=[]) but has a color_identity (e.g. Bosh, Iron Golem),
+            # we use the color_identity to drive the "Colored Artifact" frame logic if the user desires it.
+            # This aligns with the "Colored Artifact" frame style which is often used for identity.
+            if type_line and "Artifact" in type_line and not colors:
+                color_identity = scryfall_data.get('color_identity', [])
+                if color_identity:
+                    print(f"   [Artifact] Using color_identity {color_identity} for frame color (colors was empty).")
+                    colors = color_identity
+
             if category and 'token' in category.lower():
                 self.clear_mana_cost()
                 
                 # --- NEW: Fix Frame Color for Tokens ---
                 # Tokens often default to colorless when mana cost is cleared.
                 # We force the frame color based on Scryfall data.
-                scryfall_data = print_data.get('scryfall_data', {})
-                colors = scryfall_data.get('colors', [])
-                
-                # Also check card_faces if colors is missing (e.g. transform tokens?)
-                if not colors and 'card_faces' in scryfall_data:
-                     # Use first face colors
-                     colors = scryfall_data['card_faces'][0].get('colors', [])
-
-                # Get type_line for artifact check
-                type_line = scryfall_data.get('type_line')
-                if not type_line and 'card_faces' in scryfall_data:
-                    type_line = scryfall_data['card_faces'][0].get('type_line')
-
                 self.set_frame_color(colors, type_line=type_line)
-                
+                mods_applied = True
+
+            else:
+                # --- NEW: Fix Frame Color for Colored Artifacts (Non-Token) ---
+                # We now have logic in set_frame_color (canvas_mixin.py) to handle
+                # Colored Artifacts by prioritizing the Artifact frame and applying masks.
+                self.set_frame_color(colors, type_line=type_line)
                 mods_applied = True
 
             if self.apply_white_border_on_capture:
