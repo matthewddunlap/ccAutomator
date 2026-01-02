@@ -293,29 +293,6 @@ class CanvasMixin:
             frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
             frame_tab.click()
             
-            # 4. Handle Colored Artifacts (Apply Masks FIRST)
-            # We apply masks first because apply_mask clicks the color frame (setting the base to color).
-            # We then switch the base frame to Artifact, assuming masks are preserved.
-            if is_colored_artifact:
-                print(f"   [Colored Artifact] Applying colored masks for {colors}...")
-                
-                # Determine the color frame to pull masks from
-                mask_source_suffix = "cThumb.png"
-                if len(colors) > 1:
-                    mask_source_suffix = "mThumb.png"
-                else:
-                    color_map = {
-                        'W': 'wThumb.png',
-                        'U': 'uThumb.png',
-                        'B': 'bThumb.png',
-                        'R': 'rThumb.png',
-                        'G': 'gThumb.png'
-                    }
-                    mask_source_suffix = color_map.get(colors[0], "cThumb.png")
-                
-                # Apply Pinline and Rules masks from that color
-                self.apply_mask(mask_source_suffix, ['Pinline', 'Rules', 'Textbox Pinline'])
-
             # 2. Find the thumbnail (Base Frame)
             # We look for an image whose src ends with the target suffix
             # Using contains() with the slash to be safer: e.g. '/wThumb.png'
@@ -333,6 +310,29 @@ class CanvasMixin:
             self.driver.execute_script("arguments[0].click();", thumb)
             
             print(f"   Applied frame color using '{target_thumb_suffix}'.")
+            
+            # 4. Handle Colored Artifacts (Apply Masks AFTER Base Frame)
+            # User instructions: Set Artifact Frame -> Single Click Color Frame -> Apply Masks.
+            if is_colored_artifact:
+                print(f"   [Colored Artifact] Applying colored masks for {colors}...")
+                
+                # Determine the color frame to pull masks from
+                mask_source_suffix = "cThumb.png"
+                if len(colors) > 1:
+                    mask_source_suffix = "mThumb.png"
+                else:
+                    color_map = {
+                        'W': 'wThumb.png',
+                        'U': 'uThumb.png',
+                        'B': 'bThumb.png',
+                        'R': 'rThumb.png',
+                        'G': 'gThumb.png'
+                    }
+                    mask_source_suffix = color_map.get(colors[0], "cThumb.png")
+                
+                # Apply Pinline and Textbox Pinline masks from that color
+                # User requested to NOT apply 'Rules' mask, so the artifact rules box remains.
+                self.apply_mask(mask_source_suffix, ['Pinline', 'Textbox Pinline'])
             
             time.sleep(self.render_delay)
             
