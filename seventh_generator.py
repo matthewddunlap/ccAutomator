@@ -102,10 +102,18 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 code1 = LAND_COLOR_MAP.get(c1, 'l')
                 code2 = LAND_COLOR_MAP.get(c2, 'l')
                 
-                layers.append((FRAME_NAMES['l'], 'regular/l.png', 'Pinline'))
-                
-                # Sample order: c2 (Right) then c1 (Full)
-                # This seems counter-intuitive (Full covers Right), but matches the sample JSON.
+                # Split Pinlines
+                layers.append({
+                    "name": FRAME_NAMES.get(code2, 'Land Frame'),
+                    "src": f"/img/frames/seventh/regular/{code2}.png",
+                    "masks": [
+                        {"src": "/img/frames/seventh/regular/pinline.svg", "name": "Pinline"},
+                        {"src": "/img/frames/maskRightHalf.png", "name": "Right Half"}
+                    ]
+                })
+                layers.append((FRAME_NAMES.get(code1, 'Land Frame'), f'regular/{code1}.png', 'Pinline'))
+
+                # Split Rules Box
                 layers.append({
                     "name": FRAME_NAMES.get(code2, 'Land Frame'),
                     "src": f"/img/frames/seventh/regular/{code2}.png",
@@ -114,11 +122,20 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                         {"src": "/img/frames/maskRightHalf.png", "name": "Right Half"}
                     ]
                 })
-                
                 layers.append((FRAME_NAMES.get(code1, 'Land Frame'), f'regular/{code1}.png', 'Rules'))
+
+                # Split Textbox Pinline (Trim)
+                layers.append({
+                    "name": FRAME_NAMES.get(code2, 'Land Frame'),
+                    "src": f"/img/frames/seventh/regular/{code2}.png",
+                    "masks": [
+                        {"src": "/img/frames/seventh/regular/trim.svg", "name": "Textbox Pinline"},
+                        {"src": "/img/frames/maskRightHalf.png", "name": "Right Half"}
+                    ]
+                })
+                layers.append((FRAME_NAMES.get(code1, 'Land Frame'), f'regular/{code1}.png', 'Textbox Pinline'))
                 
                 layers.append((FRAME_NAMES['l'], 'regular/l.png', 'Frame'))
-                layers.append((FRAME_NAMES['l'], 'regular/l.png', 'Textbox Pinline'))
                 layers.append((FRAME_NAMES['l'], 'regular/l.png', 'Border'))
                 
             else:
@@ -405,11 +422,35 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         oracle_text = data.get('oracle_text', '')
         flavor_text = data.get('flavor_text', '')
         
-        # Apply formatting
-        is_basic = 'Basic Land' in type_line
+        # --- Land Rules Text Handling (Large Symbols) ---
+        is_basic_land = 'Basic' in type_line and 'Land' in type_line
+        is_land = 'Land' in type_line
+        produced_mana = data.get('produced_mana', [])
         
-        full_text = self._format_text(oracle_text, is_basic_land=is_basic)
-        if flavor_text:
+        full_text = ""
+        if is_basic_land:
+            # Basic Land Logic (Large Symbols)
+            mana_symbol = ''
+            card_name_upper = card_name.upper()
+            if 'PLAINS' in card_name_upper: mana_symbol = '{w}'
+            elif 'ISLAND' in card_name_upper: mana_symbol = '{u}'
+            elif 'SWAMP' in card_name_upper: mana_symbol = '{b}'
+            elif 'MOUNTAIN' in card_name_upper: mana_symbol = '{r}'
+            elif 'FOREST' in card_name_upper: mana_symbol = '{g}'
+            
+            if mana_symbol:
+                full_text = f"{{down80}}{{fontsize64pt}}{{center}}{mana_symbol}"
+            else:
+                full_text = self._format_text(oracle_text, is_basic_land=True)
+        elif is_land and len(produced_mana) == 2:
+            # Dual Land Logic (Option B: Large Symbols)
+            symbols = " ".join([f"{{{c.lower()}}}" for c in produced_mana])
+            full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+            print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
+        else:
+            full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
+
+        if flavor_text and not (is_basic_land or (is_land and len(produced_mana) == 2)):
             formatted_flavor = self._format_text(flavor_text, is_flavor=True)
             flavor_mods = ""
             if flavor_font_size: flavor_mods += f"{{fontsize{flavor_font_size}}}"

@@ -267,15 +267,16 @@ class CanvasMixin:
     def set_frame_color(self, colors, type_line=None, mana_cost=None):
         """
         Sets the frame color based on the card's colors and type line.
-        Prioritizes 'Artifact' type line to use 'aThumb.png'.
-        For Colored Artifacts, applies masks from Land frames.
+        Prioritizes 'Artifact' and 'Land' type lines to use specialized base frames.
+        For Colored Artifacts and Lands, applies masks from colored Land frames.
         """
         print(f"   Setting frame color for colors: {colors}, type_line: {type_line}...")
         
         target_thumb_suffix = "cThumb.png" # Default to colorless
         is_colored_artifact = False
+        is_colored_land = False
         
-        # 1. Navigate to the Frame tab (added back as it was missing in the provided snippet)
+        # 1. Navigate to the Frame tab
         frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
         frame_tab.click()
 
@@ -283,16 +284,17 @@ class CanvasMixin:
             target_thumb_suffix = "aThumb.png"
             if colors:
                 is_colored_artifact = True
+        elif type_line and "Land" in type_line:
+            target_thumb_suffix = "lThumb.png"
+            if colors:
+                is_colored_land = True
         elif not colors:
-            # Colorless non-artifact (e.g. Eldrazi, Lands)
-            if type_line and "Land" in type_line:
-                 target_thumb_suffix = "lThumb.png"
-            else:
-                 target_thumb_suffix = "cThumb.png"
+            # Colorless non-artifact (e.g. Eldrazi)
+            target_thumb_suffix = "cThumb.png"
         elif len(colors) > 1:
             target_thumb_suffix = "mThumb.png"
         else:
-            # Single color mapping
+            # Single color mapping for spells
             color_map = {
                 'W': 'wThumb.png',
                 'U': 'uThumb.png',
@@ -304,11 +306,7 @@ class CanvasMixin:
 
         try:
             # 1. Find the thumbnail (Base Frame)
-            # We look for an image whose src ends with the target suffix
-            # Using contains() with the slash to be safer: e.g. '/wThumb.png'
-            
             thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{target_thumb_suffix}')]"
-            
             thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))
             
             # 2. Scroll and Click
@@ -319,11 +317,11 @@ class CanvasMixin:
             self.driver.execute_script("arguments[0].click();", thumb)
             self.driver.execute_script("arguments[0].click();", thumb)
             
-            print(f"   Applied frame color using '{target_thumb_suffix}'.")
+            print(f"   Applied base frame using '{target_thumb_suffix}'.")
             
-            # 3. Handle Colored Artifacts (Apply Masks AFTER Base Frame)
-            if is_colored_artifact:
-                print(f"   [Colored Artifact] Applying colored masks for {colors}...")
+            # 3. Handle Colored Artifacts and Lands (Apply Masks AFTER Base Frame)
+            if is_colored_artifact or is_colored_land:
+                print(f"   [Colored {'Land' if is_colored_land else 'Artifact'}] Applying colored masks for {colors}...")
                 
                 # Helper to map color char to Land frame suffix
                 def get_land_suffix(color_char):
@@ -335,7 +333,15 @@ class CanvasMixin:
                         'G': 'glThumb.png'
                     }.get(color_char, "cThumb.png")
 
-                # Parse mana_cost to determine color order if available
+                # Masks to apply
+                # Lands want Pinline, Textbox Pinline, AND Rules (border)
+                # Artifacts usually only want Pinlines
+                target_masks = ['Pinline', 'Textbox Pinline']
+                if is_colored_land:
+                    target_masks.append('Rules')
+                    print(f"      Including 'Rules' mask for colored Land.")
+
+                # Parse mana_cost or colors to determine color order
                 ordered_colors = []
                 if mana_cost:
                     # Extract all letters from mana cost (e.g. {1}{B}{R} -> BR)
@@ -344,34 +350,34 @@ class CanvasMixin:
                     seen = set()
                     ordered_colors = [x for x in cost_colors if not (x in seen or seen.add(x))]
                 
-                # Fallback if mana_cost didn't give us enough info (shouldn't happen for valid cards)
+                # Fallback if mana_cost didn't give us info (common for lands)
                 if not ordered_colors:
                     ordered_colors = colors
 
                 if len(ordered_colors) == 1:
                     # Single Color
                     mask_source_suffix = get_land_suffix(ordered_colors[0])
-                    self.apply_mask(mask_source_suffix, ['Pinline', 'Textbox Pinline'])
+                    self.apply_mask(mask_source_suffix, target_masks)
                 
                 elif len(ordered_colors) == 2:
-                    # Dual Color (Split Pinlines)
+                    # Dual Color (Split Masks)
                     color1 = ordered_colors[0]
                     color2 = ordered_colors[1]
                     
-                    print(f"   [Dual Artifact] Split Pinlines: {color1} (Left) / {color2} (Right)")
+                    print(f"   [Dual {'Land' if is_colored_land else 'Artifact'}] Split Masks: {color1} (Left) / {color2} (Right)")
                     
                     # Apply Left Half (Normal)
                     suffix1 = get_land_suffix(color1)
-                    self.apply_mask(suffix1, ['Pinline', 'Textbox Pinline'], right_half=False)
+                    self.apply_mask(suffix1, target_masks, right_half=False)
                     
                     # Apply Right Half
                     suffix2 = get_land_suffix(color2)
-                    self.apply_mask(suffix2, ['Pinline', 'Textbox Pinline'], right_half=True)
+                    self.apply_mask(suffix2, target_masks, right_half=True)
                     
                 else:
                     # 3+ Colors (Gold)
-                    print(f"   [Multi Artifact] 3+ Colors: Using Gold Land Frame")
-                    self.apply_mask("lThumb.png", ['Pinline', 'Textbox Pinline'])
+                    print(f"   [Multi {'Land' if is_colored_land else 'Artifact'}] 3+ Colors: Using Gold Land Frame as mask source")
+                    self.apply_mask("lThumb.png", target_masks)
             
             time.sleep(self.render_delay)
             

@@ -673,10 +673,32 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                  "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left)
     
-            # --- NEW: Basic Land Rules Text Handling ---
-            is_basic_land = False
-            if type_line and 'Basic' in type_line and 'Land' in type_line:
-                is_basic_land = True
+            # Extract Scryfall data for frame color logic and rules text
+            scryfall_data = print_data.get('scryfall_data', {})
+            
+            # Use produced_mana for lands if colors is empty
+            colors = scryfall_data.get('colors', [])
+            if not colors and 'card_faces' in scryfall_data:
+                 colors = scryfall_data['card_faces'][0].get('colors', [])
+            
+            # Lands often have empty colors in Scryfall but have produced_mana
+            produced_mana = scryfall_data.get('produced_mana', [])
+            if not produced_mana and 'card_faces' in scryfall_data:
+                produced_mana = scryfall_data['card_faces'][0].get('produced_mana', [])
+
+            type_line_scryfall = scryfall_data.get('type_line')
+            if not type_line_scryfall and 'card_faces' in scryfall_data:
+                type_line_scryfall = scryfall_data['card_faces'][0].get('type_line')
+            
+            # Use a combined type line for logic
+            current_type_line = type_line_scryfall or type_line
+
+            # We pass mana_cost now to support dual-colored artifact logic (order matters)
+            mana_cost = scryfall_data.get('mana_cost', '')
+
+            # --- Land and Rules Text Handling ---
+            is_basic_land = current_type_line and 'Basic' in current_type_line and 'Land' in current_type_line
+            is_land = current_type_line and 'Land' in current_type_line
     
             if is_basic_land:
                 mana_symbol = ''
@@ -693,22 +715,16 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     # Fallback for other basic lands if any
                     self._apply_text_mods("Rules Text", down=self.rules_down)
                     self._apply_flavor_font_mod()
+            elif is_land and len(produced_mana) == 2:
+                # Option B: Dual Land Large Symbols
+                # We sort them to ensure consistent ordering if needed, but Scryfall usually does WUBRG order
+                symbols = " ".join([f"{{{c.lower()}}}" for c in produced_mana])
+                rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                self._set_rules_text(rules_text)
+                print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 self._apply_flavor_font_mod()
-            # --- NEW: Clear Mana Cost for Tokens ---
-            # Extract Scryfall data for frame color logic
-            scryfall_data = print_data.get('scryfall_data', {})
-            colors = scryfall_data.get('colors', [])
-            if not colors and 'card_faces' in scryfall_data:
-                 colors = scryfall_data['card_faces'][0].get('colors', [])
-
-            type_line = scryfall_data.get('type_line')
-            if not type_line and 'card_faces' in scryfall_data:
-                type_line = scryfall_data['card_faces'][0].get('type_line')
-
-            # We pass mana_cost now to support dual-colored artifact logic (order matters)
-            mana_cost = scryfall_data.get('mana_cost', '')
 
             if category and 'token' in category.lower():
                 self.clear_mana_cost()
@@ -716,14 +732,18 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 # --- NEW: Fix Frame Color for Tokens ---
                 # Tokens often default to colorless when mana cost is cleared.
                 # We force the frame color based on Scryfall data.
-                self.set_frame_color(colors, type_line=type_line, mana_cost=mana_cost)
+                self.set_frame_color(colors, type_line=current_type_line, mana_cost=mana_cost)
                 mods_applied = True
 
             else:
-                # --- NEW: Fix Frame Color for Colored Artifacts (Non-Token) ---
-                # We now have logic in set_frame_color (canvas_mixin.py) to handle
-                # Colored Artifacts by prioritizing the Artifact frame and applying masks.
-                self.set_frame_color(colors, type_line=type_line, mana_cost=mana_cost)
+                # --- NEW: Fix Frame Color for Lands and Colored Artifacts ---
+                # For lands, we use produced_mana as effective colors if colors is empty
+                effective_colors = colors
+                if is_land and not colors and produced_mana:
+                    effective_colors = produced_mana
+                    print(f"   [Land Metadata] Using produced_mana as effective colors: {effective_colors}")
+
+                self.set_frame_color(effective_colors, type_line=current_type_line, mana_cost=mana_cost)
                 mods_applied = True
 
             if self.apply_white_border_on_capture:
