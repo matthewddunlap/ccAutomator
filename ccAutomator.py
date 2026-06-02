@@ -953,6 +953,11 @@ def main():
 
             print("\n--- Starting Main Card Processing ---")
             # --- Main Processing Loop ---
+            success_count = 0
+            skipped_count = 0
+            error_count = 0
+            error_list = []
+
             if args.card_builder == 'selenium':
                 from scryfall_cache import ScryfallCache
                 cache = ScryfallCache()
@@ -963,12 +968,9 @@ def main():
                     set_code = card_data.get('set')
                     
                     # Pre-emptive Skip Check via Local Cache
-                    # If we can resolve the card and its set locally, we can check if it exists on the server
-                    # without ever making a Scryfall API call or starting the Selenium process for this card.
                     if not args.overwrite:
                         local_card = cache.get_card(card_name, set_code=set_code)
                         if local_card:
-                            # Use logic similar to automator._generate_final_filename
                             from automator_utils import generate_safe_filename
                             safe_card = generate_safe_filename(local_card.get('name', card_name))
                             safe_set = generate_safe_filename(local_card.get('set', set_code)) if local_card.get('set') else 'unknown-set'
@@ -978,10 +980,24 @@ def main():
                             if automator.should_skip_file(potential_filename):
                                 print(f"--- Processing card {i}/{len(cards_to_process)} ---")
                                 print(f"   Pre-emptive skip: '{potential_filename}' already exists.")
+                                skipped_count += 1
                                 continue
 
                     print(f"--- Processing card {i}/{len(cards_to_process)} ---")
-                    automator.process_and_capture_card(card_name, category=category, set_code=set_code)
+                    try:
+                        res = automator.process_and_capture_card(card_name, category=category, set_code=set_code)
+                        if res['captured'] > 0:
+                            success_count += 1
+                        if res['skipped'] > 0 and res['captured'] == 0:
+                            # If all selected prints were skipped, count as skipped card
+                            skipped_count += 1
+                        elif res['skipped'] > 0:
+                            # Partial success? Still count as success for the main card
+                            pass
+                    except Exception as e:
+                        print(f"   Error processing '{card_name}': {e}", file=sys.stderr)
+                        error_count += 1
+                        error_list.append(f"1 {card_name}{'|' + set_code if set_code else ''}")
 
             # --- Full-Art Basic Land Generation (Single Session) ---
             # Moved to end of workflow to prevent template masks from affecting main cards
@@ -1139,6 +1155,17 @@ def main():
                     prime_card_names=prime_card_names_ccfile,
                     prime_frame_name=args.prime_frame
                 )
+
+            # --- Final Summary ---
+            print("\n--- Summary ---")
+            print(f"Success: {success_count}")
+            print(f"Skipped: {skipped_count}")
+            print(f"Error: {error_count}")
+            
+            if error_list:
+                print("\n--- Summary of Errors ---")
+                for err in error_list:
+                    print(err)
 
             if args.save_cc_file and args.card_builder == 'selenium':
                 # In JSON mode, we already generated the file, but maybe the user wants the *final* state

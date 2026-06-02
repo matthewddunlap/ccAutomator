@@ -367,17 +367,11 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
     def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
-        Orchestrates the entire process for a single card:
-        1. Selects the card (via Scryfall or Card Conjurer search).
-        2. Sets the frame (if not already set).
-        3. Captures the image (unless prepare_only is True).
+        Orchestrates the entire process for a single card.
+        Returns a dict with 'captured' and 'skipped' counts.
         """
-        # Check if we should skip this card based on overwrite logic (only if not priming)
-        # NOTE: Overwrite logic is handled per-print inside the loop, so we don't check here.
-        # if not is_priming and not prepare_only:
-        #     if self._should_skip_card(card_name):
-        #         return
-
+        results = {'captured': 0, 'skipped': 0}
+        
         # --- Canvas Stabilization (Priming) ---
         if is_priming:
             # For priming, we just want to load *any* print of the card to get the renderer ready.
@@ -395,7 +389,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
                 else:
                     print(f"   Error: No prints found for priming card '{card_name}'.", file=sys.stderr)
-            return
+            return results
 
 
         prints_to_capture = []
@@ -513,7 +507,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not scryfall_results:
                 if self.no_match_selection == 'skip':
                     print(f"   Warning: Initial Scryfall query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
-                    return
+                    return results
     
                 # Fallback Step 1: Try stripping ONLY include sets, keeping exclude sets (if any exist)
                 if current_exclude_sets:
@@ -563,7 +557,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
                     if not scryfall_results:
                         print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
-                        return
+                        return results
     
                 # If fallback query was used, the selection strategy shifts to no_match_selection
                 selection_strategy = self.no_match_selection
@@ -573,7 +567,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             if not matched_prints:
                 print(f"   Warning: Scryfall found results, but none matched the available prints in Card Conjurer for '{card_name}'. Skipping.", file=sys.stderr)
-                return
+                return results
             
             # 4. Select prints to capture based on strategy
             if selection_strategy == 'latest':
@@ -589,7 +583,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # Step 2: Iterate through selected prints and capture
         if not prints_to_capture:
             print(f"   No prints selected for capture for '{card_name}'.")
-            return
+            return results
     
         print(f"Preparing to capture {len(prints_to_capture)} print(s) for '{card_name}'.")
         for print_data in prints_to_capture:
@@ -603,6 +597,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                      print(f"   Skipping '{output_filename}', file exists on server.")
                  else:
                      print(f"   Skipping '{output_filename}', file exists locally.")
+                 results['skipped'] += 1
                  continue # Skip to the next print
     
             self.import_save_tab.click()
@@ -852,6 +847,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             # Capture using the new method
             filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
             self.capture_card(filename)
+            results['captured'] += 1
+
+        return results
 
     def capture_card(self, output_filename):
         """
