@@ -954,10 +954,32 @@ def main():
             print("\n--- Starting Main Card Processing ---")
             # --- Main Processing Loop ---
             if args.card_builder == 'selenium':
+                from scryfall_cache import ScryfallCache
+                cache = ScryfallCache()
+                
                 for i, card_data in enumerate(cards_to_process, 1):
                     card_name = card_data['name']
                     category = card_data['category']
                     set_code = card_data.get('set')
+                    
+                    # Pre-emptive Skip Check via Local Cache
+                    # If we can resolve the card and its set locally, we can check if it exists on the server
+                    # without ever making a Scryfall API call or starting the Selenium process for this card.
+                    if not args.overwrite:
+                        local_card = cache.get_card(card_name, set_code=set_code)
+                        if local_card:
+                            # Use logic similar to automator._generate_final_filename
+                            from automator_utils import generate_safe_filename
+                            safe_card = generate_safe_filename(local_card.get('name', card_name))
+                            safe_set = generate_safe_filename(local_card.get('set', set_code)) if local_card.get('set') else 'unknown-set'
+                            safe_num = generate_safe_filename(local_card.get('collector_number')) if local_card.get('collector_number') else 'no-num'
+                            potential_filename = f"{safe_card}_{safe_set}_{safe_num}.png"
+                            
+                            if automator.should_skip_file(potential_filename):
+                                print(f"--- Processing card {i}/{len(cards_to_process)} ---")
+                                print(f"   Pre-emptive skip: '{potential_filename}' already exists.")
+                                continue
+
                     print(f"--- Processing card {i}/{len(cards_to_process)} ---")
                     automator.process_and_capture_card(card_name, category=category, set_code=set_code)
 

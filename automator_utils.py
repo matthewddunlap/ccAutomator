@@ -321,23 +321,23 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
                                  basic_land_include_set=None, basic_land_exclude_set=None):
     """
     Query Scryfall with multi-step fallback logic.
-    
-    Tries progressively broader queries:
-    1. Full query with all filters
-    2. Remove include filters, keep exclude filters
-    3. Remove 'not:covered', keep exclude filters  
-    4. Remove all filters (broadest search)
-    
-    Args:
-        Same as build_scryfall_query
-        
-    Returns:
-        Scryfall card data dict if found, None otherwise
+    Prioritizes local cache for simple name and set lookups to prevent rate-limiting.
     """
     import sys
+    from scryfall_cache import ScryfallCache
     
+    # 1. Try Local Cache first
+    # Now supports set_code lookups!
+    if not collector_number and not scryfall_filter:
+        cache = ScryfallCache()
+        local_card = cache.get_card(card_name, set_code=set_code)
+        if local_card:
+            # print(f"   Scryfall lookup: '{card_name}'{' ('+set_code+')' if set_code else ''} found in local cache.")
+            return local_card
+
     # Determine which filters to use based on card name
     is_basic_land = card_name in BASIC_LAND_NAMES
+
     current_include_set = basic_land_include_set if is_basic_land else spells_include_set
     current_exclude_set = basic_land_exclude_set if is_basic_land else spells_exclude_set
     

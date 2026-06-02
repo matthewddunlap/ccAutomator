@@ -311,6 +311,60 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         suffix = "{/bold}" if bold else ""
         return f"{prefix}{text}{suffix}"
 
+    def should_skip_file(self, filename):
+        """
+        Public wrapper for the skip logic check.
+        """
+        if self.upload_path:
+            # Check if file exists on the server
+            exists = self._check_file_exists_on_server(filename)
+            if not exists:
+                return False
+                
+            if self.overwrite:
+                # print(f"   '{filename}' exists on server, but --overwrite is enabled. Proceeding.")
+                return False
+            elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                # Check modification time on server
+                server_mod_time = self._get_file_modification_time_on_server(filename)
+                if server_mod_time:
+                    if self.overwrite_older_than_dt and server_mod_time < self.overwrite_older_than_dt:
+                        # print(f"   '{filename}' exists on server (modified {server_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                        return False
+                    elif self.overwrite_newer_than_dt and server_mod_time > self.overwrite_newer_than_dt:
+                        # print(f"   '{filename}' exists on server (modified {server_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
+                        return False
+                    else:
+                        # print(f"   Skipping '{filename}', file exists on server and does not meet overwrite criteria.")
+                        return True
+                else:
+                    # print(f"   Could not get modification time for '{filename}' on server. Skipping as per overwrite policy.")
+                    return True
+            else: # Default behavior: skip if exists and no overwrite flag
+                # print(f"   Skipping '{filename}', file exists on server.")
+                return True
+        else: # Local save mode
+            output_path = os.path.join(self.download_dir, filename)
+            if os.path.exists(output_path):
+                if self.overwrite:
+                    # print(f"   '{filename}' exists locally, but --overwrite is enabled. Proceeding.")
+                    return False
+                elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                    local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
+                    if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
+                        # print(f"   '{filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                        return False
+                    elif self.overwrite_newer_than_dt and local_mod_time > self.overwrite_newer_than_dt:
+                        # print(f"   '{filename}' exists locally (modified {local_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
+                        return False
+                    else:
+                        # print(f"   Skipping '{filename}', file exists locally and does not meet overwrite criteria.")
+                        return True
+                else:
+                    # print(f"   Skipping '{filename}', file exists locally.")
+                    return True
+        return False
+
     def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
         Orchestrates the entire process for a single card:
@@ -543,49 +597,13 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             # Check if file already exists on server or locally
             output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
-            should_skip = False
-            if self.upload_path:
-                # Check if file exists on the server
-                if self._check_file_exists_on_server(output_filename):
-                    if self.overwrite:
-                        print(f"   '{output_filename}' exists on server, but --overwrite is enabled. Proceeding.")
-                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
-                        # Check modification time on server
-                        server_mod_time = self._get_file_modification_time_on_server(output_filename)
-                        if server_mod_time:
-                            if self.overwrite_older_than_dt and server_mod_time < self.overwrite_older_than_dt:
-                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is older than --overwrite-older-than. Proceeding.")
-                            elif self.overwrite_newer_than_dt and server_mod_time > self.overwrite_newer_than_dt:
-                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
-                            else:
-                                print(f"   Skipping '{output_filename}', file exists on server and does not meet overwrite criteria.")
-                                should_skip = True
-                        else:
-                            print(f"   Could not get modification time for '{output_filename}' on server. Skipping as per overwrite policy.")
-                            should_skip = True
-                    else: # Default behavior: skip if exists and no overwrite flag
-                        print(f"   Skipping '{output_filename}', file exists on server.")
-                        should_skip = True
-            else: # Local save mode
-                output_path = os.path.join(self.download_dir, output_filename)
-                if os.path.exists(output_path):
-                    if self.overwrite:
-                        print(f"   '{output_filename}' exists locally, but --overwrite is enabled. Proceeding.")
-                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
-                        local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
-                        if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
-                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
-                        elif self.overwrite_newer_than_dt and local_mod_time > self.overwrite_newer_than_dt:
-                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
-                        else:
-                            print(f"   Skipping '{output_filename}', file exists locally and does not meet overwrite criteria.")
-                            should_skip = True
-                    else: # Default behavior: skip if exists and no overwrite flag
-                        print(f"   Skipping '{output_filename}', file exists on server.")
-                        should_skip = True
             
-            if should_skip:
-                continue # Skip to the next print
+            if self.should_skip_file(output_filename):
+                 if self.upload_path:
+                     print(f"   Skipping '{output_filename}', file exists on server.")
+                 else:
+                     print(f"   Skipping '{output_filename}', file exists locally.")
+                 continue # Skip to the next print
     
             self.import_save_tab.click()
             dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
