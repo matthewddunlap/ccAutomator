@@ -366,72 +366,56 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     except Exception as e:
         print(f"   Warning: Query failed: {e}", file=sys.stderr)
     
-    # Fallback 1: Remove include filters, keep exclude filters
-    if current_include_set and current_exclude_set:
-        print(f"   Warning: Initial query found no matches. Stripping include sets but keeping exclude sets...", file=sys.stderr)
-        fallback_query = build_scryfall_query(
+    # Fallback 1: Remove 'not:covered', but KEEP all set selection criteria (including set_code/includes/excludes)
+    if section.lower() not in ['token', 'tokens']:
+        print(f"   Warning: Initial query found no matches. Step 1: Stripping 'not:covered' but keeping all set filters...", file=sys.stderr)
+        fallback_1_query = build_scryfall_query(
             card_name=card_name,
             section=section,
             set_code=set_code,
             collector_number=collector_number,
             scryfall_filter=scryfall_filter,
-            spells_include_set=None,
-            spells_exclude_set=spells_exclude_set if not is_basic_land else None,
-            basic_land_include_set=None,
-            basic_land_exclude_set=basic_land_exclude_set if is_basic_land else None
+            spells_include_set=spells_include_set,
+            spells_exclude_set=spells_exclude_set,
+            basic_land_include_set=basic_land_include_set,
+            basic_land_exclude_set=basic_land_exclude_set
         )
-        print(f"   Scryfall fallback query (excludes only): {fallback_query}")
+        if "not:covered" in fallback_1_query:
+            fallback_1_query = fallback_1_query.replace("not:covered", "").replace("  ", " ").strip()
+        
+        print(f"   Scryfall fallback query (set filters kept, no not:covered): {fallback_1_query}")
         try:
-            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_query})
+            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_1_query})
             if resp.status_code == 200:
                 results = resp.json().get('data', [])
                 if results:
                     return results[0]
         except Exception as e:
-            print(f"   Warning: Fallback query failed: {e}", file=sys.stderr)
+            print(f"   Warning: Fallback query 1 failed: {e}", file=sys.stderr)
     
-    # Fallback 2: Remove 'not:covered', keep exclude filters
-    if current_exclude_set:
-        print(f"   Warning: Fallback 1 found no matches. Stripping 'not:covered' but keeping exclude sets...", file=sys.stderr)
-        # Build a simpler query without not:covered
-        base_query = f'!"{card_name}"'
-        if set_code:
-            base_query += f" set:{set_code}"
-        if collector_number:
-            base_query += f" cn:{collector_number}"
-        if section.lower() in ['token', 'tokens']:
-            base_query += " t:token"
-        
-        # Add exclude filters
-        if current_exclude_set:
-            exclude_sets = parse_set_list(current_exclude_set)
-            for s in exclude_sets:
-                base_query += f" -set:{s}"
-        
-        if scryfall_filter:
-            base_query += f" {scryfall_filter}"
-        
-        print(f"   Scryfall fallback query (excludes only, no not:covered): {base_query}")
-        try:
-            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': base_query})
-            if resp.status_code == 200:
-                results = resp.json().get('data', [])
-                if results:
-                    return results[0]
-        except Exception as e:
-            print(f"   Warning: Fallback query 2 failed: {e}", file=sys.stderr)
-    
-    # Fallback 3: Strip ALL filters
-    print(f"   Warning: Query found no matches. Stripping ALL set filters and retrying a broader Scryfall search.", file=sys.stderr)
-    simple_query = f'!"{card_name}"'
-    if set_code:
-        simple_query += f" set:{set_code}"
-    if collector_number:
-        simple_query += f" cn:{collector_number}"
+    # Fallback 2: Strip ALL set filters (including set_code and collector_number), KEEP paper/layout
+    print(f"   Warning: Still no matches. Step 2: Stripping ALL set criteria but keeping paper/layout constraints...", file=sys.stderr)
+    fallback_2_query = f'!"{card_name}" unique:art not:token -layout:art-series game:paper'
     if section.lower() in ['token', 'tokens']:
-        simple_query += " t:token"
+        fallback_2_query = f'!"{card_name}" unique:art is:token'
     
-    print(f"   Scryfall fallback query (no filters): {simple_query}")
+    print(f"   Scryfall fallback query (sets stripped): {fallback_2_query}")
+    try:
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_2_query})
+        if resp.status_code == 200:
+            results = resp.json().get('data', [])
+            if results:
+                return results[0]
+    except Exception as e:
+        print(f"   Warning: Fallback query 2 failed: {e}", file=sys.stderr)
+
+    # Fallback 3: Broadest search, additionally strip game:paper and -layout:art-series
+    print(f"   Warning: Still no matches. Step 3: Stripping paper/layout filters for broadest search.", file=sys.stderr)
+    simple_query = f'!"{card_name}" unique:art not:token'
+    if section.lower() in ['token', 'tokens']:
+        simple_query = f'!"{card_name}" unique:art is:token'
+    
+    print(f"   Scryfall fallback query (broadest): {simple_query}")
     try:
         resp = requests.get("https://api.scryfall.com/cards/search", params={'q': simple_query})
         if resp.status_code == 200:
