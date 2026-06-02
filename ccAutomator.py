@@ -614,11 +614,13 @@ def main():
             
             for card in section_cards:
                 card_name = card['name']
+                set_code = card.get('set')
                 try:
                     # Generate card with section-specific filtering
                     card_json = generator.generate_card(
                         card_name=card_name,
                         section=section,
+                        set_code=set_code,
                         scryfall_filter=args.scryfall_filter,
                         spells_include_set=spells_include,
                         spells_exclude_set=spells_exclude,
@@ -763,16 +765,18 @@ def main():
                     print(f"--- Starting Renderer Priming with {len(prime_cards)} cards ---")
                     for i, card_data in enumerate(prime_cards):
                         card_name = card_data['name']
-                        print(f"Priming card {i+1}/{len(prime_cards)}: '{card_name}'")
-                        automator.process_and_capture_card(card_name, is_priming=True)
+                        set_code = card_data.get('set')
+                        print(f"Priming card {i+1}/{len(prime_cards)}: '{card_name}'{' (set: ' + set_code + ')' if set_code else ''}")
+                        automator.process_and_capture_card(card_name, is_priming=True, set_code=set_code)
                     print("--- Renderer Priming Complete ---\n")
 
                 print("--- Starting Main Card Processing (Preparation Only) ---")
                 for i, card_data in enumerate(cards_to_process):
                     card_name = card_data['name']
                     category = card_data['category']
+                    set_code = card_data.get('set')
                     print(f"--- Processing card {i+1}/{len(cards_to_process)} ---")
-                    automator.process_and_capture_card(card_name, category=category, prepare_only=True)
+                    automator.process_and_capture_card(card_name, category=category, prepare_only=True, set_code=set_code)
                 
                 # Download the prepared project file
                 automator.download_saved_cards(temp_project_file)
@@ -936,8 +940,9 @@ def main():
                     print(f"\n--- Starting Renderer Priming with {len(prime_cards)} cards ---")
                     for i, card_data in enumerate(prime_cards, 1):
                         card_name = card_data['name']
-                        print(f"Priming card {i}/{len(prime_cards)}: '{card_name}'")
-                        automator.process_and_capture_card(card_name, is_priming=True)
+                        set_code = card_data.get('set')
+                        print(f"Priming card {i}/{len(prime_cards)}: '{card_name}'{' (set: ' + set_code + ')' if set_code else ''}")
+                        automator.process_and_capture_card(card_name, is_priming=True, set_code=set_code)
                     print("--- Renderer Priming Complete ---")
                 else:
                     print(f"Warning: Prime file '{args.prime_file}' was provided but contained no valid card names.", file=sys.stderr)
@@ -952,8 +957,9 @@ def main():
                 for i, card_data in enumerate(cards_to_process, 1):
                     card_name = card_data['name']
                     category = card_data['category']
+                    set_code = card_data.get('set')
                     print(f"--- Processing card {i}/{len(cards_to_process)} ---")
-                    automator.process_and_capture_card(card_name, category=category)
+                    automator.process_and_capture_card(card_name, category=category, set_code=set_code)
 
             # --- Full-Art Basic Land Generation (Single Session) ---
             # Moved to end of workflow to prevent template masks from affecting main cards

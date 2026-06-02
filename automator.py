@@ -311,7 +311,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         suffix = "{/bold}" if bold else ""
         return f"{prefix}{text}{suffix}"
 
-    def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False):
+    def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
         Orchestrates the entire process for a single card:
         1. Selects the card (via Scryfall or Card Conjurer search).
@@ -330,10 +330,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             print(f"--- Priming Renderer with '{card_name}' ---")
             
             if self.card_selection_strategy == 'scryfall':
-                self._prime_via_scryfall(card_name)
+                self._prime_via_scryfall(card_name, set_code=set_code)
             else:
                 # CardConjurer mode priming
-                all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True)
+                all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
                 if all_cc_prints:
                     initial_hash = self.current_canvas_hash
                     dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
@@ -366,13 +366,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # --- Scryfall Mode ---
         elif self.card_selection_strategy == 'scryfall':
             print(f"--- Scryfall Mode for '{card_name}' (Category: {category}) ---")
+            if set_code:
+                print(f"   Targeting specific set: {set_code}")
             
             # Determine if this is a token search
             is_token = bool(category and 'token' in category)
             
             # Get all available prints from Card Conjurer UI
             # For tokens, pass is_token=True to bypass set filtering (tokens have 't' prefix sets)
-            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=False, is_token=is_token)
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=False, is_token=is_token, set_code=set_code)
             
             # 1. Initial Scryfall Query (with set filters)
             # Adjust query based on category
@@ -383,6 +385,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             else:
                 # Standard Query: Exclude tokens, enforce paper/covered
                 base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'not:token', '-layout:art-series', 'game:paper', 'not:covered']
+            
+            if set_code:
+                base_query_parts.append(f'set:{set_code}')
             
             if self.scryfall_filter:
                 base_query_parts.append(self.scryfall_filter)
@@ -943,15 +948,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
 
 
-    def _prime_via_scryfall(self, card_name):
+    def _prime_via_scryfall(self, card_name, set_code=None):
         """
         Primes the renderer by loading a card from Scryfall.
         """
-        print(f"   Priming with Scryfall card: '{card_name}'...")
+        print(f"   Priming with Scryfall card: '{card_name}'{' (set: ' + set_code + ')' if set_code else ''}...")
         try:
             # Reuse _get_and_filter_prints to find the card
             # This handles the UI interaction to search Scryfall
-            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True)
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
             
             if all_cc_prints:
                 initial_hash = self.current_canvas_hash

@@ -164,11 +164,20 @@ def parse_card_file(filepath):
                 # Use regex to ignore leading numbers and capture the rest of the line.
                 match = re.match(r'^\d+\s+(.*)', line)
                 if match:
-                    card_name = match.group(1).strip()
-                    cards.append({'name': card_name, 'category': current_category})
+                    full_name = match.group(1).strip()
                 else:
                     # Assume the whole line is the card name if no number prefix
-                    cards.append({'name': line, 'category': current_category})
+                    full_name = line
+                
+                set_code = None
+                if '|' in full_name:
+                    parts = full_name.split('|', 1)
+                    card_name = parts[0].strip()
+                    set_code = parts[1].strip()
+                else:
+                    card_name = full_name
+                
+                cards.append({'name': card_name, 'category': current_category, 'set': set_code})
                     
     except FileNotFoundError:
         import sys

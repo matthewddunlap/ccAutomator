@@ -286,7 +286,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         text = text.replace('"', '”')
         
         # Smart Apostrophe
-        text = text.replace("'", "'")
+        text = text.replace("'", "’")
         
         # Convert all newlines to {lns} (applies to both oracle and flavor text)
         # text = text.replace('\n', '{lns}')
@@ -443,10 +443,31 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             else:
                 full_text = self._format_text(oracle_text, is_basic_land=True)
         elif is_land and len(produced_mana) == 2:
-            # Dual Land Logic (Option B: Large Symbols)
-            symbols = " ".join([f"{{{c.lower()}}}" for c in produced_mana])
-            full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
-            print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
+            # Dual Land Logic (Large Symbols + Preservation of conditional text)
+            symbols = " ".join([f"{{{c.upper()}}}" for c in produced_mana])
+            
+            # Detect if the first line is a standard mana ability
+            lines = oracle_text.split('\n')
+            first_line = lines[0].strip() if lines else ""
+            # Regex to match standard tap-for-mana line: ({T}: Add {G} or {U}.)
+            mana_ability_match = re.match(r'^\({T}: Add \{[A-Z]\} or \{[A-Z]\}\.\)$', first_line)
+            
+            if mana_ability_match:
+                if len(lines) > 1:
+                    # Multi-line: 52pt symbols + 12pt remaining text
+                    remaining_text = "\n".join(lines[1:])
+                    # We pass the remaining text through _format_text for smart quotes etc.
+                    formatted_remaining = self._format_text(remaining_text)
+                    # CC needs {lns} to force a newline between the centered symbols and left text
+                    full_text = f"{{fontsize52pt}}{{center}}{symbols}{{lns}}{{fontsize12pt}}{formatted_remaining}"
+                    print(f"   [Dual Land] Applied split symbols (52pt) and text (12pt): {symbols}")
+                else:
+                    # Single-line: 64pt symbols (existing behavior for Bayou, etc.)
+                    full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                    print(f"   [Dual Land] Applied large symbols (64pt): {symbols}")
+            else:
+                # Doesn't match standard pattern exactly, fallback to regular formatting
+                full_text = self._format_text(oracle_text)
         else:
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 
