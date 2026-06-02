@@ -696,6 +696,65 @@ def main():
         else:
             cards_to_process = all_cards
             print(f"Found {len(cards_to_process)} cards to process for capture.")
+
+        # --- PRE-FLIGHT CHECK (Early Exit) ---
+        if args.card_builder in ['selenium', 'combo'] and not args.overwrite:
+            from scryfall_cache import ScryfallCache
+            from automator_utils import generate_safe_filename
+            from urllib.parse import urljoin
+            import requests
+
+            print("\n--- Running Pre-flight Check ---")
+            cache = ScryfallCache()
+            cards_needing_work = []
+            
+            for card_data in cards_to_process:
+                name = card_data['name']
+                set_code = card_data.get('set')
+                
+                local_card = cache.get_card(name, set_code)
+                if not local_card:
+                    # Cannot resolve locally, must assume it needs processing
+                    cards_needing_work.append(card_data)
+                    continue
+                    
+                safe_card = generate_safe_filename(local_card.get('name', name))
+                safe_set = generate_safe_filename(local_card.get('set', set_code)) if local_card.get('set') else 'unknown-set'
+                safe_num = generate_safe_filename(local_card.get('collector_number')) if local_card.get('collector_number') else 'no-num'
+                filename = f"{safe_card}_{safe_set}_{safe_num}.png"
+                
+                # Check existence
+                exists = False
+                if args.upload_path:
+                    server_url = args.image_server if args.image_server else "http://mtgproxy:4242"
+                    check_url = urljoin(server_url, os.path.join(args.upload_path, filename))
+                    try:
+                        resp = requests.head(check_url, timeout=5)
+                        if resp.status_code == 200:
+                            exists = True
+                    except:
+                        pass
+                else:
+                    download_dir = args.output_dir if args.output_dir else "output_pngs"
+                    if os.path.exists(os.path.join(download_dir, filename)):
+                        exists = True
+                
+                if not exists:
+                    cards_needing_work.append(card_data)
+            
+            if not cards_needing_work:
+                # Double check full-art lands if enabled
+                if not args.full_art_basic_land:
+                    print("\n--- Summary ---")
+                    print(f"Success: 0")
+                    print(f"Skipped: {len(cards_to_process)}")
+                    print(f"Error: 0")
+                    print("\nAll cards already exist on server. Nothing to do. Exiting.")
+                    sys.exit(0)
+                else:
+                    print("   Pre-flight check: Main list complete, but checking full-art lands...")
+            else:
+                print(f"   Pre-flight check: {len(cards_needing_work)} cards still need processing.")
     elif args.card_builder == 'cc-file':
         print(f"Mode 'cc-file': Will render project file '{args.input_file}'.")
 
