@@ -1047,12 +1047,13 @@ def main():
                         res = automator.process_and_capture_card(card_name, category=category, set_code=set_code)
                         if res['captured'] > 0:
                             success_count += 1
-                        if res['skipped'] > 0 and res['captured'] == 0:
-                            # If all selected prints were skipped, count as skipped card
-                            skipped_count += 1
                         elif res['skipped'] > 0:
-                            # Partial success? Still count as success for the main card
-                            pass
+                            # All selected prints for this card were skipped
+                            skipped_count += 1
+                        else:
+                            # Neither captured nor skipped -> No match found or other silent failure
+                            error_count += 1
+                            error_list.append(f"1 {card_name}{'|' + set_code if set_code else ''}")
                     except Exception as e:
                         print(f"   Error processing '{card_name}': {e}", file=sys.stderr)
                         error_count += 1
@@ -1184,7 +1185,19 @@ def main():
                             # Capture Image
                             # Use the standard filename generation method to ensure consistency (e.g. snake_case)
                             output_filename = automator._generate_final_filename(card_name, set_code, collector_number)
-                            automator.capture_card(output_filename)
+                            
+                            try:
+                                if automator.should_skip_file(output_filename):
+                                    print(f"   Skipping '{output_filename}', file exists.")
+                                    skipped_count += 1
+                                    continue
+                                    
+                                automator.capture_card(output_filename)
+                                success_count += 1
+                            except Exception as e:
+                                print(f"   Error capturing {card_name}: {e}")
+                                error_count += 1
+                                error_list.append(f"1 {card_name}|{set_code}")
                             
                             # Upload if needed
                             if args.upload_path:
