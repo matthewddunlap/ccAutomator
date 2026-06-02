@@ -139,6 +139,49 @@ class TextMixin:
                     print(f"      An error occurred while applying mods to '{field_name}' after {max_retries} attempts.", file=sys.stderr)
                 time.sleep(1) # Wait before retrying
 
+    def set_flavor_text(self, flavor_text: str):
+        """
+        Sets the flavor text in the Rules Text box. 
+        Replaces existing flavor text if {flavor} is present, otherwise appends it.
+        """
+        if not flavor_text:
+            return
+
+        print(f"   Setting Flavor Text to: '{flavor_text[:50]}...'")
+        try:
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Rules Text']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            current_text = text_input.get_attribute('value') or ""
+
+            # Check for existing {flavor} tag
+            if '{flavor}' in current_text:
+                # Keep everything before {flavor}, replace everything after
+                base_text = current_text.split('{flavor}')[0]
+                new_text = f"{base_text}{{flavor}}{flavor_text}"
+            else:
+                # Append {flavor} and new text
+                separator = "\n" if current_text.strip() else ""
+                new_text = f"{current_text.strip()}{separator}{{flavor}}{flavor_text}"
+
+            self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            
+            print("      Flavor text updated.")
+            time.sleep(self.render_delay)
+
+        except Exception as e:
+            print(f"      An error occurred while setting Flavor Text: {e}", file=sys.stderr)
+
     def _set_rules_text(self, new_text: str):
         """
         Sets the 'Rules Text' to the provided new_text.

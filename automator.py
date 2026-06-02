@@ -36,7 +36,7 @@ from automator_utils import (
 )
 
 # Import Mixins
-from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin
+from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin, SymbolMixin
 
 # Import Scryfall API utilities from the local package
 try:
@@ -45,7 +45,7 @@ except ImportError:
     print("FATAL: Could not import ScryfallAPI from local 'scryfall_utils.py'.", file=sys.stderr)
     sys.exit(1)
 
-class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin):
+class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin, SymbolMixin):
     """
     A class to automate interactions with the Card Conjurer web application.
     """
@@ -198,6 +198,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
         self.art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Art']")))
         self.collector_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Collector']")))
+        self.symbol_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Set Symbol']")))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -257,34 +258,21 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if direct_match_found:
                 continue
 
-            # If no direct match, try cross-referencing via illustration_id
-            illustration_id = sr.get('illustration_id')
-            if illustration_id and illustration_id not in processed_illustration_ids:
-                processed_illustration_ids.add(illustration_id)
-                
-                # Query for all prints with this illustration_id
-                ill_query = f"illustration_id:{illustration_id} unique:prints game:paper"
-                # print(f"      Checking for other prints with illustration_id: {illustration_id}")
-                ill_results = self.scryfall_api.search_cards(ill_query, unique="prints", order_by="released", direction="asc")
-                
-                for ir in ill_results:
-                    ir_set = ir.get('set')
-                    ir_cn = ir.get('collector_number')
-                    if ir_set and ir_cn:
-                        for cc_print in all_cc_prints:
-                            if cc_print.get('set_name', '').lower() == ir_set.lower() and cc_print.get('collector_number', '').lower() == str(ir_cn).lower():
-                                # Avoid duplicates if we already matched this print
-                                if cc_print not in matched_prints:
-                                    # Attach Scryfall data to the print object
-                                    cc_print['scryfall_data'] = ir
-                                    matched_prints.append(cc_print)
-                                    # print(f"      -> Found cross-reference match: {cc_print['text']}")
-        
-        # Also attach for direct matches
+            # Pass 2: Fuzzy Match (Name Only) - Use as a fallback if no direct match found
+            print(f"      No direct match for '{sr.get('name')}' in Card Conjurer. Attempting fuzzy name-only match...")
+            for cc_print in all_cc_prints:
+                cc_text = cc_print.get('text', '').lower()
+                # Scryfall name is usually the first part of the CC text: "Card Name (SET #123)"
+                if sr.get('name', '').lower() in cc_text:
+                    if cc_print not in matched_prints:
+                        print(f"      Fuzzy match found: '{cc_print['text']}' will be used as base template.")
+                        cc_print['scryfall_data'] = sr # Attach original targeted scryfall data
+                        matched_prints.append(cc_print)
+                    break
+
+        # Ensure scryfall_data is attached for all matched prints
         for cc_print in matched_prints:
              if 'scryfall_data' not in cc_print:
-                 # Find the scryfall result that matched
-                 # This is a bit inefficient but safe
                  for sr in scryfall_results:
                      if sr.get('set', '').lower() == cc_print.get('set_name', '').lower() and \
                         str(sr.get('collector_number', '')).lower() == cc_print.get('collector_number', '').lower():
@@ -421,8 +409,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             is_token = bool(category and 'token' in category)
             
             # Get all available prints from Card Conjurer UI
-            # For tokens, pass is_token=True to bypass set filtering (tokens have 't' prefix sets)
-            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=False, is_token=is_token, set_code=set_code)
+            # We pass is_priming=True and NO set_code here to get the full pool of available cards 
+            # for cross-referencing and fuzzy matching.
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, is_token=is_token)
             
             # 1. Initial Scryfall Query (with set filters)
             # Adjust query based on category
@@ -585,8 +574,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         for print_data in prints_to_capture:
             print(f"   Processing print: {print_data['text']}")
             
+            # --- SCRYFALL DATA PRIORITIZATION ---
+            # If we have scryfall_data attached (from fuzzy matching or direct search), 
+            # we MUST use its set/collector info for art, metadata, and filenames.
+            scryfall_data = print_data.get('scryfall_data', {})
+            target_set = scryfall_data.get('set', print_data['set_name'])
+            target_cn = scryfall_data.get('collector_number', print_data['collector_number'])
+
             # Check if file already exists on server or locally
-            output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
+            output_filename = self._generate_final_filename(card_name, target_set, target_cn)
             
             if self.should_skip_file(output_filename):
                  if self.upload_path:
@@ -603,21 +599,21 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             # --- NEW: PREPARE AND APPLY CUSTOM ART RIGHT AFTER IMPORT ---
             final_art_url, type_line = None, None
             if self.image_server_url or self.download_dir: # Only prepare art if image server or local download is configured
-                # We ignore width/height here as automator uses UI autofit (or none)
-                final_art_url, type_line, _, _ = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
+                # Use target_set/target_cn from Scryfall if available
+                final_art_url, type_line, _, _ = self._prepare_art_asset(card_name, target_set, str(target_cn))
             
             if final_art_url:
-                self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'], final_art_url)
+                self._apply_custom_art(card_name, target_set, str(target_cn), final_art_url)
             else:
                 print(f"   No custom art URL available for '{card_name}'. Using default art.")
     
             # If prepare_only is True, we stop here and save the card to browser storage
             if prepare_only:
                 # Ensure Collector Info is set before saving
-                self.set_collector_info(print_data['set_name'], print_data['collector_number'])
+                self.set_collector_info(target_set, str(target_cn))
                 
                 print(f"   [Combo Phase 1] Prepared '{card_name}'. Saving to browser storage...")
-                self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+                self._save_card_to_browser_storage(card_name, target_set, str(target_cn))
                 continue
     
             # Set a flag to see if we need a final delay at the end
@@ -687,9 +683,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                  "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left)
     
-            # Extract Scryfall data for frame color logic and rules text
+            # Extract Scryfall data for frame color logic, rules text, flavor, and symbol
             scryfall_data = print_data.get('scryfall_data', {})
             
+            # --- GLOBAL OVERWRITES FROM SCRYFALL ---
+            # 1. Flavor Text
+            flavor_text = scryfall_data.get('flavor_text')
+            if flavor_text:
+                self.set_flavor_text(flavor_text)
+                self._apply_flavor_font_mod()
+                mods_applied = True
+            
+            # 2. Set Symbol
+            scryfall_set = scryfall_data.get('set')
+            if scryfall_set:
+                self.set_set_symbol(scryfall_set.upper())
+                mods_applied = True
+
             # Use produced_mana for lands if colors is empty
             colors = scryfall_data.get('colors', [])
             if not colors and 'card_faces' in scryfall_data:
@@ -731,7 +741,6 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 else:
                     # Fallback for other basic lands if any
                     self._apply_text_mods("Rules Text", down=self.rules_down)
-                    self._apply_flavor_font_mod()
             elif is_land and len(colored_mana_produced) == 2:
                 # Dual/Pain Land Logic (Large Symbols + Preservation of conditional text)
                 
@@ -804,7 +813,6 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
-                self._apply_flavor_font_mod()
 
 
             if category and 'token' in category.lower():
@@ -838,10 +846,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             # Save to browser storage if enabled (for .cardconjurer export)
             if self.save_cc_file:
-                self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+                self._save_card_to_browser_storage(card_name, target_set, str(target_cn))
 
             # Capture using the new method
-            filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
+            filename = self._generate_final_filename(card_name, target_set, str(target_cn))
             self.capture_card(filename)
             results['captured'] += 1
 

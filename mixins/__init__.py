@@ -3,3 +3,4 @@ from .text_mixin import TextMixin
 from .image_mixin import ImageMixin
 from .print_mixin import PrintMixin
 from .collector_mixin import CollectorMixin
+from .symbol_mixin import SymbolMixin
