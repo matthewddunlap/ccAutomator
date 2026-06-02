@@ -270,6 +270,14 @@ class CanvasMixin:
         Prioritizes 'Artifact' and 'Land' type lines to use specialized base frames.
         For Colored Artifacts and Lands, applies masks from colored Land frames.
         """
+        # For lands, we filter colors to only include colored mana (WUBRG) for frame determination
+        is_land = type_line and "Land" in type_line
+        if is_land:
+            colors = [c for c in colors if c in 'WUBRG']
+            # Standard sorting for land colors
+            wubrg_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
+            colors.sort(key=lambda x: wubrg_order.get(x, 99))
+
         print(f"   Setting frame color for colors: {colors}, type_line: {type_line}...")
         
         target_thumb_suffix = "cThumb.png" # Default to colorless

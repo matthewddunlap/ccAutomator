@@ -66,6 +66,7 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         # Determine Base Code
         if is_land:
             # Land Logic
+            # For lands, we ignore colorless 'C' when determining frame color
             produced_mana = scryfall_data.get('produced_mana', [])
             colored_mana = [c for c in produced_mana if c in ['W', 'U', 'B', 'R', 'G']]
             # Ensure WUBRG order
@@ -426,8 +427,11 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         is_basic_land = 'Basic' in type_line and 'Land' in type_line
         is_land = 'Land' in type_line
         produced_mana = data.get('produced_mana', [])
+        colored_mana_produced = [m for m in produced_mana if m in 'WUBRG']
         
         full_text = ""
+        is_big_symbol_land = False
+        
         if is_basic_land:
             # Basic Land Logic (Large Symbols)
             mana_symbol = ''
@@ -440,38 +444,85 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             
             if mana_symbol:
                 full_text = f"{{down80}}{{fontsize64pt}}{{center}}{mana_symbol}"
+                is_big_symbol_land = True
             else:
                 full_text = self._format_text(oracle_text, is_basic_land=True)
-        elif is_land and len(produced_mana) == 2:
+        elif is_land and len(colored_mana_produced) == 2:
             # Dual Land Logic (Large Symbols + Preservation of conditional text)
-            symbols = " ".join([f"{{{c.upper()}}}" for c in produced_mana])
+            # Sort colors to WUBRG order for consistency
+            color_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
+            colored_mana_produced.sort(key=lambda x: color_order.get(x, 99))
+            symbols = " ".join([f"{{{c.upper()}}}" for c in colored_mana_produced])
             
-            # Detect if the first line is a standard mana ability
-            lines = oracle_text.split('\n')
-            first_line = lines[0].strip() if lines else ""
-            # Regex to match standard tap-for-mana line: ({T}: Add {G} or {U}.)
-            mana_ability_match = re.match(r'^\({T}: Add \{[A-Z]\} or \{[A-Z]\}\.\)$', first_line)
+            # Split oracle text into lines
+            lines = [line.strip() for line in oracle_text.split('\n') if line.strip()]
+            first_line = lines[0] if lines else ""
             
-            if mana_ability_match:
+            # Pattern 1: Standard mana reminder on line 1 (Dual/Shock/Cycle)
+            # Example: ({T}: Add {G} or {U}.)
+            standard_match = re.match(r'^\({T}: Add \{[A-Z]\} or \{[A-Z]\}\.\)$', first_line)
+            
+            # Pattern 2: Pain land (Detect colorless and colored mana abilities)
+            # Scryfall usually has Colorless on L1 and Colored + Damage on L2
+            is_pain_land = False
+            colorless_line = ""
+            colored_line = ""
+            other_lines = []
+            
+            for line in lines:
+                if "{T}: Add {C}" in line:
+                    colorless_line = line
+                elif re.search(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.', line):
+                    colored_line = line
+                else:
+                    other_lines.append(line)
+            
+            if colorless_line and colored_line:
+                is_pain_land = True
+
+            if standard_match:
+                is_big_symbol_land = True
                 if len(lines) > 1:
-                    # Multi-line: 52pt symbols + 12pt remaining text
+                    # Multi-line (Shock/Cycle): 52pt symbols + 12pt remaining text
                     remaining_text = "\n".join(lines[1:])
-                    # We pass the remaining text through _format_text for smart quotes etc.
                     formatted_remaining = self._format_text(remaining_text)
-                    # CC needs {lns} to force a newline between the centered symbols and left text
-                    full_text = f"{{fontsize52pt}}{{center}}{symbols}{{lns}}{{fontsize12pt}}{formatted_remaining}"
+                    # Use {fontsize32pt}\n spacer to control gap between symbols and text
+                    full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{formatted_remaining}"
                     print(f"   [Dual Land] Applied split symbols (52pt) and text (12pt): {symbols}")
                 else:
-                    # Single-line: 64pt symbols (existing behavior for Bayou, etc.)
+                    # Single-line (Bayou): 64pt symbols
                     full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
                     print(f"   [Dual Land] Applied large symbols (64pt): {symbols}")
+            elif is_pain_land:
+                is_big_symbol_land = True
+                # Pain land special handling: Symbols -> Damage/Extra Text -> Colorless
+                # Remove the colored mana ability from the colored line to get just the damage/extra text
+                damage_part = re.sub(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.\s*', '', colored_line)
+                
+                # Ensure card name is replaced with "This land" in damage part
+                if damage_part and card_name in damage_part:
+                    damage_part = damage_part.replace(card_name, "This land")
+                
+                remaining_parts = []
+                if damage_part:
+                    remaining_parts.append(damage_part)
+                if colorless_line:
+                    remaining_parts.append(colorless_line)
+                remaining_parts.extend(other_lines)
+                
+                # Format each part and join with newline + font size reset for each line
+                formatted_parts = [self._format_text(p) for p in remaining_parts]
+                remaining_text = "\n{fontsize12pt}".join(formatted_parts)
+                
+                full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
+                print(f"   [Pain Land] Applied split symbols (52pt) and reordered text: {symbols}")
             else:
-                # Doesn't match standard pattern exactly, fallback to regular formatting
+                # Fallback to regular formatting if no special land pattern matches
                 full_text = self._format_text(oracle_text)
         else:
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 
-        if flavor_text and not (is_basic_land or (is_land and len(produced_mana) == 2)):
+        if flavor_text and not is_big_symbol_land:
             formatted_flavor = self._format_text(flavor_text, is_flavor=True)
             flavor_mods = ""
             if flavor_font_size: flavor_mods += f"{{fontsize{flavor_font_size}}}"
