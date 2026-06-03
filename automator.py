@@ -1,5 +1,6 @@
 import time
 import re
+import math
 import os
 import base64
 import base64
@@ -31,10 +32,11 @@ from automator_utils import (
     check_server_file_details,
     generate_safe_filename,
     get_image_mime_type_and_extension,
+    DEFAULT_UPSCALER_MODEL
 )
 
 # Import Mixins
-from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin
+from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin, SymbolMixin
 
 # Import Scryfall API utilities from the local package
 try:
@@ -43,7 +45,7 @@ except ImportError:
     print("FATAL: Could not import ScryfallAPI from local 'scryfall_utils.py'.", file=sys.stderr)
     sys.exit(1)
 
-class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin):
+class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin, SymbolMixin):
     """
     A class to automate interactions with the Card Conjurer web application.
     """
@@ -52,13 +54,13 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  basic_land_include_sets=None, basic_land_exclude_sets=None,
                  card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
                  no_match_selection='earliest', render_delay=1.5, white_border=False,
-                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None,
+                 pt_bold=False, pt_shadow=None, pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None,
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                 flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None,
+                 flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None, rules_bounds_x=None, rules_bounds_width=None,
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
-                 upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
+                 upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
                  auto_fit_type=False):
@@ -137,6 +139,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.pt_font_size = pt_font_size
         self.pt_kerning = pt_kerning
         self.pt_up = pt_up
+        self.pt_left = pt_left
 
         self.title_font_size = title_font_size
         self.title_shadow = title_shadow
@@ -148,6 +151,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.rules_down = rules_down
         self.rules_bounds_y = rules_bounds_y
         self.rules_bounds_height = rules_bounds_height
+        self.rules_bounds_x = rules_bounds_x
+        self.rules_bounds_width = rules_bounds_width
         self.hide_reminder_text = hide_reminder_text
 
         self.type_font_size = type_font_size
@@ -193,6 +198,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
         self.art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Art']")))
         self.collector_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Collector']")))
+        self.symbol_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Set Symbol']")))
         
         try:
             import_save_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[7]')))
@@ -252,27 +258,27 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if direct_match_found:
                 continue
 
-            # If no direct match, try cross-referencing via illustration_id
-            illustration_id = sr.get('illustration_id')
-            if illustration_id and illustration_id not in processed_illustration_ids:
-                processed_illustration_ids.add(illustration_id)
-                
-                # Query for all prints with this illustration_id
-                ill_query = f"illustration_id:{illustration_id} unique:prints game:paper"
-                # print(f"      Checking for other prints with illustration_id: {illustration_id}")
-                ill_results = self.scryfall_api.search_cards(ill_query, unique="prints", order_by="released", direction="asc")
-                
-                for ir in ill_results:
-                    ir_set = ir.get('set')
-                    ir_cn = ir.get('collector_number')
-                    if ir_set and ir_cn:
-                        for cc_print in all_cc_prints:
-                            if cc_print.get('set_name', '').lower() == ir_set.lower() and cc_print.get('collector_number', '').lower() == str(ir_cn).lower():
-                                # Avoid duplicates if we already matched this print
-                                if cc_print not in matched_prints:
-                                    matched_prints.append(cc_print)
-                                    # print(f"      -> Found cross-reference match: {cc_print['text']}")
-        
+            # Pass 2: Fuzzy Match (Name Only) - Use as a fallback if no direct match found
+            print(f"      No direct match for '{sr.get('name')}' in Card Conjurer. Attempting fuzzy name-only match...")
+            for cc_print in all_cc_prints:
+                cc_text = cc_print.get('text', '').lower()
+                # Scryfall name is usually the first part of the CC text: "Card Name (SET #123)"
+                if sr.get('name', '').lower() in cc_text:
+                    if cc_print not in matched_prints:
+                        print(f"      Fuzzy match found: '{cc_print['text']}' will be used as base template.")
+                        cc_print['scryfall_data'] = sr # Attach original targeted scryfall data
+                        matched_prints.append(cc_print)
+                    break
+
+        # Ensure scryfall_data is attached for all matched prints
+        for cc_print in matched_prints:
+             if 'scryfall_data' not in cc_print:
+                 for sr in scryfall_results:
+                     if sr.get('set', '').lower() == cc_print.get('set_name', '').lower() and \
+                        str(sr.get('collector_number', '')).lower() == cc_print.get('collector_number', '').lower():
+                         cc_print['scryfall_data'] = sr
+                         break
+
         return matched_prints
 
     def _format_mana_cost(self, mana_cost):
@@ -293,28 +299,77 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         suffix = "{/bold}" if bold else ""
         return f"{prefix}{text}{suffix}"
 
-    def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False):
+    def should_skip_file(self, filename):
         """
-        Orchestrates the entire process for a single card:
-        1. Selects the card (via Scryfall or Card Conjurer search).
-        2. Sets the frame (if not already set).
-        3. Captures the image (unless prepare_only is True).
+        Public wrapper for the skip logic check.
         """
-        # Check if we should skip this card based on overwrite logic (only if not priming)
-        if not is_priming and not prepare_only:
-            if self._should_skip_card(card_name):
-                return
+        if self.upload_path:
+            # Check if file exists on the server
+            exists = self._check_file_exists_on_server(filename)
+            if not exists:
+                return False
+                
+            if self.overwrite:
+                # print(f"   '{filename}' exists on server, but --overwrite is enabled. Proceeding.")
+                return False
+            elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                # Check modification time on server
+                server_mod_time = self._get_file_modification_time_on_server(filename)
+                if server_mod_time:
+                    if self.overwrite_older_than_dt and server_mod_time < self.overwrite_older_than_dt:
+                        # print(f"   '{filename}' exists on server (modified {server_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                        return False
+                    elif self.overwrite_newer_than_dt and server_mod_time > self.overwrite_newer_than_dt:
+                        # print(f"   '{filename}' exists on server (modified {server_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
+                        return False
+                    else:
+                        # print(f"   Skipping '{filename}', file exists on server and does not meet overwrite criteria.")
+                        return True
+                else:
+                    # print(f"   Could not get modification time for '{filename}' on server. Skipping as per overwrite policy.")
+                    return True
+            else: # Default behavior: skip if exists and no overwrite flag
+                # print(f"   Skipping '{filename}', file exists on server.")
+                return True
+        else: # Local save mode
+            output_path = os.path.join(self.download_dir, filename)
+            if os.path.exists(output_path):
+                if self.overwrite:
+                    # print(f"   '{filename}' exists locally, but --overwrite is enabled. Proceeding.")
+                    return False
+                elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
+                    local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
+                    if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
+                        # print(f"   '{filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
+                        return False
+                    elif self.overwrite_newer_than_dt and local_mod_time > self.overwrite_newer_than_dt:
+                        # print(f"   '{filename}' exists locally (modified {local_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
+                        return False
+                    else:
+                        # print(f"   Skipping '{filename}', file exists locally and does not meet overwrite criteria.")
+                        return True
+                else:
+                    # print(f"   Skipping '{filename}', file exists locally.")
+                    return True
+        return False
 
+    def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
+        """
+        Orchestrates the entire process for a single card.
+        Returns a dict with 'captured' and 'skipped' counts.
+        """
+        results = {'captured': 0, 'skipped': 0}
+        
         # --- Canvas Stabilization (Priming) ---
         if is_priming:
             # For priming, we just want to load *any* print of the card to get the renderer ready.
             print(f"--- Priming Renderer with '{card_name}' ---")
             
             if self.card_selection_strategy == 'scryfall':
-                self._prime_via_scryfall(card_name)
+                self._prime_via_scryfall(card_name, set_code=set_code)
             else:
                 # CardConjurer mode priming
-                all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True)
+                all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
                 if all_cc_prints:
                     initial_hash = self.current_canvas_hash
                     dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
@@ -322,7 +377,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
                 else:
                     print(f"   Error: No prints found for priming card '{card_name}'.", file=sys.stderr)
-            return
+            return results
 
 
         prints_to_capture = []
@@ -347,13 +402,16 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # --- Scryfall Mode ---
         elif self.card_selection_strategy == 'scryfall':
             print(f"--- Scryfall Mode for '{card_name}' (Category: {category}) ---")
+            if set_code:
+                print(f"   Targeting specific set: {set_code}")
             
             # Determine if this is a token search
             is_token = bool(category and 'token' in category)
             
             # Get all available prints from Card Conjurer UI
-            # For tokens, pass is_token=True to bypass set filtering (tokens have 't' prefix sets)
-            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=False, is_token=is_token)
+            # We pass is_priming=True and NO set_code here to get the full pool of available cards 
+            # for cross-referencing and fuzzy matching.
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, is_token=is_token)
             
             # 1. Initial Scryfall Query (with set filters)
             # Adjust query based on category
@@ -365,9 +423,14 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 # Standard Query: Exclude tokens, enforce paper/covered
                 base_query_parts = [f'!\"{card_name}\"', 'unique:art', 'not:token', '-layout:art-series', 'game:paper', 'not:covered']
             
-            if self.scryfall_filter:
-                base_query_parts.append(self.scryfall_filter)
+            # Use query_parts for the ACTUAL query construction, keeping base_query_parts minimal for fallbacks
             query_parts = list(base_query_parts) # Make a copy
+
+            if set_code:
+                query_parts.append(f'set:{set_code}')
+            
+            if self.scryfall_filter:
+                query_parts.append(self.scryfall_filter)
 
             # Determine which filters to use (Granular vs Legacy)
             from automator_utils import BASIC_LAND_NAMES
@@ -389,11 +452,41 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             # Add include/exclude set filters for the initial query
             if current_include_sets:
-                include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                # --- NEW: Token Set Auto-Mapping ---
+                if is_token:
+                    # If searching for tokens, map the include sets (which are likely parent sets) to token sets
+                    mapped_token_sets = self.scryfall_api.get_token_sets_for_parents(current_include_sets)
+                    if mapped_token_sets:
+                        print(f"   Mapped include sets {current_include_sets} to token sets {mapped_token_sets}")
+                        include_query = " OR ".join([f"set:{s}" for s in mapped_token_sets])
+                    else:
+                        print(f"   Warning: Could not map include sets {current_include_sets} to any token sets. Using original sets.")
+                        include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                else:
+                    include_query = " OR ".join([f"set:{s}" for s in current_include_sets])
+                
                 query_parts.append(f"({include_query})")
+
             if current_exclude_sets:
-                exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
-                query_parts.append(f" {exclude_query}")
+                # For excludes, we might also want to map? 
+                # If user excludes 'blb', they probably want to exclude 'tblb' too.
+                # But let's stick to explicit excludes or maybe map them too?
+                # The user request focused on "Token would only include tokens... based on token sets matching spell set equivalents".
+                # Let's map excludes too for consistency if it's a token search.
+                if is_token:
+                     mapped_exclude_token_sets = self.scryfall_api.get_token_sets_for_parents(current_exclude_sets)
+                     # We should probably exclude BOTH the parent and the token set to be safe, or just the token set.
+                     # Let's exclude the mapped token sets.
+                     if mapped_exclude_token_sets:
+                         exclude_query = " ".join([f"-set:{s}" for s in mapped_exclude_token_sets])
+                         query_parts.append(f" {exclude_query}")
+                     
+                     # Also keep the original excludes? Probably doesn't hurt.
+                     exclude_query_orig = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                     query_parts.append(f" {exclude_query_orig}")
+                else:
+                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
+                    query_parts.append(f" {exclude_query}")
     
             full_query = " ".join(query_parts)
             print(f"   Scryfall query (with filters): {full_query}")
@@ -405,57 +498,51 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not scryfall_results:
                 if self.no_match_selection == 'skip':
                     print(f"   Warning: Initial Scryfall query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
-                    return
+                    return results
     
-                # Fallback Step 1: Try stripping ONLY include sets, keeping exclude sets (if any exist)
-                if current_exclude_sets:
-                    print(f"   Warning: Initial query found no matches. Stripping include sets but keeping exclude sets...", file=sys.stderr)
-                    fallback_1_parts = list(base_query_parts)
-                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
-                    fallback_1_parts.append(f" {exclude_query}")
-                    
-                    fallback_1_query = " ".join(fallback_1_parts)
-                    print(f"   Scryfall fallback query (excludes only): {fallback_1_query}")
+                # Fallback Step 1: Strip 'not:covered' but KEEP all set selection criteria (including set_code/includes/excludes)
+                if not is_token and 'not:covered' in base_query_parts:
+                    print(f"   Warning: Initial query found no matches. Step 1: Stripping 'not:covered' constraint but keeping set filters...", file=sys.stderr)
+                    # We reuse query_parts which has set_code, includes, etc., but remove 'not:covered'
+                    fallback_1_query_parts = [p for p in query_parts if p != 'not:covered']
+                    fallback_1_query = " ".join(fallback_1_query_parts)
+                    print(f"   Scryfall fallback query (set filters kept, no not:covered): {fallback_1_query}")
                     scryfall_results = self.scryfall_api.search_cards(fallback_1_query, unique="art", order_by="released", direction="asc")
                     
                     if scryfall_results:
                         selection_strategy = self.no_match_selection
-    
-                # Fallback Step 1.5: If still no results, try stripping 'not:covered' but KEEP exclude sets
-                if not scryfall_results and current_exclude_sets:
-                    print(f"   Warning: Fallback 1 found no matches. Stripping 'not:covered' but keeping exclude sets...", file=sys.stderr)
-                    fallback_1_5_parts = list(base_query_parts)
-                    if 'not:covered' in fallback_1_5_parts:
-                        fallback_1_5_parts.remove('not:covered')
+
+                # Fallback Step 2: Strip ALL set criteria (including includes, excludes, and specific set_code)
+                if not scryfall_results:
+                    print(f"   Warning: Still no matches. Step 2: Stripping ALL set criteria but keeping paper/layout constraints...", file=sys.stderr)
                     
-                    exclude_query = " ".join([f"-set:{s}" for s in current_exclude_sets])
-                    fallback_1_5_parts.append(f" {exclude_query}")
-                    
-                    fallback_1_5_query = " ".join(fallback_1_5_parts)
-                    print(f"   Scryfall fallback query (excludes only, no not:covered): {fallback_1_5_query}")
-                    scryfall_results = self.scryfall_api.search_cards(fallback_1_5_query, unique="art", order_by="released", direction="asc")
+                    # Use base_query_parts but ensure not:covered is gone if it was there
+                    fallback_2_parts = [p for p in base_query_parts if p != 'not:covered']
+                    fallback_2_query = " ".join(fallback_2_parts)
+                    print(f"   Scryfall fallback query (sets stripped): {fallback_2_query}")
+                    scryfall_results = self.scryfall_api.search_cards(fallback_2_query, unique="art", order_by="released", direction="asc")
                     
                     if scryfall_results:
                         selection_strategy = self.no_match_selection
     
-                # Fallback Step 2: If still no results, strip ALL set filters
+                # Fallback Step 3: Broadest search, additionally strip game:paper and -layout:art-series
                 if not scryfall_results:
-                    print(f"   Warning: Query found no matches. Stripping ALL set filters and retrying a broader Scryfall search.", file=sys.stderr)
+                    print(f"   Warning: Still no matches. Step 3: Stripping paper/layout filters for broadest search.", file=sys.stderr)
                     
-                    # Construct fallback query without set filters, applying prefer:newest/oldest if specified
-                    fallback_2_parts = list(base_query_parts)
+                    # Broadest query: Use base_query_parts but strip paper/layout/covered
+                    fallback_3_parts = [p for p in base_query_parts if p not in ['not:covered', 'game:paper', '-layout:art-series']]
                     if self.no_match_selection == 'latest':
-                        fallback_2_parts.append('prefer:newest')
+                        fallback_3_parts.append('prefer:newest')
                     elif self.no_match_selection == 'earliest':
-                        fallback_2_parts.append('prefer:oldest')
+                        fallback_3_parts.append('prefer:oldest')
                     
-                    fallback_2_query = " ".join(fallback_2_parts)
-                    print(f"   Scryfall fallback query (broadest): {fallback_2_query}")
-                    scryfall_results = self.scryfall_api.search_cards(fallback_2_query, unique="art", order_by="released", direction="asc")
+                    fallback_3_query = " ".join(fallback_3_parts)
+                    print(f"   Scryfall fallback query (broadest): {fallback_3_query}")
+                    scryfall_results = self.scryfall_api.search_cards(fallback_3_query, unique="art", order_by="released", direction="asc")
     
                     if not scryfall_results:
                         print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
-                        return
+                        return results
     
                 # If fallback query was used, the selection strategy shifts to no_match_selection
                 selection_strategy = self.no_match_selection
@@ -465,7 +552,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             if not matched_prints:
                 print(f"   Warning: Scryfall found results, but none matched the available prints in Card Conjurer for '{card_name}'. Skipping.", file=sys.stderr)
-                return
+                return results
             
             # 4. Select prints to capture based on strategy
             if selection_strategy == 'latest':
@@ -481,57 +568,29 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # Step 2: Iterate through selected prints and capture
         if not prints_to_capture:
             print(f"   No prints selected for capture for '{card_name}'.")
-            return
+            return results
     
         print(f"Preparing to capture {len(prints_to_capture)} print(s) for '{card_name}'.")
         for print_data in prints_to_capture:
             print(f"   Processing print: {print_data['text']}")
             
+            # --- SCRYFALL DATA PRIORITIZATION ---
+            # If we have scryfall_data attached (from fuzzy matching or direct search), 
+            # we MUST use its set/collector info for art, metadata, and filenames.
+            scryfall_data = print_data.get('scryfall_data', {})
+            target_set = scryfall_data.get('set', print_data['set_name'])
+            target_cn = scryfall_data.get('collector_number', print_data['collector_number'])
+
             # Check if file already exists on server or locally
-            output_filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
-            should_skip = False
-            if self.upload_path:
-                # Check if file exists on the server
-                if self._check_file_exists_on_server(output_filename):
-                    if self.overwrite:
-                        print(f"   '{output_filename}' exists on server, but --overwrite is enabled. Proceeding.")
-                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
-                        # Check modification time on server
-                        server_mod_time = self._get_file_modification_time_on_server(output_filename)
-                        if server_mod_time:
-                            if self.overwrite_older_than_dt and server_mod_time < self.overwrite_older_than_dt:
-                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is older than --overwrite-older-than. Proceeding.")
-                            elif self.overwrite_newer_than_dt and server_mod_time > self.overwrite_newer_than_dt:
-                                print(f"   '{output_filename}' exists on server (modified {server_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
-                            else:
-                                print(f"   Skipping '{output_filename}', file exists on server and does not meet overwrite criteria.")
-                                should_skip = True
-                        else:
-                            print(f"   Could not get modification time for '{output_filename}' on server. Skipping as per overwrite policy.")
-                            should_skip = True
-                    else: # Default behavior: skip if exists and no overwrite flag
-                        print(f"   Skipping '{output_filename}', file exists on server.")
-                        should_skip = True
-            else: # Local save mode
-                output_path = os.path.join(self.download_dir, output_filename)
-                if os.path.exists(output_path):
-                    if self.overwrite:
-                        print(f"   '{output_filename}' exists locally, but --overwrite is enabled. Proceeding.")
-                    elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
-                        local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
-                        if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
-                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
-                        elif self.overwrite_newer_than_dt and local_mod_time > self.overwrite_newer_than_dt:
-                            print(f"   '{output_filename}' exists locally (modified {local_mod_time}), but is newer than --overwrite-newer-than. Proceeding.")
-                        else:
-                            print(f"   Skipping '{output_filename}', file exists locally and does not meet overwrite criteria.")
-                            should_skip = True
-                    else: # Default behavior: skip if exists and no overwrite flag
-                        print(f"   Skipping '{output_filename}', file exists on server.")
-                        should_skip = True
+            output_filename = self._generate_final_filename(card_name, target_set, target_cn)
             
-            if should_skip:
-                continue # Skip to the next print
+            if self.should_skip_file(output_filename):
+                 if self.upload_path:
+                     print(f"   Skipping '{output_filename}', file exists on server.")
+                 else:
+                     print(f"   Skipping '{output_filename}', file exists locally.")
+                 results['skipped'] += 1
+                 continue # Skip to the next print
     
             self.import_save_tab.click()
             dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
@@ -540,21 +599,21 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             # --- NEW: PREPARE AND APPLY CUSTOM ART RIGHT AFTER IMPORT ---
             final_art_url, type_line = None, None
             if self.image_server_url or self.download_dir: # Only prepare art if image server or local download is configured
-                # We ignore width/height here as automator uses UI autofit (or none)
-                final_art_url, type_line, _, _ = self._prepare_art_asset(card_name, print_data['set_name'], print_data['collector_number'])
+                # Use target_set/target_cn from Scryfall if available
+                final_art_url, type_line, _, _ = self._prepare_art_asset(card_name, target_set, str(target_cn))
             
             if final_art_url:
-                self._apply_custom_art(card_name, print_data['set_name'], print_data['collector_number'], final_art_url)
+                self._apply_custom_art(card_name, target_set, str(target_cn), final_art_url)
             else:
                 print(f"   No custom art URL available for '{card_name}'. Using default art.")
     
             # If prepare_only is True, we stop here and save the card to browser storage
             if prepare_only:
                 # Ensure Collector Info is set before saving
-                self.set_collector_info(print_data['set_name'], print_data['collector_number'])
+                self.set_collector_info(target_set, str(target_cn))
                 
                 print(f"   [Combo Phase 1] Prepared '{card_name}'. Saving to browser storage...")
-                self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+                self._save_card_to_browser_storage(card_name, target_set, str(target_cn))
                 continue
     
             # Set a flag to see if we need a final delay at the end
@@ -563,16 +622,110 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                 "Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left)
             
+            # --- Auto-Fit Type Logic ---
+            final_type_fs = self.type_font_size
+            final_type_kerning = self.type_kerning
+
+            if self.auto_fit_type:
+                try:
+                    # Navigate to Type line to measure text
+                    self.text_tab.click()
+                    field_button_selector = "//h4[text()='Type']"
+                    field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+                    field_button.click()
+                    time.sleep(0.5)
+                    
+                    text_input = self.wait.until(EC.presence_of_element_located((By.ID, "text-editor")))
+                    current_type_text = text_input.get_attribute('value')
+                    
+                    if current_type_text:
+                        # Strip existing tags to get raw character count
+                        clean_text = re.sub(r'\{[^}]+\}', '', current_type_text)
+                        char_count = len(clean_text)
+                        
+                        # Get current settings (default to 0 if None)
+                        k = self.type_kerning if self.type_kerning is not None else 0
+                        f = self.type_font_size if self.type_font_size is not None else 0
+                        
+                        # Calculate Threshold: 34 - k - floor(f * 0.3)
+                        threshold = 34 - k - math.floor(f * 0.3)
+                        
+                        # Calculate Excess
+                        excess = max(0, char_count - threshold)
+                        
+                        if excess > 0:
+                            # Step 1: Reduce Kerning (down to min 1)
+                            available_k_drop = max(0, k - 1)
+                            k_drop = min(excess, available_k_drop)
+                            
+                            final_k = k - k_drop
+                            remaining_excess = excess - k_drop
+                            
+                            # Step 2: Reduce Font Size
+                            f_drop = math.ceil(remaining_excess * 2.5)
+                            final_f = f - f_drop
+                            
+                            # Apply changes
+                            if final_k != k:
+                                final_type_kerning = final_k
+                                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
+                                
+                            if final_f != f:
+                                final_type_fs = final_f
+                                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
+                            
+                except Exception as e:
+                    print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
+
             self._apply_text_mods(
-                "Type", self.type_font_size, self.type_shadow, self.type_kerning, self.type_left)
+                "Type", final_type_fs, self.type_shadow, final_type_kerning, self.type_left)
     
             self._apply_text_mods(
-                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up)
+                 "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left)
     
-            # --- NEW: Basic Land Rules Text Handling ---
-            is_basic_land = False
-            if type_line and 'Basic' in type_line and 'Land' in type_line:
-                is_basic_land = True
+            # Extract Scryfall data for frame color logic, rules text, flavor, and symbol
+            scryfall_data = print_data.get('scryfall_data', {})
+            
+            # --- GLOBAL OVERWRITES FROM SCRYFALL ---
+            # 1. Flavor Text
+            flavor_text = scryfall_data.get('flavor_text')
+            if flavor_text:
+                self.set_flavor_text(flavor_text)
+                self._apply_flavor_font_mod()
+                mods_applied = True
+            
+            # 2. Set Symbol
+            scryfall_set = scryfall_data.get('set')
+            if scryfall_set:
+                self.set_set_symbol(scryfall_set.upper())
+                mods_applied = True
+
+            # Use produced_mana for lands if colors is empty
+            colors = scryfall_data.get('colors', [])
+            if not colors and 'card_faces' in scryfall_data:
+                 colors = scryfall_data['card_faces'][0].get('colors', [])
+            
+            # Lands often have empty colors in Scryfall but have produced_mana
+            produced_mana = scryfall_data.get('produced_mana', [])
+            if not produced_mana and 'card_faces' in scryfall_data:
+                produced_mana = scryfall_data['card_faces'][0].get('produced_mana', [])
+
+            type_line_scryfall = scryfall_data.get('type_line')
+            if not type_line_scryfall and 'card_faces' in scryfall_data:
+                type_line_scryfall = scryfall_data['card_faces'][0].get('type_line')
+            
+            # Use a combined type line for logic
+            current_type_line = type_line_scryfall or type_line
+
+            # We pass mana_cost now to support dual-colored artifact logic (order matters)
+            mana_cost = scryfall_data.get('mana_cost', '')
+
+            # --- Land and Rules Text Handling ---
+            is_basic_land = current_type_line and 'Basic' in current_type_line and 'Land' in current_type_line
+            is_land = current_type_line and 'Land' in current_type_line
+            
+            colored_mana_produced = [m for m in produced_mana if m in 'WUBRG']
+            oracle_text = scryfall_data.get('oracle_text', '')
     
             if is_basic_land:
                 mana_symbol = ''
@@ -588,10 +741,100 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 else:
                     # Fallback for other basic lands if any
                     self._apply_text_mods("Rules Text", down=self.rules_down)
-                    self._apply_flavor_font_mod()
+            elif is_land and len(colored_mana_produced) == 2:
+                # Dual/Pain Land Logic (Large Symbols + Preservation of conditional text)
+                
+                # Sort colors to WUBRG order for consistency
+                color_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
+                colored_mana_produced.sort(key=lambda x: color_order.get(x, 99))
+                symbols = " ".join([f"{{{c.lower()}}}" for c in colored_mana_produced])
+                
+                # Split oracle text into lines
+                lines = [line.strip() for line in oracle_text.split('\n') if line.strip()]
+                first_line = lines[0] if lines else ""
+                
+                # Pattern 1: Standard mana reminder on line 1 (Dual/Shock/Cycle)
+                # Example: ({T}: Add {G} or {U}.)
+                standard_match = re.match(r'^\({T}: Add \{[A-Z]\} or \{[A-Z]\}\.\)$', first_line)
+                
+                # Pattern 2: Pain land (Detect colorless and colored mana abilities)
+                is_pain_land = False
+                colorless_line = ""
+                colored_line = ""
+                other_lines = []
+                
+                for line in lines:
+                    if "{T}: Add {C}" in line:
+                        colorless_line = line
+                    elif re.search(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.', line):
+                        colored_line = line
+                    else:
+                        other_lines.append(line)
+                
+                if colorless_line and colored_line:
+                    is_pain_land = True
+
+                if standard_match:
+                    if len(lines) > 1:
+                        # Multi-line (Shock/Cycle): 52pt symbols + 12pt remaining text
+                        remaining_text = "\n".join(lines[1:])
+                        # Use {fontsize32pt}\n spacer to control gap between symbols and text
+                        rules_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
+                        print(f"   [Dual Land] Applied split symbols (52pt) and text (12pt): {symbols}")
+                    else:
+                        # Single-line (Bayou): 64pt symbols
+                        rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                        print(f"   [Dual Land] Applied large symbols (64pt): {symbols}")
+                    self._set_rules_text(rules_text)
+                elif is_pain_land:
+                    # Pain land special handling: Symbols -> Damage/Extra Text -> Colorless
+                    # Remove the colored mana ability from the colored line to get just the damage/extra text
+                    damage_part = re.sub(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.\s*', '', colored_line)
+                    
+                    # Ensure card name is replaced with "This land" in damage part
+                    if damage_part and card_name in damage_part:
+                        damage_part = damage_part.replace(card_name, "This land")
+                    
+                    remaining_parts = []
+                    if damage_part:
+                        remaining_parts.append(damage_part)
+                    if colorless_line:
+                        remaining_parts.append(colorless_line)
+                    remaining_parts.extend(other_lines)
+                    
+                    remaining_text = "\n{fontsize12pt}".join(remaining_parts)
+                    rules_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
+                    self._set_rules_text(rules_text)
+                    print(f"   [Pain Land] Applied split symbols (52pt) and reordered text: {symbols}")
+                else:
+                    # Fallback for other non-pain lands with 2 produced colors
+                    rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                    self._set_rules_text(rules_text)
+                    print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
-                self._apply_flavor_font_mod()
+
+
+            if category and 'token' in category.lower():
+                self.clear_mana_cost()
+                
+                # --- NEW: Fix Frame Color for Tokens ---
+                # Tokens often default to colorless when mana cost is cleared.
+                # We force the frame color based on Scryfall data.
+                self.set_frame_color(colors, type_line=current_type_line, mana_cost=mana_cost)
+                mods_applied = True
+
+            else:
+                # --- NEW: Fix Frame Color for Lands and Colored Artifacts ---
+                # For lands, we use produced_mana as effective colors if colors is empty
+                effective_colors = colors
+                if is_land and not colors and produced_mana:
+                    effective_colors = produced_mana
+                    print(f"   [Land Metadata] Using produced_mana as effective colors: {effective_colors}")
+
+                self.set_frame_color(effective_colors, type_line=current_type_line, mana_cost=mana_cost)
+                mods_applied = True
+
             if self.apply_white_border_on_capture:
                 self.apply_white_border()
                 mods_applied = True
@@ -601,30 +844,48 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not mods_applied:
                 time.sleep(self.render_delay)
     
+            # Save to browser storage if enabled (for .cardconjurer export)
+            if self.save_cc_file:
+                self._save_card_to_browser_storage(card_name, target_set, str(target_cn))
+
+            # Capture using the new method
+            filename = self._generate_final_filename(card_name, target_set, str(target_cn))
+            self.capture_card(filename)
+            results['captured'] += 1
+
+        return results
+
+    def capture_card(self, output_filename):
+        """
+        Captures the current canvas and saves it to the specified filename (or uploads it).
+        """
+        try:
             data_url = self._get_canvas_data_url()
             if not data_url or not data_url.startswith('data:image/png;base64,'):
-                print(f"   Error: Could not capture canvas.", file=sys.stderr); continue
-            try:
-                img_data = base64.b64decode(data_url.split(',', 1)[1])
-                filename = self._generate_final_filename(card_name, print_data['set_name'], print_data['collector_number'])
-                # --- REVISED, CLEANER LOGIC ---
-                if self.upload_path:
-                    # Upload mode is active
-                    self._upload_image(img_data, filename)
-                else:
-                    # Local save mode is active
-                    output_path = os.path.join(self.download_dir, filename)
-                    with open(output_path, 'wb') as f:
-                        f.write(img_data)
-                    print(f"   Saved locally to '{output_path}'.")
-                # --- END OF REVISED LOGIC ---
-    
-            except Exception as e:
-                print(f"   Error processing or saving/uploading image data: {e}", file=sys.stderr)
+                print(f"   Error: Could not capture canvas.", file=sys.stderr)
+                return
+
+            img_data = base64.b64decode(data_url.split(',', 1)[1])
+            
+            if self.upload_path:
+                # Upload mode is active
+                self._upload_image(img_data, output_filename)
+            else:
+                # Local save mode is active
+                output_path = os.path.join(self.download_dir, output_filename)
+                with open(output_path, 'wb') as f:
+                    f.write(img_data)
+                print(f"   Saved locally to '{output_path}'.")
+
+        except Exception as e:
+            print(f"   Error capturing card: {e}", file=sys.stderr)
     
         # --- Save Card to Browser Storage (if enabled) ---
-        if self.save_cc_file:
-            self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
+        # NOTE: We do NOT do this here anymore. Saving to browser storage should be explicit
+        # and handled by the caller (e.g., process_and_capture_card or the full-art loop).
+        # This avoids the NameError since card_name is not passed to capture_card.
+        # if self.save_cc_file:
+        #     self._save_card_to_browser_storage(card_name, print_data['set_name'], print_data['collector_number'])
     
 
 
@@ -774,15 +1035,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
 
 
-    def _prime_via_scryfall(self, card_name):
+    def _prime_via_scryfall(self, card_name, set_code=None):
         """
         Primes the renderer by loading a card from Scryfall.
         """
-        print(f"   Priming with Scryfall card: '{card_name}'...")
+        print(f"   Priming with Scryfall card: '{card_name}'{' (set: ' + set_code + ')' if set_code else ''}...")
         try:
             # Reuse _get_and_filter_prints to find the card
             # This handles the UI interaction to search Scryfall
-            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True)
+            all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
             
             if all_cc_prints:
                 initial_hash = self.current_canvas_hash
@@ -802,7 +1063,56 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         except Exception as e:
             print(f"   Error during priming with '{card_name}': {e}", file=sys.stderr)
 
-    def render_project_file(self, project_file_path, frame_name, prime_card_names=None):
+    def load_project_file(self, project_file_path):
+        """
+        Uploads a .cardconjurer project file to the browser.
+        """
+        print(f"--- Loading Project File: {project_file_path} ---")
+        try:
+            # 1. Upload the project file
+            self.import_save_tab.click()
+            
+            # Find the file input for uploading saved cards
+            file_input = self.driver.find_element(By.XPATH, "//input[@oninput='uploadSavedCards(event);']")
+            
+            abs_path = os.path.abspath(project_file_path)
+            file_input.send_keys(abs_path)
+            
+            print("   Uploaded project file.")
+            time.sleep(2) # Wait for processing
+            
+        except Exception as e:
+            print(f"   Error loading project file: {e}", file=sys.stderr)
+            raise
+
+    def load_saved_card(self, card_name_to_load):
+        """
+        Loads a specific card from the 'Saved Cards' dropdown by name.
+        """
+        print(f"   Loading saved card: '{card_name_to_load}'...")
+        try:
+            self.import_save_tab.click()
+            dropdown_element = self.driver.find_element(By.ID, 'load-card-options')
+            select = Select(dropdown_element)
+            
+            # Find the option with the matching text
+            found = False
+            for option in select.options:
+                if option.text == card_name_to_load:
+                    select.select_by_visible_text(card_name_to_load)
+                    found = True
+                    break
+            
+            if not found:
+                raise ValueError(f"Card '{card_name_to_load}' not found in saved cards.")
+                
+            time.sleep(1.5) # Wait for load
+            
+        except Exception as e:
+            print(f"   Error loading saved card '{card_name_to_load}': {e}", file=sys.stderr)
+            raise
+
+    def render_project_file(self, project_file_path, frame_name=None, prime_card_names=None, prime_frame_name=None):
         """
         Uploads a .cardconjurer project file and iterates through the saved cards to capture them.
         """
@@ -821,6 +1131,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             print("   Uploaded project file.")
             
+            # --- NEW: Parse the project file to get metadata ---
+            card_metadata_list = []
             # --- NEW: Parse the project file to get metadata ---
             card_metadata_list = []
             try:
@@ -857,11 +1169,25 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             
             # 4. Prime the renderer if requested
             if prime_card_names:
+                # Apply Prime Frame if specified
+                if prime_frame_name:
+                    print(f"   Setting prime frame to '{prime_frame_name}'...")
+                    self.set_frame(prime_frame_name, wait=True)
+                
                 print(f"--- Starting Renderer Priming with {len(prime_card_names)} cards ---")
                 for i, card_name in enumerate(prime_card_names):
                     print(f"Priming card {i+1}/{len(prime_card_names)}: '{card_name}'")
                     self._prime_via_scryfall(card_name)
                 print("--- Renderer Priming Complete ---\n")
+                
+                # Revert Frame if prime frame was used
+                if prime_frame_name:
+                    if frame_name:
+                        print(f"   Reverting frame to '{frame_name}'...")
+                        self.set_frame(frame_name, wait=True)
+                    else:
+                        print("   Disabling frame after priming...")
+                        self.set_frame("false", wait=True)
                 
                 # After priming, we need to ensure we are back on the Import/Save tab
                 # and looking at the project file's saved cards.

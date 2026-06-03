@@ -206,3 +206,195 @@ class CanvasMixin:
         except Exception as e:
             print(f"An unexpected error occurred while applying the white border: {e}", file=sys.stderr)
             raise
+
+    def apply_mask(self, frame_suffix, mask_names, right_half=False):
+        """
+        Applies specific masks from a given frame group.
+        1. Single-clicks the frame (by suffix) to load its masks.
+        2. Double-clicks each mask in the mask picker matching the mask_names.
+        3. If right_half is True, also clicks the 'Right Half' button for each mask.
+        """
+        print(f"   Applying masks {mask_names} from frame '{frame_suffix}' (Right Half: {right_half})...")
+        try:
+            # 1. Find the frame thumbnail
+            thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{frame_suffix}')]"
+            thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))
+            
+            # 2. Single Click to load masks (do NOT double click)
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", thumb)
+            time.sleep(0.5)
+            self.driver.execute_script("arguments[0].click();", thumb)
+            time.sleep(0.5) # Wait for mask picker to populate
+            
+            # 3. Apply each mask
+            for mask_name in mask_names:
+                # Map mask names to src substrings (Thumbnails are .png)
+                mask_src_map = {
+                    'Pinline': 'pinlineThumb.png',
+                    'Rules': 'rulesThumb.png',
+                    'Textbox Pinline': 'trimThumb.png',
+                    'Right Half': 'maskRightHalf.png',
+                    'Frame': 'frameThumb.png',
+                    'Border': 'borderThumb.png'
+                }
+                
+                target_src = mask_src_map.get(mask_name, mask_name.lower())
+                
+                # Find mask in picker
+                mask_selector = f"//div[@id='mask-picker']//img[contains(@src, '{target_src}')]"
+                mask_thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, mask_selector)))
+                
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", mask_thumb)
+
+                if right_half:
+                    # Single click to select, then click "Right Half" button
+                    self.driver.execute_script("arguments[0].click();", mask_thumb)
+                    time.sleep(0.2)
+                    right_half_btn = self.wait.until(EC.element_to_be_clickable((By.ID, "addToRightHalf")))
+                    self.driver.execute_script("arguments[0].click();", right_half_btn)
+                    print(f"      Applied mask: {mask_name} (Right Half)")
+                else:
+                    # Double click to apply normally (Left Half / Full)
+                    self.driver.execute_script("arguments[0].click();", mask_thumb)
+                    self.driver.execute_script("arguments[0].click();", mask_thumb)
+                    print(f"      Applied mask: {mask_name}")
+                
+                time.sleep(0.2)
+                
+        except Exception as e:
+            print(f"   Error applying masks: {e}", file=sys.stderr)
+
+    def set_frame_color(self, colors, type_line=None, mana_cost=None):
+        """
+        Sets the frame color based on the card's colors and type line.
+        Prioritizes 'Artifact' and 'Land' type lines to use specialized base frames.
+        For Colored Artifacts and Lands, applies masks from colored Land frames.
+        """
+        # For lands, we filter colors to only include colored mana (WUBRG) for frame determination
+        is_land = type_line and "Land" in type_line
+        if is_land:
+            colors = [c for c in colors if c in 'WUBRG']
+            # Standard sorting for land colors
+            wubrg_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
+            colors.sort(key=lambda x: wubrg_order.get(x, 99))
+
+        print(f"   Setting frame color for colors: {colors}, type_line: {type_line}...")
+        
+        target_thumb_suffix = "cThumb.png" # Default to colorless
+        is_colored_artifact = False
+        is_colored_land = False
+        
+        # 1. Navigate to the Frame tab
+        frame_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Frame']")))
+        frame_tab.click()
+
+        if type_line and "Artifact" in type_line:
+            target_thumb_suffix = "aThumb.png"
+            if colors:
+                is_colored_artifact = True
+        elif type_line and "Land" in type_line:
+            target_thumb_suffix = "lThumb.png"
+            if colors:
+                is_colored_land = True
+        elif not colors:
+            # Colorless non-artifact (e.g. Eldrazi)
+            target_thumb_suffix = "cThumb.png"
+        elif len(colors) > 1:
+            target_thumb_suffix = "mThumb.png"
+        else:
+            # Single color mapping for spells
+            color_map = {
+                'W': 'wThumb.png',
+                'U': 'uThumb.png',
+                'B': 'bThumb.png',
+                'R': 'rThumb.png',
+                'G': 'gThumb.png'
+            }
+            target_thumb_suffix = color_map.get(colors[0], "cThumb.png")
+
+        try:
+            # 1. Find the thumbnail (Base Frame)
+            thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{target_thumb_suffix}')]"
+            thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))
+            
+            # 2. Scroll and Click
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", thumb)
+            time.sleep(0.5)
+            
+            # Double click to be safe (Sets the Base Frame)
+            self.driver.execute_script("arguments[0].click();", thumb)
+            self.driver.execute_script("arguments[0].click();", thumb)
+            
+            print(f"   Applied base frame using '{target_thumb_suffix}'.")
+            
+            # 3. Handle Colored Artifacts and Lands (Apply Masks AFTER Base Frame)
+            if is_colored_artifact or is_colored_land:
+                print(f"   [Colored {'Land' if is_colored_land else 'Artifact'}] Applying colored masks for {colors}...")
+                
+                # Helper to map color char to Land frame suffix
+                def get_land_suffix(color_char):
+                    return {
+                        'W': 'wlThumb.png',
+                        'U': 'ulThumb.png',
+                        'B': 'blThumb.png',
+                        'R': 'rlThumb.png',
+                        'G': 'glThumb.png'
+                    }.get(color_char, "cThumb.png")
+
+                # Masks to apply
+                # Lands want Pinline, Textbox Pinline, AND Rules (border)
+                # Artifacts usually only want Pinlines
+                target_masks = ['Pinline', 'Textbox Pinline']
+                if is_colored_land:
+                    target_masks.append('Rules')
+                    print(f"      Including 'Rules' mask for colored Land.")
+
+                # Parse mana_cost or colors to determine color order
+                ordered_colors = []
+                if mana_cost:
+                    # Extract all letters from mana cost (e.g. {1}{B}{R} -> BR)
+                    cost_colors = [c for c in mana_cost if c in 'WUBRG']
+                    # Deduplicate while preserving order
+                    seen = set()
+                    ordered_colors = [x for x in cost_colors if not (x in seen or seen.add(x))]
+                
+                # Fallback if mana_cost didn't give us info (common for lands)
+                if not ordered_colors:
+                    ordered_colors = colors
+
+                if len(ordered_colors) == 1:
+                    # Single Color
+                    mask_source_suffix = get_land_suffix(ordered_colors[0])
+                    self.apply_mask(mask_source_suffix, target_masks)
+                
+                elif len(ordered_colors) == 2:
+                    # Dual Color (Split Masks)
+                    color1 = ordered_colors[0]
+                    color2 = ordered_colors[1]
+                    
+                    print(f"   [Dual {'Land' if is_colored_land else 'Artifact'}] Split Masks: {color1} (Left) / {color2} (Right)")
+                    
+                    # Apply Left Half (Normal)
+                    suffix1 = get_land_suffix(color1)
+                    self.apply_mask(suffix1, target_masks, right_half=False)
+                    
+                    # Apply Right Half
+                    suffix2 = get_land_suffix(color2)
+                    self.apply_mask(suffix2, target_masks, right_half=True)
+                    
+                else:
+                    # 3+ Colors (Gold)
+                    print(f"   [Multi {'Land' if is_colored_land else 'Artifact'}] 3+ Colors: Using Gold Land Frame as mask source")
+                    self.apply_mask("lThumb.png", target_masks)
+            
+            time.sleep(self.render_delay)
+            
+        except Exception as e:
+            print(f"   Error setting frame color: {e}", file=sys.stderr)
+            # Debug: print available thumbs
+            try:
+                images = self.driver.find_elements(By.XPATH, "//div[@id='frame-picker']//img")
+                srcs = [img.get_attribute('src') for img in images]
+                print(f"      Available thumbnails: {srcs}", file=sys.stderr)
+            except:
+                pass

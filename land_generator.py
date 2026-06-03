@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import re
 from scryfall_utils import ScryfallAPI
 from mixins.image_mixin import ImageMixin
 
@@ -47,7 +48,12 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
                            image_server_path=None, art_path='/local_art/art/',
                            upscale_art=False, ilaria_url=None, upscaler_model='RealESRGAN_x2plus', upscaler_factor=4,
                            upload_path=None, upload_secret=None, download_dir='.',
-                           white_border=False):
+                           white_border=False,
+                           # Text formatting args
+                           pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False, pt_shadow=None,
+                           title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
+                           type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
+                           flavor_font=None, rules_down=None):
     """
     Generate full-art basic lands using template and Scryfall data.
     """
@@ -97,6 +103,7 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
             query_parts.append(scryfall_filter)
         
         query = ' '.join(query_parts)
+        print(f"   Scryfall query: {query}")
         cards = scryfall.search_cards(query)
         
         if not cards:
@@ -322,14 +329,122 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
                 # (Card Conjurer renders frames from Index 0 = Top to Index N = Bottom)
                 new_card['data']['frames'].insert(0, white_border_frame)
             
+            # --- Apply Text Modifications ---
+            text_dict = new_card['data'].get('text', {})
+            
+            # Helper to update tags
+            def _update_tag(text, tag_name, value):
+                pattern = fr'\{{{tag_name}-?\d+\}}'
+                new_tag = f"{{{tag_name}{value}}}"
+                if re.search(pattern, text):
+                    return re.sub(pattern, new_tag, text, count=1)
+                else:
+                    return f"{new_tag}{text}"
+
+            # Title
+            if 'title' in text_dict:
+                t_obj = text_dict['title']
+                original_text = t_obj.get('text', '')
+                new_text = original_text
+                if title_kerning is not None: new_text = _update_tag(new_text, 'kerning', title_kerning)
+                if title_font_size is not None: new_text = _update_tag(new_text, 'fontsize', title_font_size)
+                if title_shadow is not None: new_text = _update_tag(new_text, 'shadow', title_shadow)
+                if title_left is not None: new_text = _update_tag(new_text, 'left', title_left)
+                if title_up is not None: new_text = _update_tag(new_text, 'up', title_up)
+                t_obj['text'] = new_text
+
+            # Type
+            if 'type' in text_dict:
+                t_obj = text_dict['type']
+                original_text = t_obj.get('text', '')
+                new_text = original_text
+                if type_kerning is not None: new_text = _update_tag(new_text, 'kerning', type_kerning)
+                if type_font_size is not None: new_text = _update_tag(new_text, 'fontsize', type_font_size)
+                if type_shadow is not None: new_text = _update_tag(new_text, 'shadow', type_shadow)
+                if type_left is not None: new_text = _update_tag(new_text, 'left', type_left)
+                t_obj['text'] = new_text
+
+            # PT
+            if 'pt' in text_dict:
+                t_obj = text_dict['pt']
+                original_text = t_obj.get('text', '')
+                new_text = original_text
+                if pt_kerning is not None: new_text = _update_tag(new_text, 'kerning', pt_kerning)
+                if pt_font_size is not None: new_text = _update_tag(new_text, 'fontsize', pt_font_size)
+                if pt_shadow is not None: new_text = _update_tag(new_text, 'shadow', pt_shadow)
+                if pt_up is not None: new_text = _update_tag(new_text, 'up', pt_up)
+                if pt_left is not None: new_text = _update_tag(new_text, 'left', pt_left)
+                if pt_bold and '{bold}' not in new_text: new_text = f"{{bold}}{new_text}{{/bold}}"
+                t_obj['text'] = new_text
+
+            # Rules/Flavor (skip for basic lands usually, but apply if requested)
+            # Note: Basic lands usually don't have rules text, but if they do (e.g. Wastes or special full arts), apply mods.
+            if 'rules' in text_dict:
+                t_obj = text_dict['rules']
+                original_text = t_obj.get('text', '')
+                new_text = original_text
+                if rules_down is not None: new_text = _update_tag(new_text, 'down', rules_down)
+                if flavor_font is not None and '{flavor}' in new_text:
+                    parts = new_text.split('{flavor}', 1)
+                    if len(parts) == 2:
+                        new_text = f"{parts[0]}{{flavor}}{{fontsize{flavor_font}}}{parts[1]}"
+                t_obj['text'] = new_text
+
+            
             generated_cards.append(new_card)
             print(f"Generated: {new_card['key']}")
     
     if not generated_cards:
         print("Warning: No cards were generated!")
-        return
+        return []
     
-    print(f"Saving {len(generated_cards)} cards to {output_path}...")
-    with open(output_path, 'w') as f:
-        json.dump(generated_cards, f, indent=2)
-    print("Done.")
+    if output_path:
+        print(f"Saving {len(generated_cards)} cards to {output_path}...")
+        with open(output_path, 'w') as f:
+            json.dump(generated_cards, f, indent=2)
+        print("Done.")
+        
+    return generated_cards
+
+def generate_template_project(template_path, output_path):
+    """
+    Generates a template project containing placeholders for the 5 basic land types.
+    These placeholders have the correct frames but no specific art or text modifications.
+    """
+    print(f"Loading template from {template_path}...")
+    with open(template_path, 'r') as f:
+        templates = json.load(f)
+    
+    # Create a mapping of land type to template
+    template_map = {}
+    for card in templates:
+        title = card['data']['text']['title']['text']
+        if title in LAND_CONFIG:
+            template_map[title] = card
+            
+    generated_cards = []
+    
+    # Generate one placeholder for each basic land type
+    for land_type in BASIC_LANDS:
+        if land_type == 'Wastes': continue # Skip Wastes for now unless requested
+        
+        if land_type not in template_map:
+            print(f"Warning: No template found for '{land_type}', skipping...")
+            continue
+            
+        # Clone template
+        new_card = json.loads(json.dumps(template_map[land_type]))
+        
+        # Set generic key
+        new_card['key'] = f"fullArt-{land_type}"
+        
+        generated_cards.append(new_card)
+        print(f"Generated template placeholder: {new_card['key']}")
+        
+    if output_path:
+        print(f"Saving {len(generated_cards)} template cards to {output_path}...")
+        with open(output_path, 'w') as f:
+            json.dump(generated_cards, f, indent=2)
+        print("Done.")
+        
+    return generated_cards

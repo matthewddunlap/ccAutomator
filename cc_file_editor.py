@@ -46,7 +46,7 @@ class CcFileEditor:
         return clean_name in BASIC_LANDS
 
     def apply_edits(self, white_border=False, black_border=False,
-                    pt_font_size=None, pt_kerning=None, pt_up=None, pt_bold=False, pt_shadow=None,
+                    pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False, pt_shadow=None,
                     title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                     type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                     flavor_font=None, rules_down=None, auto_fit_type=False):
@@ -217,6 +217,8 @@ class CcFileEditor:
                     new_text = self._update_tag(new_text, 'shadow', pt_shadow)
                 if pt_up is not None:
                     new_text = self._update_tag(new_text, 'up', pt_up)
+                if pt_left is not None:
+                    new_text = self._update_tag(new_text, 'left', pt_left)
                 if pt_bold:
                     if '{bold}' not in new_text:
                         new_text = f"{{bold}}{new_text}{{/bold}}"

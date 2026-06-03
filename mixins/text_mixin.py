@@ -39,6 +39,8 @@ class TextMixin:
 
                 self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+                self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+                # self.driver.execute_script("textEdited()")
                 print(f"      Found {{flavor}} tag. Injected font size tag.")
                 
                 time.sleep(self.render_delay)
@@ -57,46 +59,128 @@ class TextMixin:
             return
 
         print(f"   Applying text modifications to '{field_name}'...")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # print(f"      [Debug] Attempt {attempt+1}: Clicking text tab...")
+                # Re-find the tab to avoid stale element issues
+                text_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//h3[text()='Text']")))
+                text_tab.click()
+                
+                field_button_selector = f"//h4[text()='{field_name}']"
+                text_editor_id = "text-editor"
+
+                # print(f"      [Debug] Waiting for field button '{field_name}'...")
+                # Use presence first, then scroll, then click. This is more robust than element_to_be_clickable alone.
+                field_button = self.wait.until(EC.presence_of_element_located((By.XPATH, field_button_selector)))
+                
+                # Scroll into view to ensure it's clickable
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field_button)
+                time.sleep(0.2) # Small pause after scroll
+                
+                field_button.click()
+                
+                # Brief pause to let the textarea populate
+                time.sleep(0.5)
+
+                # print(f"      [Debug] Waiting for text editor...")
+                # Use visibility instead of presence to ensure it's actually shown
+                text_input = self.wait.until(EC.visibility_of_element_located((By.ID, text_editor_id)))
+                current_text = text_input.get_attribute('value')
+                # print(f"      [Debug] Current text: '{current_text}'")
+
+                # Build the prefix tags
+                tags = []
+                if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
+                if shadow is not None: tags.append(f"{{shadow{shadow}}}")
+                if kerning is not None: tags.append(f"{{kerning{kerning}}}")
+                if left is not None: tags.append(f"{{left{left}}}")
+                if up is not None: tags.append(f"{{up{up}}}")
+                if down is not None: tags.append(f"{{down{down}}}")
+                if bold: tags.append("{bold}")
+                
+                prefix = "".join(tags)
+                suffix = "{/bold}" if bold else ""
+
+                if current_text and current_text.strip():
+                    # Check if already applied to avoid double application on retry
+                    if prefix in current_text:
+                         print(f"      '{field_name}' already has modifications. Skipping.")
+                         return
+
+                    new_text = f"{prefix}{current_text}{suffix}"
+                    
+                    # print(f"      [Debug] Executing JS to update text...")
+                    self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                    self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+                    self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+                    # self.driver.execute_script("textEdited()")
+                    print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
+
+                # Wait for the change to render on a canvas
+                time.sleep(self.render_delay)
+                return # Success, exit loop
+
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f"      Attempt {attempt+1}/{max_retries} failed for '{field_name}': {e}", file=sys.stderr)
+                
+                # DEBUG: List all available h4 elements to see what's actually there
+                try:
+                    h4s = self.driver.find_elements(By.XPATH, "//h4")
+                    available_fields = [h.text for h in h4s]
+                    print(f"      [Debug] Available text fields: {available_fields}", file=sys.stderr)
+                except:
+                    pass
+
+                # print(f"      Traceback: {tb}", file=sys.stderr)
+                if attempt == max_retries - 1:
+                    print(f"      An error occurred while applying mods to '{field_name}' after {max_retries} attempts.", file=sys.stderr)
+                time.sleep(1) # Wait before retrying
+
+    def set_flavor_text(self, flavor_text: str):
+        """
+        Sets the flavor text in the Rules Text box. 
+        Replaces existing flavor text if {flavor} is present, otherwise appends it.
+        """
+        if not flavor_text:
+            return
+
+        print(f"   Setting Flavor Text to: '{flavor_text[:50]}...'")
         try:
             self.text_tab.click()
             
-            field_button_selector = f"//h4[text()='{field_name}']"
+            field_button_selector = "//h4[text()='Rules Text']"
             text_editor_id = "text-editor"
 
             field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
             field_button.click()
             
-            # Brief pause to let the textarea populate
             time.sleep(0.5)
 
             text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
-            current_text = text_input.get_attribute('value')
+            current_text = text_input.get_attribute('value') or ""
 
-            # Build the prefix tags
-            tags = []
-            if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
-            if shadow is not None: tags.append(f"{{shadow{shadow}}}")
-            if kerning is not None: tags.append(f"{{kerning{kerning}}}")
-            if left is not None: tags.append(f"{{left{left}}}")
-            if up is not None: tags.append(f"{{up{up}}}")
-            if down is not None: tags.append(f"{{down{down}}}")
-            if bold: tags.append("{bold}")
+            # Check for existing {flavor} tag
+            if '{flavor}' in current_text:
+                # Keep everything before {flavor}, replace everything after
+                base_text = current_text.split('{flavor}')[0]
+                new_text = f"{base_text}{{flavor}}{flavor_text}"
+            else:
+                # Append {flavor} and new text
+                separator = "\n" if current_text.strip() else ""
+                new_text = f"{current_text.strip()}{separator}{{flavor}}{flavor_text}"
+
+            self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
             
-            prefix = "".join(tags)
-            suffix = "{/bold}" if bold else ""
-
-            if current_text and current_text.strip():
-                new_text = f"{prefix}{current_text}{suffix}"
-                
-                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
-                self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
-                print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
-
-            # Wait for the change to render on a canvas
+            print("      Flavor text updated.")
             time.sleep(self.render_delay)
 
         except Exception as e:
-            print(f"      An error occurred while applying mods to '{field_name}': {e}", file=sys.stderr)
+            print(f"      An error occurred while setting Flavor Text: {e}", file=sys.stderr)
 
     def _set_rules_text(self, new_text: str):
         """
@@ -118,25 +202,27 @@ class TextMixin:
             
             self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            # self.driver.execute_script("textEdited()")
             
             time.sleep(self.render_delay)
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
-    DEFAULT_RULES_BOUNDS_Y = 1707
-    DEFAULT_RULES_BOUNDS_HEIGHT = 767
-
     def apply_rules_text_bounds_mods(self):
         """
-        Modifies the Y position and height of the rules text box by opening the
-        'Edit Bounds' dialog and adjusting the values.
-        Uses default constants to ensure idempotency (avoids cumulative updates).
+        Modifies the Y position, Height, X position, and Width of the rules text box
+        by opening the 'Edit Bounds' dialog and adjusting the values relative to the
+        current values found in the UI.
+        
+        Note: This applies a relative delta. If called multiple times without resetting
+        the frame, the changes will be cumulative.
         """
-        if self.rules_bounds_y is None and self.rules_bounds_height is None:
-            print("   [Debug] Skipping rules bounds mods: both Y and Height are None.")
+        if self.rules_bounds_y is None and self.rules_bounds_height is None and self.rules_bounds_x is None and self.rules_bounds_width is None:
+            print("   [Debug] Skipping rules bounds mods: all bounds args are None.")
             return
 
-        print(f"   Applying rules text bounds modifications (Y delta={self.rules_bounds_y}, Height delta={self.rules_bounds_height})...")
+        print(f"   Applying rules text bounds modifications (Y delta={self.rules_bounds_y}, Height delta={self.rules_bounds_height}, X delta={self.rules_bounds_x}, Width delta={self.rules_bounds_width})...")
         try:
             # 1. Navigate to the Text tab and select Rules Text
             self.text_tab.click()
@@ -162,39 +248,59 @@ class TextMixin:
                 y_input = self.driver.find_element(By.ID, 'textbox-editor-y')
                 current_y = int(y_input.get_attribute('value') or 0)
                 
-                # Calculate target based on known default to ensure idempotency
-                target_y = self.DEFAULT_RULES_BOUNDS_Y + self.rules_bounds_y
+                # Calculate target relative to CURRENT value
+                target_y = current_y + self.rules_bounds_y
                 
-                if current_y == target_y:
-                    print(f"      Rules Bounds Y already at target {target_y}. Skipping.")
-                else:
-                    # Use send_keys to ensure events are triggered and hit Enter
-                    y_input.clear()
-                    y_input.send_keys(str(target_y))
-                    y_input.send_keys(Keys.RETURN)
-                    print(f"      Adjusted Rules Bounds Y from {current_y} to {target_y} (delta: {self.rules_bounds_y}).")
+                # Use send_keys to ensure events are triggered and hit Enter
+                y_input.clear()
+                y_input.send_keys(str(target_y))
+                y_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Y from {current_y} to {target_y} (delta: {self.rules_bounds_y}).")
 
             # 4. Modify the 'Height' value if provided.
             if self.rules_bounds_height is not None:
                 height_input = self.driver.find_element(By.ID, 'textbox-editor-height')
                 current_height = int(height_input.get_attribute('value') or 0)
                 
-                # Calculate target based on known default
-                target_height = self.DEFAULT_RULES_BOUNDS_HEIGHT + self.rules_bounds_height
+                # Calculate target relative to CURRENT value
+                target_height = current_height + self.rules_bounds_height
                 
-                if current_height == target_height:
-                    print(f"      Rules Bounds Height already at target {target_height}. Skipping.")
-                else:
-                    # Use send_keys to ensure events are triggered and hit Enter
-                    height_input.clear()
-                    height_input.send_keys(str(target_height))
-                    height_input.send_keys(Keys.RETURN)
-                    print(f"      Adjusted Rules Bounds Height from {current_height} to {target_height} (delta: {self.rules_bounds_height}).")
+                # Use send_keys to ensure events are triggered and hit Enter
+                height_input.clear()
+                height_input.send_keys(str(target_height))
+                height_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Height from {current_height} to {target_height} (delta: {self.rules_bounds_height}).")
+
+            # 5. Modify the 'X' value if provided.
+            if self.rules_bounds_x is not None:
+                x_input = self.driver.find_element(By.ID, 'textbox-editor-x')
+                current_x = int(x_input.get_attribute('value') or 0)
+                
+                # Calculate target relative to CURRENT value
+                target_x = current_x + self.rules_bounds_x
+                
+                x_input.clear()
+                x_input.send_keys(str(target_x))
+                x_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds X from {current_x} to {target_x} (delta: {self.rules_bounds_x}).")
+
+            # 6. Modify the 'Width' value if provided.
+            if self.rules_bounds_width is not None:
+                width_input = self.driver.find_element(By.ID, 'textbox-editor-width')
+                current_width = int(width_input.get_attribute('value') or 0)
+                
+                # Calculate target relative to CURRENT value
+                target_width = current_width + self.rules_bounds_width
+                
+                width_input.clear()
+                width_input.send_keys(str(target_width))
+                width_input.send_keys(Keys.RETURN)
+                print(f"      Adjusted Rules Bounds Width from {current_width} to {target_width} (delta: {self.rules_bounds_width}).")
 
             # Wait for a fraction of a second before closing
             time.sleep(0.5)
 
-            # 5. Close the textbox editor.
+            # 7. Close the textbox editor.
             close_button_selector = "h2.textbox-editor-close"
             close_button = self.driver.find_element(By.CSS_SELECTOR, close_button_selector)
             close_button.click()
@@ -251,6 +357,34 @@ class TextMixin:
             print(f"      An error occurred while applying hide reminder text: {e}", file=sys.stderr)
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_hide_reminder_text: {e}", file=sys.stderr)
+
+    def clear_mana_cost(self):
+        """
+        Clears the Mana Cost field.
+        """
+        print("   Clearing Mana Cost...")
+        try:
+            self.text_tab.click()
+            
+            field_button_selector = "//h4[text()='Mana Cost']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            
+            self.driver.execute_script("arguments[0].value = '';", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            
+            print("      Mana Cost cleared.")
+            time.sleep(self.render_delay)
+
+        except Exception as e:
+            print(f"      An error occurred while clearing Mana Cost: {e}", file=sys.stderr)
 
 
     def _process_all_text_modifications(self):
@@ -310,6 +444,9 @@ class TextMixin:
                     # Calculate Excess
                     excess = max(0, char_count - threshold)
                     
+                    # Initialize final_type_fs with current setting
+                    final_type_fs = self.type_font_size
+
                     if excess > 0:
                         # Step 1: Reduce Kerning (down to min 1)
                         available_k_drop = max(0, k - 1)
@@ -330,16 +467,6 @@ class TextMixin:
                         if final_f != f:
                             final_type_fs = final_f
                             print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
-                    else:
-                        # We need to prepend this tag to the text.
-                        # Since _apply_text_mods replaces the whole text, we can't easily prepend 
-                        # without modifying _apply_text_mods or doing it manually here.
-                        
-                        # Actually, _apply_text_mods takes `font_size`.
-                        # If we pass `remaining_boost` (e.g. -2) as `font_size`, 
-                        # it will create `{fontsize-2}`.
-                        # This works perfectly!
-                        final_type_fs = remaining_boost
                         
             except Exception as e:
                 print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
