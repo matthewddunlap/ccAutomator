@@ -230,54 +230,43 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     def _match_scryfall_to_cc_prints(self, scryfall_results, all_cc_prints):
         """
         Matches Scryfall results to Card Conjurer prints, including cross-referencing via illustration_id.
+        Allows multiple Scryfall arts to use the same Card Conjurer print as a base template.
         """
         matched_prints = []
-        processed_illustration_ids = set()
 
         print(f"   Cross-referencing {len(scryfall_results)} Scryfall result(s) with Card Conjurer prints...")
 
         for sr in scryfall_results:
-            # Check for direct match first
-            scryfall_set = sr.get('set')
-            scryfall_cn = sr.get('collector_number')
+            scryfall_set = sr.get('set', '').lower()
+            scryfall_cn = str(sr.get('collector_number', '')).lower()
             
+            # Pass 1: Direct Match (Set + Collector Number)
             direct_match_found = False
-            if scryfall_set and scryfall_cn:
-                if self.debug:
-                    print(f"      DEBUG: Scryfall result - set: '{scryfall_set}', cn: '{scryfall_cn}'")
-                for cc_print in all_cc_prints:
-                    cc_set = cc_print.get('set_name', '')
-                    cc_cn = cc_print.get('collector_number', '')
-                    if self.debug:
-                        print(f"      DEBUG: Comparing CC print - set: '{cc_set}', cn: '{cc_cn}' | Match: {cc_set.lower() == scryfall_set.lower() and cc_cn.lower() == str(scryfall_cn).lower()}")
-                    if cc_set.lower() == scryfall_set.lower() and cc_cn.lower() == str(scryfall_cn).lower():
-                        matched_prints.append(cc_print)
-                        direct_match_found = True
-                        break
+            for cc_print in all_cc_prints:
+                cc_set = cc_print.get('set_name', '').lower()
+                cc_cn = str(cc_print.get('collector_number', '')).lower()
+                
+                if cc_set == scryfall_set and cc_cn == scryfall_cn:
+                    new_print = cc_print.copy()
+                    new_print['scryfall_data'] = sr
+                    matched_prints.append(new_print)
+                    direct_match_found = True
+                    break
             
             if direct_match_found:
                 continue
 
-            # Pass 2: Fuzzy Match (Name Only) - Use as a fallback if no direct match found
-            print(f"      No direct match for '{sr.get('name')}' in Card Conjurer. Attempting fuzzy name-only match...")
+            # Pass 2: Fuzzy Match (Name Only) - Use as a fallback for ANY print of the same name
             for cc_print in all_cc_prints:
                 cc_text = cc_print.get('text', '').lower()
                 # Scryfall name is usually the first part of the CC text: "Card Name (SET #123)"
                 if sr.get('name', '').lower() in cc_text:
-                    if cc_print not in matched_prints:
-                        print(f"      Fuzzy match found: '{cc_print['text']}' will be used as base template.")
-                        cc_print['scryfall_data'] = sr # Attach original targeted scryfall data
-                        matched_prints.append(cc_print)
+                    new_print = cc_print.copy()
+                    new_print['scryfall_data'] = sr
+                    matched_prints.append(new_print)
+                    # if self.debug:
+                    #     print(f"      DEBUG: Using '{cc_print['text']}' as template for '{sr.get('name')}' ({sr.get('set')} #{sr.get('collector_number')})")
                     break
-
-        # Ensure scryfall_data is attached for all matched prints
-        for cc_print in matched_prints:
-             if 'scryfall_data' not in cc_print:
-                 for sr in scryfall_results:
-                     if sr.get('set', '').lower() == cc_print.get('set_name', '').lower() and \
-                        str(sr.get('collector_number', '')).lower() == cc_print.get('collector_number', '').lower():
-                         cc_print['scryfall_data'] = sr
-                         break
 
         return matched_prints
 

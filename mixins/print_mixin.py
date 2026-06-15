@@ -4,7 +4,7 @@ import random
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class PrintMixin:
@@ -34,6 +34,39 @@ class PrintMixin:
                 import time
                 time.sleep(0.5)
                 self.import_save_tab.click()
+                
+                # --- OPTIMIZATION: Check if current results are already what we need ---
+                dropdown_locator = (By.ID, 'import-index')
+                try:
+                    dropdown_element = self.driver.find_element(*dropdown_locator)
+                    current_options = Select(dropdown_element).options
+                    if current_options and not current_options[0].get_attribute("disabled"):
+                        # Check if the first non-disabled option matches our card name
+                        if current_options[0].text.lower().startswith(card_name.lower()):
+                            # print(f"   Optimization: Results for '{card_name}' already loaded. Skipping search.")
+                            # We still need to populate all_exact_matches
+                            all_exact_matches = []
+                            for option in current_options:
+                                option_text = option.text
+                                if option_text.lower().startswith(card_name.lower()):
+                                    end_of_name_index = len(card_name)
+                                    if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
+                                        match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
+                                        set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
+                                        if set_info:
+                                            cc_set = set_info.group(1).strip()
+                                            if set_code and cc_set.lower() != set_code.lower(): continue
+                                            match_data['set_name'] = cc_set
+                                            match_data['collector_number'] = set_info.group(2).strip()
+                                        elif set_code: continue
+                                        all_exact_matches.append(match_data)
+                            
+                            if all_exact_matches:
+                                break # Skip the actual search and go to filtering
+                except (NoSuchElementException, Exception):
+                    pass # Fall back to normal search if anything fails
+                # ----------------------------------------------------------------------
+
                 import_input = self.wait.until(EC.element_to_be_clickable((By.ID, 'import-name')))
                 
                 # Robust clear and type
@@ -41,7 +74,6 @@ class PrintMixin:
                 import_input.send_keys(Keys.CONTROL + "a")
                 import_input.send_keys(Keys.BACKSPACE)
                 
-                dropdown_locator = (By.ID, 'import-index')
                 try:
                     first_option = self.driver.find_element(*dropdown_locator).find_element(By.TAG_NAME, 'option')
                 except NoSuchElementException:
@@ -52,8 +84,13 @@ class PrintMixin:
                 print(f"Searching for '{search_query}' (Attempt {attempt+1}/{max_retries})...")
                 
                 if first_option:
-                    # Wait for the dropdown to update/refresh
-                    self.wait.until(EC.staleness_of(first_option))
+                    # Wait for the dropdown to update/refresh, but with a shorter timeout
+                    # because if it doesn't change, we want to proceed to check the content anyway.
+                    try:
+                        WebDriverWait(self.driver, 5).until(EC.staleness_of(first_option))
+                    except TimeoutException:
+                        # If it didn't become stale, maybe it didn't need to refresh (same search)
+                        pass
                 
                 # Wait for the dropdown to have options
                 self.wait.until(lambda d: len(Select(d.find_element(*dropdown_locator)).options) > 0)
