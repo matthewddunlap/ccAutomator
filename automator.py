@@ -796,10 +796,27 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     self._set_rules_text(rules_text)
                     print(f"   [Pain Land] Applied split symbols (52pt) and reordered text: {symbols}")
                 else:
-                    # Fallback for other non-pain lands with 2 produced colors
-                    rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
-                    self._set_rules_text(rules_text)
-                    print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
+                    # Pattern 3: Split mana land (always adds BOTH colors, e.g. Golgari Rot Farm "{T}: Add {B}{G}.")
+                    split_line = None
+                    for line in lines:
+                        if re.search(r'\{T\}: Add \{[A-Z]\}\{[A-Z]\}\.', line):
+                            split_line = line
+                            break
+
+                    if split_line:
+                        remaining_lines = [l for l in lines if l != split_line]
+                        if remaining_lines:
+                            remaining_text = "\n".join(remaining_lines)
+                            rules_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
+                        else:
+                            rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                        self._set_rules_text(rules_text)
+                        print(f"   [Split Land] Applied split symbols ({symbols}) with remaining text")
+                    else:
+                        # Fallback for other non-pain lands with 2 produced colors
+                        rules_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                        self._set_rules_text(rules_text)
+                        print(f"   [Dual Land] Applied large symbols rules text: {symbols}")
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
 

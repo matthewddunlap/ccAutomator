@@ -517,8 +517,25 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
                 print(f"   [Pain Land] Applied split symbols (52pt) and reordered text: {symbols}")
             else:
-                # Fallback to regular formatting if no special land pattern matches
-                full_text = self._format_text(oracle_text)
+                # Pattern 3: Split mana land (always adds BOTH colors, e.g. Golgari Rot Farm "{T}: Add {B}{G}.")
+                split_line = None
+                for line in lines:
+                    if re.search(r'\{T\}: Add \{[A-Z]\}\{[A-Z]\}\.', line):
+                        split_line = line
+                        break
+
+                if split_line:
+                    is_big_symbol_land = True
+                    remaining_lines = [l for l in lines if l != split_line]
+                    if remaining_lines:
+                        formatted_remaining = self._format_text("\n".join(remaining_lines))
+                        full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{formatted_remaining}"
+                    else:
+                        full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
+                    print(f"   [Split Land] Applied split symbols ({symbols}) with remaining text")
+                else:
+                    # Fallback to regular formatting if no special land pattern matches
+                    full_text = self._format_text(oracle_text)
         else:
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 
