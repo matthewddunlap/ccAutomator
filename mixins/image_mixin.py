@@ -198,7 +198,8 @@ class ImageMixin:
         if not url: return None
         try:
             print(f"   Fetching image for {purpose} from: {url}")
-            response = requests.get(url, timeout=10)
+            headers = {"User-Agent": "ccAutomator/1.0 (custom card frame automation tool)"} if "scryfall.io" in url else None
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             # No api_delay_seconds for now, as we are not hitting Scryfall API directly for every image fetch
             return response.content

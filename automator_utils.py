@@ -565,7 +565,8 @@ def autofit_set_symbol(set_symbol_url, card_data, image_server_url=None):
             # Fetch from URL
             for attempt in range(3):
                 try:
-                    resp = requests.get(svg_url, timeout=10)
+                    headers = {"User-Agent": "ccAutomator/1.0 (custom card frame automation tool)"} if "scryfall.io" in svg_url else None
+                    resp = requests.get(svg_url, headers=headers, timeout=10)
                     resp.raise_for_status()
                     svg_content = resp.content
                     break

@@ -861,14 +861,45 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
         return results
 
+    def _is_blank_canvas(self, data_url):
+        """Heuristic: treat a canvas as blank/empty if it is undecodable or its pixels are (nearly) uniform."""
+        try:
+            encoded = data_url.split(',', 1)[1]
+            img = Image.open(io.BytesIO(base64.b64decode(encoded))).convert('RGB')
+            w, h = img.size
+            if w == 0 or h == 0:
+                return True
+            # Sample a 5x5 grid across the canvas; a real card has many distinct colors.
+            points = [(x * w // 5, y * h // 5) for y in range(5) for x in range(5)]
+            distinct = {img.getpixel(p) for p in points}
+            return len(distinct) <= 1
+        except Exception:
+            return True
+
     def capture_card(self, output_filename):
         """
         Captures the current canvas and saves it to the specified filename (or uploads it).
         """
         try:
-            data_url = self._get_canvas_data_url()
+            # Ensure the canvas has finished rendering before snapshotting it.
+            # The selenium/Scryfall path captures immediately after the final render_delay,
+            # which can race with compositing in HEADDLESS mode and yield a blank, partial,
+            # or offset frame. Wait for steady-state and reject blank frames with retries.
+            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+
+            max_attempts = 3
+            data_url = None
+            for attempt in range(1, max_attempts + 1):
+                url = self._get_canvas_data_url()
+                if url and url.startswith('data:image/png;base64,') and not self._is_blank_canvas(url):
+                    data_url = url
+                    break
+                print(f"   [Capture] Attempt {attempt}/{max_attempts}: empty/blank canvas, retrying...", file=sys.stderr)
+                time.sleep(0.5)
+                self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+
             if not data_url or not data_url.startswith('data:image/png;base64,'):
-                print(f"   Error: Could not capture canvas.", file=sys.stderr)
+                print(f"   Error: Could not capture canvas (blank after {max_attempts} attempts).", file=sys.stderr)
                 return
 
             img_data = base64.b64decode(data_url.split(',', 1)[1])
