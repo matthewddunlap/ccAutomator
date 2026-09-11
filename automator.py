@@ -49,7 +49,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     """
     A class to automate interactions with the Card Conjurer web application.
     """
-    def __init__(self, url, download_dir='.', headless=True, include_sets=None,
+    def __init__(self, url, download_dir='.', headless=True, viewport=(1200, 900), include_sets=None,
                  exclude_sets=None, spells_include_sets=None, spells_exclude_sets=None,
                  basic_land_include_sets=None, basic_land_exclude_sets=None,
                  card_selection_strategy='cardconjurer', set_selection_strategy='earliest',
@@ -104,7 +104,18 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         chrome_options.add_experimental_option("prefs", prefs)
         
         self.driver = webdriver.Chrome(options=chrome_options)
-        
+
+        # Force an exact layout viewport. Headless Chromium reports a virtual screen of
+        # 800x600 and clamps --window-size, so the app only sees ~780x437 and renders the
+        # card offset (right/bottom clipped) compared to windowed mode. The CDP device-metrics
+        # override is not clamped and matches the windowed behavior.
+        if headless:
+            vw, vh = viewport
+            self.driver.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
+                "width": vw, "height": vh, "deviceScaleFactor": 1, "mobile": False
+            })
+            print(f"   Forced headless viewport to {vw}x{vh} (CDP setDeviceMetricsOverride).")
+
         # Use CDP to allow downloads in headless mode
         params = {
             'behavior': 'allow',
