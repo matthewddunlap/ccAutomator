@@ -26,6 +26,9 @@ BASIC_LAND_NAMES = {
 # Default Configuration
 DEFAULT_UPSCALER_MODEL = 'RealESRGAN_x2plus'
 
+# Scryfall API requires a custom User-Agent (rejects the default Python-requests one)
+SCRYFALL_HEADERS = {'User-Agent': 'ccAutomator/1.0 (custom card frame automation tool)'}
+
 def parse_time_string(time_str: str) -> Optional[datetime]:
     """Parses a timestamp string (yyyy-mm-dd-hh-mm-ss) or relative time (e.g., 5m, 2h) into a timezone-aware datetime object (UTC)."""
     if not time_str:
@@ -358,7 +361,7 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     
     print(f"   Scryfall query (with filters): {query}")
     try:
-        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': query})
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': query}, headers=SCRYFALL_HEADERS)
         if resp.status_code == 200:
             results = resp.json().get('data', [])
             if results:
@@ -385,7 +388,7 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
         
         print(f"   Scryfall fallback query (set filters kept, no not:covered): {fallback_1_query}")
         try:
-            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_1_query})
+            resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_1_query}, headers=SCRYFALL_HEADERS)
             if resp.status_code == 200:
                 results = resp.json().get('data', [])
                 if results:
@@ -401,7 +404,7 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     
     print(f"   Scryfall fallback query (sets stripped): {fallback_2_query}")
     try:
-        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_2_query})
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': fallback_2_query}, headers=SCRYFALL_HEADERS)
         if resp.status_code == 200:
             results = resp.json().get('data', [])
             if results:
@@ -417,7 +420,7 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     
     print(f"   Scryfall fallback query (broadest): {simple_query}")
     try:
-        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': simple_query})
+        resp = requests.get("https://api.scryfall.com/cards/search", params={'q': simple_query}, headers=SCRYFALL_HEADERS)
         if resp.status_code == 200:
             results = resp.json().get('data', [])
             if results:

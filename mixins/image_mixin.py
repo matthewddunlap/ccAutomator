@@ -303,7 +303,7 @@ class ImageMixin:
         search_url = f"https://api.scryfall.com/cards/{set_code}/{collector_number}"
         print(f"   Fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}) from: {search_url}")
         try:
-            response = requests.get(search_url, timeout=10)
+            response = requests.get(search_url, headers={"User-Agent": "ccAutomator/1.0 (custom card frame automation tool)"}, timeout=10)
             response.raise_for_status()
             card_data = response.json()
             
