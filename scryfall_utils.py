@@ -19,8 +19,11 @@ class ScryfallAPIException(Exception):
         return super().__str__()
 
 class ScryfallAPI:
+    USER_AGENT = "ccAutomator/1.0 (custom card frame automation tool)"
+
     def __init__(self):
         self.base_url = "https://api.scryfall.com"
+        self.headers = {"User-Agent": self.USER_AGENT}
     
     def search_cards(self, query: str, unique="prints", order_by="released", direction="asc") -> List[Dict]:
         """Search for cards using the Scryfall API. Returns a list of all cards matching the query by handling pagination."""
@@ -42,7 +45,7 @@ class ScryfallAPI:
                 current_params = params if page_num == 1 else None
                 # logger.debug(f"Fetching page {page_num} for query '{query}': {current_search_url} with params {current_params}")
                 
-                response = requests.get(current_search_url, params=current_params, timeout=20)
+                response = requests.get(current_search_url, params=current_params, headers=self.headers, timeout=20)
                 response.raise_for_status() 
                 
                 page_data = response.json()
