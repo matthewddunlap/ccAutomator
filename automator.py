@@ -482,67 +482,74 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             scryfall_results = self.scryfall_api.search_cards(full_query, unique="art", order_by="released", direction="asc")
     
             selection_strategy = self.set_selection_strategy # Default to set_selection_strategy
-    
-            # 2. Fallback Scryfall Queries if initial one yields no results
-            if not scryfall_results:
-                if self.no_match_selection == 'skip':
+     
+            # 2. Fallback Scryfall Queries: triggered when (a) the initial query yielded no
+            # Scryfall results, OR (b) Scryfall returned results but none matched the
+            # Card Conjurer prints (e.g. the CC pool is unexpectedly empty). In both cases
+            # the widening progression below is appropriate.
+            def _try_cross_reference(results_list):
+                if not results_list:
+                    return []
+                return self._match_scryfall_to_cc_prints(results_list, all_cc_prints)
+
+            matched_prints = _try_cross_reference(scryfall_results)
+            fallback_used = False
+            if not matched_prints:
+                if self.no_match_selection == 'skip' and not scryfall_results:
                     print(f"   Warning: Initial Scryfall query found no matches. Skipping card as per --no-match-selection.", file=sys.stderr)
                     return results
-    
+
                 # Fallback Step 1: Strip 'not:covered' but KEEP all set selection criteria (including set_code/includes/excludes)
-                if not is_token and 'not:covered' in base_query_parts:
-                    print(f"   Warning: Initial query found no matches. Step 1: Stripping 'not:covered' constraint but keeping set filters...", file=sys.stderr)
+                if not matched_prints and not is_token and 'not:covered' in base_query_parts:
+                    reason = "no matches" if not scryfall_results else "results present but none matched Card Conjurer"
+                    print(f"   Warning: Initial query had {reason}. Step 1: Stripping 'not:covered' constraint but keeping set filters...", file=sys.stderr)
                     # We reuse query_parts which has set_code, includes, etc., but remove 'not:covered'
                     fallback_1_query_parts = [p for p in query_parts if p != 'not:covered']
                     fallback_1_query = " ".join(fallback_1_query_parts)
                     print(f"   Scryfall fallback query (set filters kept, no not:covered): {fallback_1_query}")
-                    scryfall_results = self.scryfall_api.search_cards(fallback_1_query, unique="art", order_by="released", direction="asc")
-                    
-                    if scryfall_results:
-                        selection_strategy = self.no_match_selection
+                    fallback_results = self.scryfall_api.search_cards(fallback_1_query, unique="art", order_by="released", direction="asc")
+                    fallback_used = True
+                    matched_prints = _try_cross_reference(fallback_results)
 
                 # Fallback Step 2: Strip ALL set criteria (including includes, excludes, and specific set_code)
-                if not scryfall_results:
-                    print(f"   Warning: Still no matches. Step 2: Stripping ALL set criteria but keeping paper/layout constraints...", file=sys.stderr)
-                    
+                if not matched_prints:
+                    reason = "no matches" if not scryfall_results else "results present but none matched Card Conjurer"
+                    print(f"   Warning: Still no usable match. Step 2: Stripping ALL set criteria but keeping paper/layout constraints... (prev reason: {reason})", file=sys.stderr)
+
                     # Use base_query_parts but ensure not:covered is gone if it was there
                     fallback_2_parts = [p for p in base_query_parts if p != 'not:covered']
                     fallback_2_query = " ".join(fallback_2_parts)
                     print(f"   Scryfall fallback query (sets stripped): {fallback_2_query}")
-                    scryfall_results = self.scryfall_api.search_cards(fallback_2_query, unique="art", order_by="released", direction="asc")
-                    
-                    if scryfall_results:
-                        selection_strategy = self.no_match_selection
-    
+                    fallback_results = self.scryfall_api.search_cards(fallback_2_query, unique="art", order_by="released", direction="asc")
+                    fallback_used = True
+                    matched_prints = _try_cross_reference(fallback_results)
+
                 # Fallback Step 3: Broadest search, additionally strip game:paper and -layout:art-series
-                if not scryfall_results:
-                    print(f"   Warning: Still no matches. Step 3: Stripping paper/layout filters for broadest search.", file=sys.stderr)
-                    
+                if not matched_prints:
+                    reason = "no matches" if not scryfall_results else "results present but none matched Card Conjurer"
+                    print(f"   Warning: Still no usable match. Step 3: Stripping paper/layout filters for broadest search. (prev reason: {reason})", file=sys.stderr)
+
                     # Broadest query: Use base_query_parts but strip paper/layout/covered
                     fallback_3_parts = [p for p in base_query_parts if p not in ['not:covered', 'game:paper', '-layout:art-series']]
                     if self.no_match_selection == 'latest':
                         fallback_3_parts.append('prefer:newest')
                     elif self.no_match_selection == 'earliest':
                         fallback_3_parts.append('prefer:oldest')
-                    
+
                     fallback_3_query = " ".join(fallback_3_parts)
                     print(f"   Scryfall fallback query (broadest): {fallback_3_query}")
-                    scryfall_results = self.scryfall_api.search_cards(fallback_3_query, unique="art", order_by="released", direction="asc")
-    
-                    if not scryfall_results:
-                        print(f"   Error: Fallback Scryfall query also found no results for '{card_name}'. Skipping card.", file=sys.stderr)
-                        return results
-    
-                # If fallback query was used, the selection strategy shifts to no_match_selection
-                selection_strategy = self.no_match_selection
-    
-            # 3. Match Scryfall results against Card Conjurer UI prints
-            matched_prints = self._match_scryfall_to_cc_prints(scryfall_results, all_cc_prints)
-            
+                    fallback_results = self.scryfall_api.search_cards(fallback_3_query, unique="art", order_by="released", direction="asc")
+                    fallback_used = True
+                    matched_prints = _try_cross_reference(fallback_results)
+
             if not matched_prints:
-                print(f"   Warning: Scryfall found results, but none matched the available prints in Card Conjurer for '{card_name}'. Skipping.", file=sys.stderr)
+                print(f"   Error: Fallback Scryfall query also found no usable result for '{card_name}'. Skipping card.", file=sys.stderr)
                 return results
-            
+
+            # If a fallback query was used, the selection strategy shifts to no_match_selection
+            if fallback_used:
+                selection_strategy = self.no_match_selection
+
             # 4. Select prints to capture based on strategy
             if selection_strategy == 'latest':
                 prints_to_capture = [matched_prints[-1]] # Last item from sorted list is newest (Scryfall results are oldest-to-newest)

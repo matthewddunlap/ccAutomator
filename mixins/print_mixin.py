@@ -8,6 +8,23 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class PrintMixin:
+    @staticmethod
+    def _normalize_card_name(name: str) -> str:
+        """Strip all whitespace and lowercase so 'DarkRitual' == 'Dark Ritual'."""
+        return re.sub(r'\s+', '', name).lower()
+
+    @classmethod
+    def _option_name_matches(cls, option_text: str, card_name: str) -> bool:
+        """Returns True when the name portion of a Card Conjurer dropdown option
+        (text before the first " (SET #n)" suffix) matches `card_name` case- and
+        whitespace-insensitively. So 'DarkRitual' matches 'Dark Ritual (SLZ #38)',
+        but 'DarkRitual' does NOT match 'DarkRituals (XXX #1)'.
+        """
+        m = re.match(r'^(.*?)\s*\(', option_text)
+        if not m:
+            return False
+        return cls._normalize_card_name(m.group(1)) == cls._normalize_card_name(card_name)
+
     def _get_and_filter_prints(self, card_name, is_priming=False, is_token=False, set_code=None) -> tuple[list[dict], bool]:
         """
         Gets all prints from the Card Conjurer UI and filters them based on include/exclude sets.
@@ -42,24 +59,22 @@ class PrintMixin:
                     current_options = Select(dropdown_element).options
                     if current_options and not current_options[0].get_attribute("disabled"):
                         # Check if the first non-disabled option matches our card name
-                        if current_options[0].text.lower().startswith(card_name.lower()):
+                        if self._option_name_matches(current_options[0].text, card_name):
                             # print(f"   Optimization: Results for '{card_name}' already loaded. Skipping search.")
                             # We still need to populate all_exact_matches
                             all_exact_matches = []
                             for option in current_options:
                                 option_text = option.text
-                                if option_text.lower().startswith(card_name.lower()):
-                                    end_of_name_index = len(card_name)
-                                    if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
-                                        match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
-                                        set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
-                                        if set_info:
-                                            cc_set = set_info.group(1).strip()
-                                            if set_code and cc_set.lower() != set_code.lower(): continue
-                                            match_data['set_name'] = cc_set
-                                            match_data['collector_number'] = set_info.group(2).strip()
-                                        elif set_code: continue
-                                        all_exact_matches.append(match_data)
+                                if self._option_name_matches(option_text, card_name):
+                                    match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
+                                    set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
+                                    if set_info:
+                                        cc_set = set_info.group(1).strip()
+                                        if set_code and cc_set.lower() != set_code.lower(): continue
+                                        match_data['set_name'] = cc_set
+                                        match_data['collector_number'] = set_info.group(2).strip()
+                                    elif set_code: continue
+                                    all_exact_matches.append(match_data)
                             
                             if all_exact_matches:
                                 break # Skip the actual search and go to filtering
@@ -99,24 +114,22 @@ class PrintMixin:
                 dropdown = Select(self.driver.find_element(*dropdown_locator))
                 for option in dropdown.options:
                     option_text = option.text
-                    if option_text.lower().startswith(card_name.lower()):
-                        end_of_name_index = len(card_name)
-                        if len(option_text) == end_of_name_index or option_text[end_of_name_index:end_of_name_index+2] == ' (':
-                            match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
-                            set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
-                            if set_info:
-                                cc_set = set_info.group(1).strip()
-                                # If a specific set was targeted, filter out anything else immediately
-                                if set_code and cc_set.lower() != set_code.lower():
-                                    continue
-                                    
-                                match_data['set_name'] = cc_set
-                                match_data['collector_number'] = set_info.group(2).strip()
-                            elif set_code:
-                                # If we are looking for a set but this result has no set info, skip it
+                    if self._option_name_matches(option_text, card_name):
+                        match_data = {'index': option.get_attribute('value'), 'text': option_text, 'set_name': None, 'collector_number': None}
+                        set_info = re.search(r'\(([^#]+?)\s*#([^)]+)\)', option_text)
+                        if set_info:
+                            cc_set = set_info.group(1).strip()
+                            # If a specific set was targeted, filter out anything else immediately
+                            if set_code and cc_set.lower() != set_code.lower():
                                 continue
-                                
-                            all_exact_matches.append(match_data)
+                            
+                            match_data['set_name'] = cc_set
+                            match_data['collector_number'] = set_info.group(2).strip()
+                        elif set_code:
+                            # If we are looking for a set but this result has no set info, skip it
+                            continue
+                            
+                        all_exact_matches.append(match_data)
                 
                 if not all_exact_matches:
                     print(f"   Warning: No exact match found for '{card_name}'{' in ' + set_code if set_code else ''}.", file=sys.stderr)
