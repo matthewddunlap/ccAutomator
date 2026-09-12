@@ -875,6 +875,26 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         """
         try:
             if self.driver.execute_script("return (typeof cardCanvas) !== 'undefined' && cardCanvas && cardCanvas.width > 0 && cardCanvas.height > 0;"):
+                # Card Conjurer's drawCard()/redraws can leak a translate transform onto
+                # cardContext (unbalanced save()/restore()). Left as-is, the frame/text
+                # composite lands off-canvas (bottom-right) so cardCanvas reads back
+                # mostly transparent. Reset the context to identity and force one clean
+                # synchronous redraw before snapshotting.
+                self.driver.execute_script(r"""
+                    if (typeof cardContext !== 'undefined') {
+                        cardContext.save();
+                        cardContext.setTransform(1,0,0,1,0,0);
+                        try { drawCard(); } catch(e) {}
+                        cardContext.restore();
+                        cardContext.setTransform(1,0,0,1,0,0);
+                    }
+                    if (typeof previewContext !== 'undefined') {
+                        previewContext.save();
+                        previewContext.setTransform(1,0,0,1,0,0);
+                        previewContext.restore();
+                    }
+                    return true;
+                """)
                 data_url = self.driver.execute_script("return cardCanvas.toDataURL('image/png');")
                 if data_url and data_url.startswith('data:image/png;base64,') and not self._is_blank_canvas(data_url):
                     return base64.b64decode(data_url.split(',', 1)[1])
