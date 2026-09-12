@@ -844,31 +844,105 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
         return results
 
-    def capture_card(self, output_filename):
+    def _is_blank_canvas(self, data_url):
+        """Heuristic: treat a canvas as blank/empty if it is undecodable or its pixels are (nearly) uniform."""
+        try:
+            encoded = data_url.split(',', 1)[1]
+            img = Image.open(io.BytesIO(base64.b64decode(encoded))).convert('RGB')
+            w, h = img.size
+            if w == 0 or h == 0:
+                return True
+            # Sample a 5x5 grid across the canvas; a real card has many distinct colors.
+            points = [(x * w // 5, y * h // 5) for y in range(5) for x in range(5)]
+            distinct = {img.getpixel(p) for p in points}
+            return len(distinct) <= 1
+        except Exception:
+            return True
+
+    def _capture_via_card_canvas(self):
         """
-        Captures the current canvas and saves it to the specified filename (or uploads it).
+        Reads the app's full-resolution render canvas directly -- the same source the Card
+        Conjurer 'download your card' button uses (its non-alt branch is literally
+        `cardCanvas.toDataURL('image/png')`).
+
+        `cardCanvas` is the full-res render surface (e.g. 2010x2814) in the app's global
+        script scope. Unlike #previewCanvas (the half-res 1005x1407 element the old
+        canvas-capture path was reading, first-in-DOM), cardCanvas is at native resolution
+        and is composed independent of viewport size/position, so it avoids both the
+        headless offset bug and the low-resolution preview problem.
+
+        Returns img_data (bytes) on success, or None.
         """
         try:
-            data_url = self._get_canvas_data_url()
-            if not data_url or not data_url.startswith('data:image/png;base64,'):
-                print(f"   Error: Could not capture canvas.", file=sys.stderr)
-                return
+            if self.driver.execute_script("return (typeof cardCanvas) !== 'undefined' && cardCanvas && cardCanvas.width > 0 && cardCanvas.height > 0;"):
+                data_url = self.driver.execute_script("return cardCanvas.toDataURL('image/png');")
+                if data_url and data_url.startswith('data:image/png;base64,') and not self._is_blank_canvas(data_url):
+                    return base64.b64decode(data_url.split(',', 1)[1])
+                print("   [Capture] cardCanvas read back blank/invalid.", file=sys.stderr)
+            else:
+                print("   [Capture] cardCanvas not available (no card rendered?); falling back to canvas.", file=sys.stderr)
+        except Exception as e:
+            print(f"   [Capture] cardCanvas read failed: {e}; falling back to canvas.", file=sys.stderr)
+        return None
 
-            img_data = base64.b64decode(data_url.split(',', 1)[1])
-            
+    def capture_card(self, output_filename):
+        """
+        Captures the current card. Prefers the app's full-resolution render canvas
+        (cardCanvas -- the same source as the 'download your card' button, 2010x2814,
+        viewport-independent); falls back to the (lower-res, viewport-dependent) element canvas.
+        """
+        # Preferred path: the app's full-res render canvas (authoritative, viewport-independent).
+        img_data = None
+        for attempt in range(3):
+            img_data = self._capture_via_card_canvas()
+            if img_data:
+                break
+            print(f"   [Capture] cardCanvas retry {attempt + 1}/3...", file=sys.stderr)
+            self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+            time.sleep(0.5)
+
+        if img_data:
             if self.upload_path:
-                # Upload mode is active
                 self._upload_image(img_data, output_filename)
             else:
-                # Local save mode is active
                 output_path = os.path.join(self.download_dir, output_filename)
                 with open(output_path, 'wb') as f:
                     f.write(img_data)
-                print(f"   Saved locally to '{output_path}'.")
+                print(f"   Saved locally to '{output_path}' ({len(img_data)//1024} KB).")
+            return
 
-        except Exception as e:
-            print(f"   Error capturing card: {e}", file=sys.stderr)
-    
+        # Fallback path: snapshot the (preview) canvas element. Viewport-dependent; historically
+        # the source of the headless offset bug, so only used if cardCanvas is unavailable.
+        print("   [Capture] Falling back to element canvas (lower-res, may be viewport-offset).", file=sys.stderr)
+        self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+
+        max_attempts = 3
+        data_url = None
+        for attempt in range(1, max_attempts + 1):
+            url = self._get_canvas_data_url()
+            if url and url.startswith('data:image/png;base64,') and not self._is_blank_canvas(url):
+                data_url = url
+                break
+            print(f"   [Capture] Attempt {attempt}/{max_attempts}: empty/blank canvas, retrying...", file=sys.stderr)
+            time.sleep(0.5)
+            self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+
+        if not data_url or not data_url.startswith('data:image/png;base64,'):
+            print(f"   Error: Could not capture canvas (blank after {max_attempts} attempts).", file=sys.stderr)
+            return
+
+        img_data = base64.b64decode(data_url.split(',', 1)[1])
+
+        if self.upload_path:
+            # Upload mode is active
+            self._upload_image(img_data, output_filename)
+        else:
+            # Local save mode is active
+            output_path = os.path.join(self.download_dir, output_filename)
+            with open(output_path, 'wb') as f:
+                f.write(img_data)
+            print(f"   Saved locally to '{output_path}'.")
+
         # --- Save Card to Browser Storage (if enabled) ---
         # NOTE: We do NOT do this here anymore. Saving to browser storage should be explicit
         # and handled by the caller (e.g., process_and_capture_card or the full-art loop).
