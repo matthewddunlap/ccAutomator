@@ -576,9 +576,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             scryfall_data = print_data.get('scryfall_data', {})
             target_set = scryfall_data.get('set', print_data['set_name'])
             target_cn = scryfall_data.get('collector_number', print_data['collector_number'])
+            # For filenames, use the canonical card name resolved by Scryfall (not the
+            # user's input, which might be a typo like "DarkRitual"). The set/number still
+            # come from Scryfall, so the filename is the same as if the user had typed the
+            # card correctly — e.g. 'Dark Ritual' (MSC #793) -> dark_ritual_msc_793.png,
+            # not darkritual_msc_793.png.
+            canonical_name = scryfall_data.get('name') or card_name
 
             # Check if file already exists on server or locally
-            output_filename = self._generate_final_filename(card_name, target_set, target_cn)
+            output_filename = self._generate_final_filename(canonical_name, target_set, target_cn)
             
             if self.should_skip_file(output_filename):
                  if self.upload_path:
@@ -842,10 +848,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             # Save to browser storage if enabled (for .cardconjurer export)
             if self.save_cc_file:
-                self._save_card_to_browser_storage(card_name, target_set, str(target_cn))
+                self._save_card_to_browser_storage(canonical_name, target_set, str(target_cn))
 
             # Capture using the new method
-            filename = self._generate_final_filename(card_name, target_set, str(target_cn))
+            filename = self._generate_final_filename(canonical_name, target_set, str(target_cn))
             self.capture_card(filename)
             results['captured'] += 1
 
