@@ -12,7 +12,10 @@ from automator_utils import (
     generate_safe_filename,
     get_image_mime_type_and_extension,
     DEFAULT_UPSCALER_MODEL,
-    scryfall_query_with_fallback
+    scryfall_query_with_fallback,
+    autofit_land_symbols,
+    classify_land_lines,
+    build_dual_land_rules_text
 )
 # Add parent directory to path to import mixins
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -448,77 +451,27 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             else:
                 full_text = self._format_text(oracle_text, is_basic_land=True)
         elif is_land and len(colored_mana_produced) == 2:
-            # Dual Land Logic (Large Symbols + Preservation of conditional text)
-            # Sort colors to WUBRG order for consistency
+            # Dual / Pain / Bounce Land Logic.
+            # Large mana symbols + any real body text, sized so the pair always
+            # fits the fixed rules box (sizes are derived from the body line
+            # count, not hardcoded per-branch).
+            is_big_symbol_land = True
             color_order = {'W': 0, 'U': 1, 'B': 2, 'R': 3, 'G': 4}
             colored_mana_produced.sort(key=lambda x: color_order.get(x, 99))
             symbols = " ".join([f"{{{c.upper()}}}" for c in colored_mana_produced])
-            
-            # Split oracle text into lines
-            lines = [line.strip() for line in oracle_text.split('\n') if line.strip()]
-            first_line = lines[0] if lines else ""
-            
-            # Pattern 1: Standard mana reminder on line 1 (Dual/Shock/Cycle)
-            # Example: ({T}: Add {G} or {U}.)
-            standard_match = re.match(r'^\({T}: Add \{[A-Z]\} or \{[A-Z]\}\.\)$', first_line)
-            
-            # Pattern 2: Pain land (Detect colorless and colored mana abilities)
-            # Scryfall usually has Colorless on L1 and Colored + Damage on L2
-            is_pain_land = False
-            colorless_line = ""
-            colored_line = ""
-            other_lines = []
-            
-            for line in lines:
-                if "{T}: Add {C}" in line:
-                    colorless_line = line
-                elif re.search(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.', line):
-                    colored_line = line
-                else:
-                    other_lines.append(line)
-            
-            if colorless_line and colored_line:
-                is_pain_land = True
 
-            if standard_match:
-                is_big_symbol_land = True
-                if len(lines) > 1:
-                    # Multi-line (Shock/Cycle): 52pt symbols + 12pt remaining text
-                    remaining_text = "\n".join(lines[1:])
-                    formatted_remaining = self._format_text(remaining_text)
-                    # Use {fontsize32pt}\n spacer to control gap between symbols and text
-                    full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{formatted_remaining}"
-                    print(f"   [Dual Land] Applied split symbols (52pt) and text (12pt): {symbols}")
-                else:
-                    # Single-line (Bayou): 64pt symbols
-                    full_text = f"{{down80}}{{fontsize64pt}}{{center}}{symbols}"
-                    print(f"   [Dual Land] Applied large symbols (64pt): {symbols}")
-            elif is_pain_land:
-                is_big_symbol_land = True
-                # Pain land special handling: Symbols -> Damage/Extra Text -> Colorless
-                # Remove the colored mana ability from the colored line to get just the damage/extra text
-                damage_part = re.sub(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.\s*', '', colored_line)
-                
-                # Ensure card name is replaced with "This land" in damage part
-                if damage_part and card_name in damage_part:
-                    damage_part = damage_part.replace(card_name, "This land")
-                
-                remaining_parts = []
-                if damage_part:
-                    remaining_parts.append(damage_part)
-                if colorless_line:
-                    remaining_parts.append(colorless_line)
-                remaining_parts.extend(other_lines)
-                
-                # Format each part and join with newline + font size reset for each line
-                formatted_parts = [self._format_text(p) for p in remaining_parts]
-                remaining_text = "\n{fontsize12pt}".join(formatted_parts)
-                
-                full_text = f"{{fontsize52pt}}{{center}}{symbols}{{fontsize32pt}}\n{{fontsize12pt}}{remaining_text}"
-                print(f"   [Pain Land] Applied split symbols (52pt) and reordered text: {symbols}")
-            else:
-                # Fallback to regular formatting if no special land pattern matches
-                full_text = self._format_text(oracle_text)
+            lines = [line.strip() for line in oracle_text.split('\n') if line.strip()]
+            body_lines = classify_land_lines(lines)
+            # For pain lands, refer to "This land" instead of the card name.
+            body_lines = [ln.replace(card_name, "This land") if card_name in ln else ln
+                          for ln in body_lines]
+
+            fit = autofit_land_symbols(len(body_lines))
+            full_text = build_dual_land_rules_text(
+                symbols, body_lines,
+                formatter=lambda s: self._format_text(s) if s else s)
+            print(f"   [Dual Land] Symbols (fontsize {fit['symbol']}pt) + "
+                  f"{len(body_lines)} body line(s) at {fit['text']}pt: {symbols}")
         else:
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 

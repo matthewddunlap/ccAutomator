@@ -430,6 +430,125 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     
     return None
 
+def autofit_land_symbols(n_small_lines, symbol_max=64, symbol_min=30, symbol_step=12):
+    """
+    Compute the largest large-symbol point size that can share the fixed
+    rules-text box with `n_small_lines` lines of small body text below it.
+
+    The rules box has a fixed height, so the larger the symbols, the less room
+    is left for text.  Reserving space for each additional body line shrinks the
+    symbols by `symbol_step` points down to a floor.  This generalizes the
+    previously hardcoded per-branch sizes (Bayou=64, Hallowed Fountain=52) into
+    one monotonic rule so multi-line lands (e.g. Golgari Rot Farm) never overflow.
+
+    Args:
+        n_small_lines: number of small body-text lines to render beneath the symbols
+        symbol_max / symbol_min / symbol_step: size calibration bounds (points)
+
+    Returns:
+        dict with 'symbol' (pt), 'text' (pt), 'gap' (pt) and 'n' (line count)
+    """
+    n = max(0, int(n_small_lines))
+    size = symbol_max - symbol_step * n
+    size = max(symbol_min, min(symbol_max, size))
+    # Drop body text one step for the busiest layouts so 3+ lines also fit.
+    text_size = 10 if n >= 3 else 12
+    return {"symbol": size, "text": text_size, "gap": 32, "n": n}
+
+def classify_land_lines(lines):
+    """
+    Reduce a land's oracle-text lines to the small body text to render beneath
+    the large mana symbols, in final on-card order.
+
+    The large mana symbols already express the land's colored tap-to-add-mana,
+    so a line that is *solely* a mana ability ('{T}: Add {B}{G}.' or
+    '({T}: Add {B} or {G}.)') is dropped -- the symbols stand in for it.  Everything
+    else (entering-tapped, triggers, damage, costs) is preserved.  A pain land's
+    colorless clause ({T}: Add {C}) is kept, and its redundant colored add-clause
+    is stripped, yielding the original symbols -> damage -> {T}: Add {C} order.
+
+    Args:
+        lines: list of stripped, non-empty oracle-text lines, in card order
+
+    Returns:
+        body_lines: the small body-text lines (in render order).  May be empty
+                    (e.g. Bayou -> symbols only).
+    """
+    def is_pure_mana_tap(line):
+        # A line that is purely a tap-to-add-mana ability is fully represented by
+        # the large symbols, so it's dropped from the small body text.  Shapes:
+        #   '{T}: Add {B}{G}.'            (bounce / dual colored add)
+        #   '({T}: Add {B} or {G}.)'       (standard dual mana reminder)
+        core = (line or "").strip()
+        if core.startswith("(") and core.endswith(")"):
+            core = core[1:-1].strip()
+        core = core.rstrip(".")
+        if re.match(r'^\{T\}: Add (?:\{[A-Z]\})+$', core):
+            return True
+        if re.match(r'^\{T\}: Add \{[A-Z]\} or \{[A-Z]\}$', core):
+            return True
+        return False
+
+    def is_colored_add(line):
+        return bool(re.search(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.', line or ""))
+
+    is_pain = any("{T}: Add {C}" in (l or "") for l in lines) and any(is_colored_add(l) for l in lines)
+
+    if is_pain:
+        damage_part = colorless_clause = None
+        other_lines = []
+        for line in lines:
+            if "{T}: Add {C}" in line:
+                colorless_clause = re.sub(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.\s*', '', line)
+            elif is_colored_add(line):
+                damage_part = re.sub(r'\{T\}: Add \{[A-Z]\} or \{[A-Z]\}\.\s*', '', line)
+            else:
+                other_lines.append(line)
+        body = []
+        if damage_part:
+            body.append(damage_part)
+        if colorless_clause:
+            body.append(colorless_clause)
+        body.extend(other_lines)
+        return body
+
+    # Standard / bounce / other dual lands: keep every line except a pure
+    # mana-ability line that the large symbols already represent.
+    return [line for line in lines if not is_pure_mana_tap(line)]
+
+def build_dual_land_rules_text(symbols, body_lines, formatter=None):
+    """
+    Build the Card Conjurer rules text for a land that shows large mana symbols
+    plus an optional stack of small body-text lines.
+
+    The symbol size is computed from the number of body lines so the pair always
+    fits the fixed rules box (see autofit_land_symbols).
+
+    Args:
+        symbols:    large mana tokens, e.g. "{B} {G}"
+        body_lines: small body-text lines to render under the symbols, in the
+                    desired order, already stripped of redundant mana-ability
+                    text.  May be empty (Bayou -> symbols only).
+        formatter:  optional callable applied to each body line (e.g. to italicize
+                    reminder text / normalize quotes).  Defaults to identity.
+
+    Returns:
+        the rules text string ready for Card Conjurer
+    """
+    fit = autofit_land_symbols(len(body_lines or []))
+    sz = fit["symbol"]
+    txt = fit["text"]
+    gap = fit["gap"]
+
+    body_lines = body_lines or []
+    if not body_lines:
+        return f"{{down80}}{{fontsize{sz}pt}}{{center}}{symbols}"
+
+    fmt = formatter or (lambda s: s)
+    base = f"{{fontsize{txt}pt}}"
+    body = base + ("\n" + base).join(fmt(line) for line in body_lines)
+    return f"{{fontsize{sz}pt}}{{center}}{symbols}{{fontsize{gap}pt}}\n{body}"
+
 def autofit_art_position(art_width, art_height, card_data):
     """
     Calculate optimal art position and zoom to fit within artBounds.
