@@ -66,7 +66,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
-                 auto_fit_type=False):
+                 auto_fit_type=False,
+                 set_symbol_source='cardconjurer'):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -163,6 +164,11 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.type_kerning = type_kerning
         self.type_left = type_left
         self.auto_fit_type = auto_fit_type
+        # Where Card Conjurer fetches set symbols from: 'cardconjurer' (the
+        # app's built-in asset set) or 'hexproof' (https://api.hexproof.io),
+        # the latter of which covers every official set and is colorized per
+        # the print's Scryfall rarity.  See --set-symbol-source.
+        self.set_symbol_source = set_symbol_source or 'cardconjurer'
         print(f"DEBUG: CardConjurerAutomator initialized with auto_fit_type={self.auto_fit_type}")
 
         self.app_url = url
@@ -702,7 +708,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             # 2. Set Symbol
             scryfall_set = scryfall_data.get('set')
             if scryfall_set:
-                self.set_set_symbol(scryfall_set.upper())
+                # Pass the print's Scryfall rarity so the tab requests the
+                # colorized variant (the app reads the rarity in every source
+                # branch).  The source is controlled by --set-symbol-source:
+                #   * 'cardconjurer' (default) - the app's built-in asset set
+                #   * 'hexproof'               - https://api.hexproof.io,
+                #                                covers every official set
+                #                                (TRK, ECC, EOC, ...) and
+                #                                returns Access-Control-Allow-
+                #                                Origin: * (Card Conjurer sets
+                #                                image.crossOrigin='anonymous'
+                #                                on the symbol when drawing,
+                #                                so a CORS header is required
+                #                                to avoid canvas taint)
+                self.set_set_symbol(
+                    scryfall_set.upper(),
+                    rarity=scryfall_data.get('rarity'),
+                    source=self.set_symbol_source)
                 mods_applied = True
 
             # Use produced_mana for lands if colors is empty

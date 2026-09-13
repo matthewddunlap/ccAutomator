@@ -301,6 +301,18 @@ def main():
     )
 
     parser.add_argument(
+        '--set-symbol-source',
+        choices=['cardconjurer', 'hexproof'],
+        default='cardconjurer',
+        help="Which source Card Conjurer fetches set symbols from. "
+             "'cardconjurer' (default) uses the app's built-in asset set; "
+             "'hexproof' fetches from https://api.hexproof.io which covers "
+             "every official set and is colorized per the print's Scryfall "
+             "rarity.  Use 'hexproof' for promo/commander sets that the "
+             "built-in set has no asset for (TRK, ECC, EOC, ...)."
+    )
+
+    parser.add_argument(
         '--image-server',
         help="The base URL of the web server where custom art is stored (e.g., 'http://mtgproxy:4242')."
     )
@@ -801,6 +813,7 @@ def main():
                 pt_left=args.pt_left,
                 pt_up=args.pt_up,
                 hide_reminder_text=args.hide_reminder_text,
+                set_symbol_source=args.set_symbol_source,
                 title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
                 overwrite=args.overwrite,
@@ -886,6 +899,7 @@ def main():
                 rules_bounds_y=args.rules_bounds_y,
                 rules_bounds_height=args.rules_bounds_height,
                 hide_reminder_text=args.hide_reminder_text,
+                set_symbol_source=args.set_symbol_source,
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
                 overwrite_newer_than=args.overwrite_newer_than,
@@ -956,6 +970,7 @@ def main():
             rules_bounds_x=args.rules_bounds_x,
             rules_bounds_width=args.rules_bounds_width,
             hide_reminder_text=args.hide_reminder_text,
+            set_symbol_source=args.set_symbol_source,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             art_path=args.art_path,

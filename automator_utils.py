@@ -450,10 +450,12 @@ def autofit_land_symbols(n_small_lines, symbol_max=64, symbol_min=30, symbol_ste
     """
     n = max(0, int(n_small_lines))
     size = symbol_max - symbol_step * n
-    size = max(symbol_min, min(symbol_max, size))
-    # Drop body text one step for the busiest layouts so 3+ lines also fit.
-    text_size = 10 if n >= 3 else 12
-    return {"symbol": size, "text": text_size, "gap": 32, "n": n}
+    size = int(max(symbol_min, min(symbol_max, size)))
+    # Body text and the post-symbol spacer tighten once more than one line must
+    # share the box with the symbols.  Single-line layouts keep roomier values.
+    text_size = 12 if n <= 1 else 11
+    gap = 32 if n <= 1 else 30
+    return {"symbol": size, "text": text_size, "gap": gap, "n": n}
 
 def classify_land_lines(lines):
     """
