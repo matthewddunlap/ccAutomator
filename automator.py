@@ -35,7 +35,8 @@ from automator_utils import (
     DEFAULT_UPSCALER_MODEL,
     autofit_land_symbols,
     classify_land_lines,
-    build_dual_land_rules_text
+    build_dual_land_rules_text,
+    autofit_type,
 )
 
 # Import Mixins
@@ -651,58 +652,35 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                 "Title", eff_title_fs, self.title_shadow, eff_title_kerning, self.title_left)
             
-            # --- Auto-Fit Type Logic ---
+            # --- Auto-Fit Type Logic (calibrated width model vs set symbol) ---
             final_type_fs = self.type_font_size
             final_type_kerning = self.type_kerning
 
             if self.auto_fit_type:
                 try:
-                    # Navigate to Type line to measure text
+                    # Navigate to Type line to read the current type text.
                     self.text_tab.click()
                     field_button_selector = "//h4[text()='Type']"
                     field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
                     field_button.click()
                     time.sleep(0.5)
-                    
+
                     text_input = self.wait.until(EC.presence_of_element_located((By.ID, "text-editor")))
                     current_type_text = text_input.get_attribute('value')
-                    
+
                     if current_type_text:
-                        # Strip existing tags to get raw character count
-                        clean_text = re.sub(r'\{[^}]+\}', '', current_type_text)
-                        char_count = len(clean_text)
-                        
-                        # Get current settings (default to 0 if None)
-                        k = self.type_kerning if self.type_kerning is not None else 0
-                        f = self.type_font_size if self.type_font_size is not None else 0
-                        
-                        # Calculate Threshold: 34 - k - floor(f * 0.3)
-                        threshold = 34 - k - math.floor(f * 0.3)
-                        
-                        # Calculate Excess
-                        excess = max(0, char_count - threshold)
-                        
-                        if excess > 0:
-                            # Step 1: Reduce Kerning (down to min 1)
-                            available_k_drop = max(0, k - 1)
-                            k_drop = min(excess, available_k_drop)
-                            
-                            final_k = k - k_drop
-                            remaining_excess = excess - k_drop
-                            
-                            # Step 2: Reduce Font Size
-                            f_drop = math.ceil(remaining_excess * 2.5)
-                            final_f = f - f_drop
-                            
-                            # Apply changes
-                            if final_k != k:
-                                final_type_kerning = final_k
-                                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
-                                
-                            if final_f != f:
-                                final_type_fs = final_f
-                                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
-                            
+                        # Strip existing tags to get the raw type line.
+                        clean_text = re.sub(r'\{[^}]+\}', '', current_type_text).strip()
+                        # Reserve room for the set symbol that sits on the right
+                        # of the type row (has_set_symbol=True), so a very long
+                        # "Legendary Creature - ..." line never runs into it.
+                        final_type_kerning, final_type_fs = autofit_type(
+                            clean_text,
+                            self.type_kerning if self.type_kerning is not None else 0,
+                            self.type_font_size if self.type_font_size is not None else 0,
+                            self.type_left if self.type_left else 0,
+                            has_set_symbol=True)
+
                 except Exception as e:
                     print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
 

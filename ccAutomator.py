@@ -240,7 +240,9 @@ def main():
     parser.add_argument(
         '--auto-fit-type',
         action='store_true',
-        help="Automatically adjust Type line font size based on character count thresholds."
+        help="Automatically shrink Type kerning/font size so the type line fits the "
+             "type row alongside the set symbol on the right "
+             "(width estimated from the type text; reserves room for the symbol)."
     )
 
     parser.add_argument(

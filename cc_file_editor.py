@@ -5,7 +5,7 @@ import re
 import sys
 import math
 
-from automator_utils import autofit_title
+from automator_utils import autofit_title, autofit_type
 
 # Basic land types
 BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
@@ -144,75 +144,33 @@ class CcFileEditor:
                 t_obj = text_dict['type']
                 original_text = t_obj.get('text', '')
                 new_text = original_text
-                
-                # --- Auto-Fit Logic ---
-                final_type_fs_tag = ""
-                final_type_kerning_tag = ""
-                
-                if auto_fit_type:
-                    # Strip existing tags to get raw character count
-                    clean_text = re.sub(r'\{[^}]+\}', '', original_text)
-                    char_count = len(clean_text)
-                    
-                    # Get current settings (default to 0 if None)
-                    k = type_kerning if type_kerning is not None else 0
-                    f = type_font_size if type_font_size is not None else 0
-                    
-                    # Calculate Threshold: 34 - k - floor(f * 0.3)
-                    threshold = 34 - k - math.floor(f * 0.3)
-                    
-                    # Calculate Excess
-                    excess = max(0, char_count - threshold)
-                    
-                    if excess > 0:
-                        # Step 1: Reduce Kerning (down to min 1)
-                        # We can drop kerning by at most (k - 1). If k <= 1, available drop is 0.
-                        available_k_drop = max(0, k - 1)
-                        k_drop = min(excess, available_k_drop)
-                        
-                        final_k = k - k_drop
-                        remaining_excess = excess - k_drop
-                        
-                        # Step 2: Reduce Font Size
-                        # Each remaining excess char costs 2.5 font points
-                        f_drop = math.ceil(remaining_excess * 2.5)
-                        final_f = f - f_drop
-                        
-                        # Prepare tags
-                        # Only apply if different from original
-                        if final_k != k:
-                            final_type_kerning_tag = final_k
-                            print(f"   [{clean_card_name}] [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Kerning from {k} to {final_k}.")
-                            
-                        if final_f != f:
-                            final_type_fs_tag = final_f
-                            print(f"   [{clean_card_name}] [Auto-Fit] Length {char_count} (Excess {excess}). Reduced Font Size from {f} to {final_f}.")
-                    else:
-                        # No excess, no changes needed beyond standard args
-                        pass
 
-                # Apply Kerning
-                # If auto-fit calculated a kerning, use it. Otherwise use the standard arg.
-                effective_kerning = final_type_kerning_tag if (auto_fit_type and final_type_kerning_tag != "") else type_kerning
-                
-                if effective_kerning is not None:
-                    new_text = self._update_tag(new_text, 'kerning', effective_kerning)
-                
-                # Apply Shadow
+                # --- Auto-Fit Type: compute this card's effective values ---
+                # Reserve room for the set symbol that sits on the right of the
+                # row (when this card carries one), so a long type line never
+                # runs into it.
+                has_set_symbol = bool(data.get('setSymbolSource'))
+                k0 = type_kerning if type_kerning is not None else 0
+                f0 = type_font_size if type_font_size is not None else 0
+                new_k, new_f = k0, f0
+                if auto_fit_type:
+                    clean_text = re.sub(r'\{[^}]+\}', '', original_text).strip()
+                    new_k, new_f = autofit_type(
+                        clean_text, k0, f0,
+                        type_left if type_left else 0,
+                        has_set_symbol=has_set_symbol)
+
+                # Write a tag when the user specified one, or when auto-fit
+                # changed the value (so we never emit a no-op {kerning0}/{fontsize0}).
+                if type_kerning is not None or new_k != k0:
+                    new_text = self._update_tag(new_text, 'kerning', new_k)
+                if type_font_size is not None or new_f != f0:
+                    new_text = self._update_tag(new_text, 'fontsize', new_f)
                 if type_shadow is not None:
                     new_text = self._update_tag(new_text, 'shadow', type_shadow)
-                
-                # Apply Left
                 if type_left is not None:
                     new_text = self._update_tag(new_text, 'left', type_left)
 
-                # Apply Font Size
-                # If auto-fit calculated a size, use it. Otherwise use the standard arg.
-                effective_fs = final_type_fs_tag if (auto_fit_type and final_type_fs_tag != "") else type_font_size
-                
-                if effective_fs is not None:
-                    new_text = self._update_tag(new_text, 'fontsize', effective_fs)
-                
                 if new_text != original_text:
                     t_obj['text'] = new_text
                     print(f"   [{clean_card_name}] Updated Type Line: '{original_text}' -> '{new_text}'")

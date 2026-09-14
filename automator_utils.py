@@ -565,6 +565,120 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
     return k, fs
 
 
+# ==============================================================================
+# Type-Line Auto-Fit (width model measured from the LIVE renderer)
+# ==============================================================================
+#
+# The type line sits in its own fixed row, left-aligned.  On the RIGHT end of
+# the same row lives the set symbol, so a very long type line ("Legendary
+# Creature - Dragon, Wizard, Cleric") will grow rightward and run INTO the
+# symbol / past the card edge.  The type therefore has a width budget bounded by
+# the set symbol's left edge (or, when there is no symbol, the field's right cap).
+#
+# Like autofit_title(), the real pixel relationship is measured from the live
+# renderer (see type_calibrate.py) and encoded below as per-character constants.
+# For the sample "Dragon Wizard" (13 chars) least-squares fit on the Seventh
+# frame (residuals within ~2 px):
+#   width = 3.50 * {fontsize} + 6.15 * {kerning} + 299.7
+#   -> per char: base 23.054, +0.269 per fontsize unit, +0.473 per kerning unit
+#   type origin ~ 108 px (left edge at {left}=0), row right cap ~ 905 px, and
+#   the set symbol begins near there (measured left edge ~ 904 px), so the symbol
+#   effectively defines the row's right boundary.  We reserve room for it.
+# Re-run type_calibrate.py after any frame/font change to refresh the numbers.
+
+_TYPE_W_BASE = 23.054   # px per char at default (fontsize offset 0, kerning 0)
+_TYPE_W_FONT = 0.269    # px per char gained per +1 {fontsize} unit
+_TYPE_W_KERN = 0.473    # px per char gained per +1 {kerning} unit
+
+# Row right boundary, measured on the Seventh frame (canvas 1005px wide):
+#   * the type text field itself extends to ~897px (field x=0.1074, w=0.7852),
+#   * the very-long-type cap sits at ~909px,
+#   * the set symbol is right-aligned starting ~890-904px.
+# So when a set symbol is present it is the effective right wall (we stop a hair
+# short of it), and without one the field cap (~905px) bounds the type.
+_TYPE_ORIGIN = 108      # leftmost px of the type text at {left}=0 (field x=0.1074 -> 107px)
+_TYPE_LEFT_GAIN = 0.5   # {leftN} shifts the type N*0.5 px left (measured: left40 -> ~20px)
+_TYPE_ROW_RIGHT = 905   # right cap when NO set symbol occupies the row (measured very-long-type)
+_SET_SYMBOL_LEFT = 890  # right-side boundary to respect when a SET SYMBOL is present
+_TYPE_CLEARANCE = 30    # required gap between the type's last letter and the boundary
+
+
+def _estimate_type_width(text, font_offset, kerning):
+    """Estimated rendered width of `text` (canvas px) at the given tags."""
+    if not text:
+        return 0.0
+    n = len(text)
+    return n * (_TYPE_W_BASE + _TYPE_W_FONT * (font_offset or 0) + _TYPE_W_KERN * (kerning or 0))
+
+
+def _type_budget(type_left, has_set_symbol):
+    """Type width budget (canvas px) bounded by the set symbol / field cap.
+
+    budget = boundary - origin - clearance, where {leftN} moves the type origin
+    left by N*_TYPE_LEFT_GAIN px.  boundary is the set-symbol left edge when a
+    symbol occupies the right of the row, otherwise the field's right cap.
+    """
+    boundary = _SET_SYMBOL_LEFT if has_set_symbol else _TYPE_ROW_RIGHT
+    origin = _TYPE_ORIGIN - (type_left or 0) * _TYPE_LEFT_GAIN
+    return boundary - origin - _TYPE_CLEARANCE
+
+
+def autofit_type(type_text, kerning=None, font_size=None, type_left=0, has_set_symbol=True):
+    """
+    Determine a type `(kerning, font_size)` pair that fits the type row.
+
+    Mirrors autofit_title(): computes a pixel budget for the available row width
+    (reserving the set-symbol region on the right), and, if the type overflow,
+    shrinks kerning first (the most cosmetic thing to give back) down to its
+    floor, then drops font size to exactly fit.  Returns the inputs unchanged if
+    the type already fits.  Neither result ever exceeds the caller's starting
+    value, and both are bounded by the shared floors.
+
+    Args:
+        type_text:       raw type line (tags stripped), e.g. 'Elf Wizard'.
+        kerning:         starting kerning (absolute px) or None.
+        font_size:       starting {fontsize} offset (relative px) or None.
+        type_left:       value of the {left#} tag (positive = room gained).
+        has_set_symbol:  True if a set symbol occupies the right of the row.
+
+    Returns:
+        (kerning, font_size)
+    """
+    k = kerning if kerning is not None else 0
+    fs = font_size if font_size is not None else 0
+    left = type_left if type_left else 0
+
+    if not type_text:
+        return k, fs
+
+    budget = _type_budget(left, has_set_symbol)
+    type_w = _estimate_type_width(type_text, fs, k)
+    if type_w <= budget:
+        return k, fs  # no change needed
+
+    n = max(1, len(type_text))
+
+    def fits(font_off, kern):
+        return _estimate_type_width(type_text, font_off, kern) <= budget
+
+    # Largest kerning (clamped to <= the user's value and >= the floor) that fits.
+    if n > 1:
+        per_kern = n * _TYPE_W_KERN
+        ideal_k = (budget - n * (_TYPE_W_BASE + fs * _TYPE_W_FONT)) / per_kern
+        k = max(_KERNING_MIN, min(k, int(ideal_k + 1e-9)))
+
+    # If it still overflows at that kerning, drop the font size to exactly fit.
+    if not fits(fs, k):
+        target_per_char = (budget - n * _TYPE_W_KERN * k) / n
+        fs = (target_per_char - _TYPE_W_BASE) / _TYPE_W_FONT
+        fs = max(_FONT_FLOOR, int(round(fs)))
+
+    print(f"   [Auto-Fit-Type] '{type_text}' (symbol={has_set_symbol}, left={left}) "
+          f"-> kerning {kerning}->{k}, fontsize {font_size}->{fs} "
+          f"(budget {budget:.0f}px, type_w {type_w:.0f}px)")
+    return k, fs
+
+
 def autofit_land_symbols(n_small_lines, symbol_max=64, symbol_min=30, symbol_step=12):
     """
     Compute the largest large-symbol point size that can share the fixed

@@ -15,6 +15,7 @@ from automator_utils import (
     scryfall_query_with_fallback,
     autofit_land_symbols,
     autofit_title,
+    autofit_type,
     classify_land_lines,
     build_dual_land_rules_text
 )
@@ -382,28 +383,17 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
         title = data['name']
         type_line = data['type_line']
         
-        # Auto-Fit Type Logic
+        # Auto-Fit Type Logic (calibrated width model vs the set symbol).
+        # type_line here is the clean type string (no tags), so autofit_type can
+        # measure it directly.  A set symbol occupies the right of the row in this
+        # path, so reserve its space to keep a long type line clear of it.
         if auto_fit_type:
-            char_count = len(type_line)
-            
-            k = type_kerning if type_kerning is not None else 0
-            f = type_font_size if type_font_size is not None else 0
-            
-            # Threshold calculation from TextMixin
-            threshold = 34 - k - math.floor(f * 0.3)
-            excess = max(0, char_count - threshold)
-            
-            if excess > 0:
-                available_k_drop = max(0, k - 1)
-                k_drop = min(excess, available_k_drop)
-                
-                type_kerning = k - k_drop
-                remaining_excess = excess - k_drop
-                
-                f_drop = math.ceil(remaining_excess * 2.5)
-                type_font_size = f - f_drop
-                
-                print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Adjusted Type: Kerning {k}->{type_kerning}, Size {f}->{type_font_size}")
+            type_kerning, type_font_size = autofit_type(
+                type_line,
+                type_kerning if type_kerning is not None else 0,
+                type_font_size if type_font_size is not None else 0,
+                type_left if type_left else 0,
+                has_set_symbol=True)
         
         # Title Auto-Fit: shrink kerning/font offset so the name + mana cost
         # fit the fixed title bar.  Runs before the title mods are built so the
