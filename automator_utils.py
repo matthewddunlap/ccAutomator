@@ -431,45 +431,46 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
     return None
 
 # ==============================================================================
-# Title Auto-Fit (weighted-width estimation for the name bar)
+# Title Auto-Fit (width model measured from the LIVE renderer)
 # ==============================================================================
 #
-# The CardConjurer title box is a fixed width; the mana cost is a fixed set of
-# right-aligned symbols sharing that band.  The name therefore has a finite
-# horizontal budget that shrinks as the cost gets longer.  Instead of a raw
-# character count we estimate rendered width via per-character advance weights
-# (so 'i'/'l' are cheap and 'm'/'w' are expensive) and reserve room for the
-# mana symbols counted out of the Scryfall `mana_cost` string (which may be
-# multi-symbol like {X}{X}{2}{W} or contain hybrids/phyrexian/snow).
+# The CardConjurer name bar is a fixed band: the name sits left-aligned and the
+# mana cost is right-aligned in the same row.  The name therefore has a budget
+# that shrinks as the cost gets longer.  We do NOT derive this from the JSON
+# box geometry -- the real pixel relationship is measured from the renderer
+# itself (see title_calibrate.py) and encoded below as per-character constants.
 #
-# CardConjurer tag semantics used here (see the app's "Text Codes" reference):
-#   * `{fontsize#}`  -- RELATIVE adjustment in pixels (e.g. {fontsize-12}).
-#   * `{kerning#}`   -- ABSOLUTE letter-spacing in pixels.
-#   * `{left#}`      -- shift text N px left, which frees N px on the right.
+# CardConjurer tag semantics (app "Text Codes" reference):
+#   * `{fontsize#}`  -- RELATIVE size adjustment: the value is in canvas px.
+#   * `{kerning#}`   -- ABSOLUTE letter-spacing applied between glyphs.
+#   * `{left#}`      -- shift text N px left (frees N px on the right).
 #
-# Base geometry (from seventh_generator.py title box):
-#   * card  2010 x 2814
-#   * title box width 0.7734        ->  1555 px
-#   * title base size 0.041 (frac)  ->  115 px
+# Measured ground truth (canvas px) for 'Rofellos, Llanowar Emissary' (27 chars),
+# rendered with NO {left} tag (origin 88px):
+#   name width = 6.20 * {fontsize}  +  13.0 * {kerning}  +  660
+#   -> per char:  base 24.444, +0.230 per fontsize unit, +0.4815 per kerning unit
+#   (the renderer caps the name at the title box for very large settings, so these
+#    hold up to that cap, which is well above any sensible autofit range)
+#   mana cost right edge fixed at 931, one symbol ~ 52.4 px, name origin ~ 88 px.
+# Re-run title_calibrate.py after any frame/font change to refresh the numbers.
 
-_TITLE_BOX_W_PX  = round(0.7734 * 2010)   # 1555
-_TITLE_BASE_PX   = round(0.041  * 2814)   # 115
-_SYMBOL_PX       = _TITLE_BASE_PX         # one mana symbol ~ one font-size wide
-_RIGHT_GAP_PX    = 24                     # clearance between name and leftmost mana symbol
+_CHAR_W_BASE = 24.444    # px per char at default (fontsize offset 0, kerning 0)
+_CHAR_W_FONT = 0.230     # px per char gained per +1 {fontsize} unit
+_CHAR_W_KERN = 0.4815    # px per char gained per +1 {kerning} unit
 
-# Relative advance width per glyph for the goudymedieval title font.
-# Anything unlisted falls back to _DEFAULT_ADVANCE.
-_CHAR_ADVANCE = {
-    ' ': 0.28, ',': 0.30, '.': 0.28, ';': 0.30, ':': 0.34,
-    '(': 0.35, ')': 0.35, '-': 0.38, '’': 0.18, '’': 0.18,
-    'i': 0.32, 'j': 0.32, 't': 0.38, 'f': 0.40, 'l': 0.38, 'I': 0.22,
-    'm': 1.05, 'M': 1.05, 'w': 1.00, 'W': 1.05,
-}
-_DEFAULT_ADVANCE = 0.58
+_BAR_RIGHT_PX  = 931     # right edge of the rightmost mana symbol (measured)
+_SYMBOL_PX     = 52.4    # horizontal room consumed by one mana symbol
+_NAME_ORIGIN   = 88      # leftmost px of the name at {left}=0 (measured)
+_LEFT_GAIN     = 0.5     # {leftN} in tag units shifts the name N*0.5 px left (measured: left40 -> 20px)
 
-_KERNING_MIN = 1          # px floor for letter-spacing
-_FONT_FLOOR  = -50        # px floor for the {fontsize} relative offset (final >= ~65px)
-_BUDGET_MIN  = round(_TITLE_BOX_W_PX * 0.35)  # never reserve less than 35% of box
+# Target clearance (canvas px) we require between the name's last letter and
+# the leftmost mana symbol.  26 px reads as "touching" to the eye on a ~863 px
+# bar; 45 px (~half a mana symbol) reads as clearly separated.  Raise to shrink
+# more aggressively, lower to allow the name to sit closer to the cost.
+_CLEARANCE_PX  = 45
+
+_KERNING_MIN = 0         # floor for the {kerning} value
+_FONT_FLOOR  = -20       # floor for the {fontsize} offset
 
 
 def count_mana_symbols(mana_cost):
@@ -483,12 +484,28 @@ def count_mana_symbols(mana_cost):
     return len(re.findall(r'\{[^}]+\}', mana_cost))
 
 
-def estimate_name_width(name, font_px, kerning_px):
-    """Estimated rendered width of `name` in px at the given font/kerning."""
+def estimate_name_width(name, font_offset, kerning):
+    """Estimated rendered width of `name` (canvas px) at the given tags.
+
+    Calibrated linear law: width = n * (base + font_off*wf + kern*wk).
+    """
     if not name:
-        return 0
-    adv = sum(_CHAR_ADVANCE.get(c, _DEFAULT_ADVANCE) for c in name)
-    return round(adv * font_px + max(0, len(name) - 1) * kerning_px)
+        return 0.0
+    n = len(name)
+    return n * (_CHAR_W_BASE + _CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
+
+
+def _title_budget(n_syms, title_left):
+    """Name width budget (canvas px) for a cost of n_syms symbols.
+
+    budget = cost_left - name_origin - clearance, where the {leftN} tag moves
+    the name origin left by N*_LEFT_GAIN px (N is in the card's 2010px space,
+    measured canvas is half that).  A target clearance keeps the name visually
+    clear of the leftmost mana symbol.
+    """
+    cost_left = _BAR_RIGHT_PX - n_syms * _SYMBOL_PX
+    origin = _NAME_ORIGIN - (title_left or 0) * _LEFT_GAIN
+    return cost_left - origin - _CLEARANCE_PX
 
 
 def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
@@ -512,28 +529,39 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
     left = title_left if title_left else 0
 
     n_syms = count_mana_symbols(mana_cost)
-    budget = _TITLE_BOX_W_PX + left - n_syms * _SYMBOL_PX - _RIGHT_GAP_PX
-    budget = max(budget, _BUDGET_MIN)
+    budget = _title_budget(n_syms, left)
 
-    name_w = estimate_name_width(name, _TITLE_BASE_PX + fs, k)
+    name_w = estimate_name_width(name, fs, k)
     if name_w <= budget:
         return k, fs  # no change needed
 
-    # Step 1: pull kerning down to floor (letter-spacing is cheapest to drop)
-    while k > _KERNING_MIN and estimate_name_width(name, _TITLE_BASE_PX + fs, k) > budget:
-        k -= 1
+    # The name is too wide.  Reduce kerning first (letter-spacing is the most
+    # cosmetic thing to give back), but only as far as needed -- and never above
+    # the user's starting value.  Only after kerning hits its floor do we cut the
+    # font size.  Both results are bounded so we never END up larger than the
+    # user's input.
+    n = max(1, len(name))
 
-    # Step 2: solve for the font size that just fits at the reduced kerning
-    total_adv = sum(_CHAR_ADVANCE.get(c, _DEFAULT_ADVANCE) for c in name) or 1.0
-    kern_gap = max(0, len(name) - 1) * k
-    target_font_px = (budget - kern_gap) / total_adv
-    fs = int(target_font_px) - _TITLE_BASE_PX
-    if fs < _FONT_FLOOR:
-        fs = _FONT_FLOOR
+    def fits(font_off, kern):
+        return estimate_name_width(name, font_off, kern) <= budget
+
+    # Largest kerning (clamped to <= the user's value and >= floor) that fits
+    # at the current font size.
+    if n > 1:
+        per_kern = n * _CHAR_W_KERN
+        ideal_k = (budget - n * (_CHAR_W_BASE + fs * _CHAR_W_FONT)) / per_kern
+        k = max(_KERNING_MIN, min(k, int(ideal_k + 1e-9)))
+        k = max(k, _KERNING_MIN)
+
+    # If it still overflows at that kerning, drop the font size to exactly fit.
+    if not fits(fs, k):
+        target_per_char = (budget - n * _CHAR_W_KERN * k) / n
+        fs = (target_per_char - _CHAR_W_BASE) / _CHAR_W_FONT
+        fs = max(_FONT_FLOOR, int(round(fs)))
 
     print(f"   [Auto-Fit-Title] '{name}' ({n_syms} cost, left={left}) "
           f"-> kerning {kerning}->{k}, fontsize {font_size}->{fs} "
-          f"(budget {budget}px, name_w {name_w}px)")
+          f"(budget {budget:.0f}px, name_w {name_w:.0f}px)")
     return k, fs
 
 
