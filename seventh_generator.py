@@ -14,6 +14,7 @@ from automator_utils import (
     DEFAULT_UPSCALER_MODEL,
     scryfall_query_with_fallback,
     autofit_land_symbols,
+    autofit_title,
     classify_land_lines,
     build_dual_land_rules_text
 )
@@ -305,8 +306,8 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                      type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                      pt_font_size=None, pt_shadow=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False,
                      flavor_font_size=None,
-                     white_border=False, auto_fit_type=False,
-                     image_server_url=None):
+                      white_border=False, auto_fit_type=False, auto_fit_title=False,
+                      image_server_url=None):
         """
         Generates a single card JSON object.
         """
@@ -404,6 +405,16 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 
                 print(f"   [Auto-Fit] Length {char_count} (Excess {excess}). Adjusted Type: Kerning {k}->{type_kerning}, Size {f}->{type_font_size}")
         
+        # Title Auto-Fit: shrink kerning/font offset so the name + mana cost
+        # fit the fixed title bar.  Runs before the title mods are built so the
+        # computed values flow through untouched.
+        if auto_fit_title:
+            k0 = title_kerning if title_kerning is not None else 0
+            f0 = title_font_size if title_font_size is not None else 0
+            title_kerning, title_font_size = autofit_title(
+                title, data.get('mana_cost', ''), k0, f0,
+                title_left if title_left else 0)
+
         # Apply Title Mods
         title_mods = ""
         if title_font_size: title_mods += f"{{fontsize{title_font_size}}}"

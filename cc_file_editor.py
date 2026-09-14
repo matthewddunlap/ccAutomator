@@ -5,6 +5,8 @@ import re
 import sys
 import math
 
+from automator_utils import autofit_title
+
 # Basic land types
 BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
 
@@ -49,7 +51,7 @@ class CcFileEditor:
                     pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False, pt_shadow=None,
                     title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                     type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                    flavor_font=None, rules_down=None, auto_fit_type=False):
+                    flavor_font=None, rules_down=None, auto_fit_type=False, auto_fit_title=False):
         """
         Applies the specified edits to all cards in the project.
         """
@@ -109,11 +111,23 @@ class CcFileEditor:
                 t_obj = text_dict['title']
                 original_text = t_obj.get('text', '')
                 new_text = original_text
-                
-                if title_kerning is not None:
-                    new_text = self._update_tag(new_text, 'kerning', title_kerning)
-                if title_font_size is not None:
-                    new_text = self._update_tag(new_text, 'fontsize', title_font_size)
+
+                # --- Title Auto-Fit: compute this card's effective values ---
+                k0 = title_kerning if title_kerning is not None else 0
+                f0 = title_font_size if title_font_size is not None else 0
+                new_k, new_f = k0, f0
+                if auto_fit_title:
+                    clean_name = re.sub(r'\{[^}]+\}', '', original_text).strip()
+                    mana_cost = text_dict.get('mana', {}).get('text', '') if 'mana' in text_dict else ''
+                    new_k, new_f = autofit_title(clean_name, mana_cost, k0, f0,
+                                                 title_left if title_left else 0)
+
+                # Write a tag when the user specified one, or when auto-fit
+                # changed the value (so we never emit a no-op {kerning0}/{fontsize0}).
+                if title_kerning is not None or new_k != k0:
+                    new_text = self._update_tag(new_text, 'kerning', new_k)
+                if title_font_size is not None or new_f != f0:
+                    new_text = self._update_tag(new_text, 'fontsize', new_f)
                 if title_shadow is not None:
                     new_text = self._update_tag(new_text, 'shadow', title_shadow)
                 if title_left is not None:

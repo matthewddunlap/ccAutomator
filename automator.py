@@ -65,9 +65,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
-                 overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
-                 auto_fit_type=False,
-                 set_symbol_source='cardconjurer'):
+                  overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
+                  auto_fit_type=False,
+                  auto_fit_title=False,
+                  set_symbol_source='cardconjurer'):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -164,6 +165,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.type_kerning = type_kerning
         self.type_left = type_left
         self.auto_fit_type = auto_fit_type
+        self.auto_fit_title = auto_fit_title
         # Where Card Conjurer fetches set symbols from: 'cardconjurer' (the
         # app's built-in asset set) or 'hexproof' (https://api.hexproof.io),
         # the latter of which covers every official set and is colorized per
@@ -629,9 +631,25 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             # Set a flag to see if we need a final delay at the end
             mods_applied = False
-    
+
+            # --- Title Auto-Fit (weighted width vs mana cost) ---
+            eff_title_kerning = self.title_kerning
+            eff_title_fs = self.title_font_size
+            if getattr(self, 'auto_fit_title', False):
+                try:
+                    from automator_utils import autofit_title
+                    clean_title = re.sub(r'\{[^}]+\}', '', card_name or '').strip()
+                    title_mana_cost = scryfall_data.get('mana_cost', '')
+                    k0 = eff_title_kerning if eff_title_kerning is not None else 0
+                    f0 = eff_title_fs if eff_title_fs is not None else 0
+                    eff_title_kerning, eff_title_fs = autofit_title(
+                        clean_title, title_mana_cost, k0, f0,
+                        self.title_left if self.title_left else 0)
+                except Exception as e:
+                    print(f"      Error during Title Auto-Fit: {e}", file=sys.stderr)
+
             self._apply_text_mods(
-                "Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left)
+                "Title", eff_title_fs, self.title_shadow, eff_title_kerning, self.title_left)
             
             # --- Auto-Fit Type Logic ---
             final_type_fs = self.type_font_size

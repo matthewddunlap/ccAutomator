@@ -244,6 +244,14 @@ def main():
     )
 
     parser.add_argument(
+        '--auto-fit-title',
+        action='store_true',
+        help="Automatically shrink Title kerning/font size so the name fits the "
+             "name bar alongside the card's mana cost "
+             "(width estimated from the name + Scryfall mana_cost)."
+    )
+
+    parser.add_argument(
         '--flavor-font',
         type=int,
         metavar='NUM',
@@ -527,7 +535,8 @@ def main():
             rules_down=args.rules_down,
             white_border=args.white_border,
             black_border=args.black_border,
-            auto_fit_type=args.auto_fit_type
+            auto_fit_type=args.auto_fit_type,
+            auto_fit_title=args.auto_fit_title,
         )
         
         # Determine output filename
@@ -657,6 +666,7 @@ def main():
                         flavor_font_size=args.flavor_font_size,
                         white_border=args.white_border,
                         auto_fit_type=args.auto_fit_type,
+                        auto_fit_title=args.auto_fit_title,
                         image_server_url=args.image_server if args.image_server else "http://mtgproxy:4242"
                     )
                     
@@ -820,7 +830,8 @@ def main():
                 overwrite_older_than=args.overwrite_older_than,
                 overwrite_newer_than=args.overwrite_newer_than,
                 debug=args.debug,
-                auto_fit_type=args.auto_fit_type
+                auto_fit_type=args.auto_fit_type,
+                auto_fit_title=args.auto_fit_title
             ) as automator:
                 
                 # Clear any existing saved cards to start fresh
@@ -880,7 +891,8 @@ def main():
                 rules_down=args.rules_down,
                 white_border=args.white_border,
                 black_border=args.black_border,
-                auto_fit_type=args.auto_fit_type
+                auto_fit_type=args.auto_fit_type,
+                auto_fit_title=args.auto_fit_title
             )
             editor.save(os.path.join(args.output_dir if args.output_dir else '.', edited_project_file))
             print(f"--- Phase 2 Complete: Edited file saved to {edited_project_file} ---")
@@ -905,7 +917,8 @@ def main():
                 overwrite_newer_than=args.overwrite_newer_than,
                 debug=args.debug,
                 title_up=None,
-                auto_fit_type=False # Disable auto-fit in Phase 3 as it's handled in Phase 2
+                auto_fit_type=False, # Disable auto-fit in Phase 3 as it's handled in Phase 2
+                auto_fit_title=False # Disable auto-fit in Phase 3 as it's handled in Phase 2
             ) as automator:
                  edited_file_full_path = os.path.join(args.output_dir if args.output_dir else '.', edited_project_file)
                  
@@ -987,7 +1000,8 @@ def main():
             overwrite_older_than=args.overwrite_older_than,
             overwrite_newer_than=args.overwrite_newer_than,
             debug=args.debug,
-            auto_fit_type=args.auto_fit_type
+            auto_fit_type=args.auto_fit_type,
+            auto_fit_title=args.auto_fit_title
         ) as automator:
             
             # Generate the full-art lands TEMPLATE (if needed)

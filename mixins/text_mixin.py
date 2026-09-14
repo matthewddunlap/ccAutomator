@@ -387,28 +387,73 @@ class TextMixin:
             print(f"      An error occurred while clearing Mana Cost: {e}", file=sys.stderr)
 
 
+    def _read_field_value(self, field_name):
+        """
+        Reads the current value of a named text field (e.g. 'Title', 'Mana Cost')
+        from the Card Conjurer text editor without modifying it.
+        Returns the string (possibly with tags) or None on failure.
+        """
+        try:
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, f"//h4[text()='{field_name}']")))
+            field_button.click()
+            time.sleep(0.3)
+            text_input = self.wait.until(EC.element_to_be_clickable((By.ID, "text-editor")))
+            return text_input.get_attribute('value')
+        except Exception:
+            return None
+
+    def _read_title_and_mana_from_ui(self):
+        """
+        Reads the current Title text and Mana Cost text from the UI.
+        Returns (clean_title, mana_cost) for auto-fit estimation.
+        """
+        import re as _re
+        title_raw = self._read_field_value('Title')
+        mana_raw = self._read_field_value('Mana Cost')
+        clean_title = _re.sub(r'\{[^}]+\}', '', title_raw or '').strip()
+        return clean_title, (mana_raw or '')
+
     def _process_all_text_modifications(self):
         """
         Orchestrator for all text modifications to prevent race conditions.
         Returns True if a modified was successfully made.
         """
-        print(f"   [Debug] Entering _process_all_text_modifications. auto_fit_type={getattr(self, 'auto_fit_type', 'MISSING')}")
-        
-        # --- UPDATED: Check for new parameters ---
+        print(f"   [Debug] Entering _process_all_text_modifications. auto_fit_type={getattr(self, 'auto_fit_type', 'MISSING')}, auto_fit_title={getattr(self, 'auto_fit_title', 'MISSING')}")
+
         # --- UPDATED: Check for new parameters ---
         has_mods_to_apply = any([
             self.title_font_size, self.title_shadow, self.title_kerning, self.title_left, self.title_up,
             self.type_font_size, self.type_shadow, self.type_kerning, self.type_left,
             self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up,
-            self.flavor_font, self.rules_down, getattr(self, 'auto_fit_type', False)
+            self.flavor_font, self.rules_down, getattr(self, 'auto_fit_type', False),
+            getattr(self, 'auto_fit_title', False)
         ])
         if not has_mods_to_apply:
             return False
 
         self.text_tab.click()
-        
+
         any_text_mod_made = False
-        if self._apply_text_mods("Title", self.title_font_size, self.title_shadow, self.title_kerning, self.title_left, up=self.title_up): any_text_mod_made = True
+
+        # --- Title Auto-Fit (weighted width vs mana cost) ---
+        # Compute effective kerning / fontsize for the Title before _apply_text_mods
+        # injects the tags, so the shrunken values are written verbatim.
+        eff_title_kerning = self.title_kerning
+        eff_title_fs = self.title_font_size
+        if getattr(self, 'auto_fit_title', False):
+            try:
+                clean_name, mana_cost = self._read_title_and_mana_from_ui()
+                if clean_name:
+                    from automator_utils import autofit_title
+                    k0 = eff_title_kerning if eff_title_kerning is not None else 0
+                    f0 = eff_title_fs if eff_title_fs is not None else 0
+                    eff_title_kerning, eff_title_fs = autofit_title(
+                        clean_name, mana_cost, k0, f0,
+                        self.title_left if self.title_left else 0)
+            except Exception as e:
+                print(f"      Error during Title Auto-Fit: {e}", file=sys.stderr)
+
+        if self._apply_text_mods("Title", eff_title_fs, self.title_shadow, eff_title_kerning, self.title_left, up=self.title_up): any_text_mod_made = True
         
         # --- Type Line Logic with Character Count Auto-Fit ---
         final_type_fs = self.type_font_size
