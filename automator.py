@@ -7,6 +7,7 @@ import base64
 import sys
 import hashlib
 import random
+import subprocess
 import requests
 import json
 from urllib.parse import urljoin
@@ -111,7 +112,16 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         }
         chrome_options.add_experimental_option("prefs", prefs)
         
-        self.driver = webdriver.Chrome(options=chrome_options)
+        # Launch chromedriver (and thus the chromium it spawns) in its OWN
+        # POSIX session / process group.  Chromium's sandbox/zygote can kill an
+        # entire process group on shutdown; if it shares one with the caller's
+        # shell (e.g. a tmux pane), that kill reaches the shell and closes the
+        # pane.  A fresh session (os.setsid at chromedriver start) contains that
+        # blast radius to the automation processes only.
+        from selenium.webdriver.common.service import Service
+        self.driver = webdriver.Chrome(
+            service=Service(popen_kw={"preexec_fn": os.setsid}),
+            options=chrome_options)
         
         # Use CDP to allow downloads in headless mode
         params = {
