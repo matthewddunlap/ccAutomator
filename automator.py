@@ -37,6 +37,7 @@ from automator_utils import (
     classify_land_lines,
     build_dual_land_rules_text,
     autofit_type,
+    estimate_set_symbol_left,
 )
 
 # Import Mixins
@@ -67,9 +68,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
                   overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
-                  auto_fit_type=False,
-                  auto_fit_title=False,
-                  set_symbol_source='cardconjurer'):
+              auto_fit_type=False,
+              auto_fit_title=False,
+              set_symbol_source='cardconjurer',
+              type_gap=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -167,6 +169,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.type_left = type_left
         self.auto_fit_type = auto_fit_type
         self.auto_fit_title = auto_fit_title
+        # Configurable clearance (px) between the end of the type line and the
+        # set symbol / row edge -- the size of the gap that --auto-fit-type
+        # computes the rest of the type fit against.  None => default (45).
+        self.type_gap = type_gap
         # Where Card Conjurer fetches set symbols from: 'cardconjurer' (the
         # app's built-in asset set) or 'hexproof' (https://api.hexproof.io),
         # the latter of which covers every official set and is colorized per
@@ -652,6 +658,17 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                 "Title", eff_title_fs, self.title_shadow, eff_title_kerning, self.title_left)
             
+            # --- Set Symbol (must run BEFORE the type auto-fit so the app's
+            #     `card` global carries THIS card's symbol geometry, letting the
+            #     type fit reserve the symbol's actual left edge) ---
+            scryfall_set = scryfall_data.get('set')
+            if scryfall_set:
+                self.set_set_symbol(
+                    scryfall_set.upper(),
+                    rarity=scryfall_data.get('rarity'),
+                    source=self.set_symbol_source)
+                mods_applied = True
+
             # --- Auto-Fit Type Logic (calibrated width model vs set symbol) ---
             final_type_fs = self.type_font_size
             final_type_kerning = self.type_kerning
@@ -671,15 +688,29 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     if current_type_text:
                         # Strip existing tags to get the raw type line.
                         clean_text = re.sub(r'\{[^}]+\}', '', current_type_text).strip()
-                        # Reserve room for the set symbol that sits on the right
-                        # of the type row (has_set_symbol=True), so a very long
-                        # "Legendary Creature - ..." line never runs into it.
+                        # Reserve room for the set symbol on the right of the row:
+                        # use the LIVE symbol edge read from the app whenever it
+                        # is known (varies per set/zoom); otherwise reserve room
+                        # from the conservative constant.  Gap = --type-gap.
+                        has_symbol = True
+                        sl = None
+                        try:
+                            geom = self.get_symbol_geometry()
+                            if geom:
+                                sl = estimate_set_symbol_left(
+                                    float(geom['x']) if geom.get('x') is not None else None,
+                                    float(geom['zoom']) if geom.get('zoom') is not None else None)
+                                has_symbol = bool(geom.get('source') or sl is not None)
+                        except Exception:
+                            has_symbol = True
                         final_type_kerning, final_type_fs = autofit_type(
                             clean_text,
                             self.type_kerning if self.type_kerning is not None else 0,
                             self.type_font_size if self.type_font_size is not None else 0,
                             self.type_left if self.type_left else 0,
-                            has_set_symbol=True)
+                            has_set_symbol=has_symbol,
+                            set_symbol_left=sl,
+                            gap=self.type_gap)
 
                 except Exception as e:
                     print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
@@ -700,28 +731,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 self.set_flavor_text(flavor_text)
                 self._apply_flavor_font_mod()
                 mods_applied = True
-            
-            # 2. Set Symbol
-            scryfall_set = scryfall_data.get('set')
-            if scryfall_set:
-                # Pass the print's Scryfall rarity so the tab requests the
-                # colorized variant (the app reads the rarity in every source
-                # branch).  The source is controlled by --set-symbol-source:
-                #   * 'cardconjurer' (default) - the app's built-in asset set
-                #   * 'hexproof'               - https://api.hexproof.io,
-                #                                covers every official set
-                #                                (TRK, ECC, EOC, ...) and
-                #                                returns Access-Control-Allow-
-                #                                Origin: * (Card Conjurer sets
-                #                                image.crossOrigin='anonymous'
-                #                                on the symbol when drawing,
-                #                                so a CORS header is required
-                #                                to avoid canvas taint)
-                self.set_set_symbol(
-                    scryfall_set.upper(),
-                    rarity=scryfall_data.get('rarity'),
-                    source=self.set_symbol_source)
-                mods_applied = True
+
+            # NOTE: the Set Symbol (set_set_symbol(...)) is applied ABOVE the
+            #       type auto-fit block so the app's `card` global carries this
+            #       card's symbol geometry when autofit_type reads it.
 
             # Use produced_mana for lands if colors is empty
             colors = scryfall_data.get('colors', [])

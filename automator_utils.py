@@ -7,6 +7,8 @@ import requests
 from PIL import Image
 import io
 import time
+import json
+import os
 import sys
 
 # Optional dependency for SVG parsing
@@ -616,41 +618,89 @@ _TYPE_W_DASH = 16.0      # em-dash / hyphen
 _TYPE_W_COMMA = 8.5      # comma
 _TYPE_W_OTHER = 22.0     # digits / other
 # Per-char font-size / kerning scale coefficients (px per char per tag unit).
-# These scale all glyphs together, so a constant is fine -- the per-category
-# base above already handles the letter-shape differences.
+# These scale all glyphs together, so a constant is fine -- the base width
+# term (per-glyph or per-category) already carries the letter-shape differences.
 _TYPE_W_FONT = 0.5       # px per char gained per +1 {fontsize} unit
 _TYPE_W_KERN = 0.625     # px per char gained per +1 {kerning} unit
+
+_TYPE_GLYPHS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "type_glyphs.json")
+_type_glyphs_cache = None
+
+
+def _load_type_glyphs():
+    """Load the per-glyph base-width table written by type_calibrate.py.
+
+    Returns a dict mapping a single character -> base advance (px) at
+    fontsize 0 / kerning 0, or {} if the table is absent / unreadable.
+    Result is cached for the process lifetime.
+    """
+    global _type_glyphs_cache
+    if _type_glyphs_cache is not None:
+        return _type_glyphs_cache
+    table = {}
+    try:
+        with open(_TYPE_GLYPHS_FILE) as fh:
+            raw = json.load(fh)
+        for key, val in raw.items():
+            if len(key) == 1 and isinstance(val, (int, float)):
+                try:
+                    table[key] = float(val)
+                except Exception:
+                    pass
+    except Exception:
+        table = {}
+    _type_glyphs_cache = table
+    return table
+
 
 def _estimate_type_width(text, font_offset=None, kerning=None):
     """Estimated rendered width of `text` (canvas px) at the given tags.
 
-    Uses a per-glyph-category width table (upper/lower/space/em-dash/comma/other)
-    instead of a single per-char constant, because MTG type lines mix wide
-    (uppercase) and narrow (lowercase) letters -- e.g. "Phyrexian Dreadnought"
-    is mostly narrow letters while "Legendary Creature -- Human Druid" has more
-    wide ones.  A constant cannot fit both; a per-category model can.
+    The base width is a per-glyph advance when a calibrated table
+    (type_glyphs.json, produced by type_calibrate.py) is available -- each
+    character is looked up individually, which is what makes a type line's
+    summed width track the renderer closely even when it mixes wide
+    uppercase letters and narrow lowercase ones.  Without the table it falls
+    back to per-character-class widths (upper/lower/space/dash/comma/other).
 
     font_offset / kerning are folded in as a small per-char adjustment on top
-    of the measured base (they mostly scale all glyphs together).
+    of the base (they mostly scale all glyphs together).
     """
     if not text:
         return 0.0
+    table = _load_type_glyphs()
     tot = 0.0
     n = 0
     for ch in text:
         n += 1
-        if ch.isupper():
-            tot += _TYPE_W_UL
-        elif ch.islower():
-            tot += _TYPE_W_LL
-        elif ch == "\u2014" or ch == "-":
-            tot += _TYPE_W_DASH
-        elif ch == " ":
-            tot += _TYPE_W_SPACE
-        elif ch == ",":
-            tot += _TYPE_W_COMMA
+        if table:
+            if ch in table:
+                tot += table[ch]
+            elif ch.isupper():
+                tot += _TYPE_W_UL
+            elif ch.islower():
+                tot += _TYPE_W_LL
+            elif ch == "\u2014" or ch == "-":
+                tot += _TYPE_W_DASH
+            elif ch == " ":
+                tot += _TYPE_W_SPACE
+            elif ch == ",":
+                tot += _TYPE_W_COMMA
+            else:
+                tot += _TYPE_W_OTHER
         else:
-            tot += _TYPE_W_OTHER
+            if ch.isupper():
+                tot += _TYPE_W_UL
+            elif ch.islower():
+                tot += _TYPE_W_LL
+            elif ch == "\u2014" or ch == "-":
+                tot += _TYPE_W_DASH
+            elif ch == " ":
+                tot += _TYPE_W_SPACE
+            elif ch == ",":
+                tot += _TYPE_W_COMMA
+            else:
+                tot += _TYPE_W_OTHER
     if n:
         tot += n * (_TYPE_W_FONT * (font_offset or 0) + _TYPE_W_KERN * (kerning or 0))
     return tot
@@ -670,20 +720,26 @@ def estimate_set_symbol_left(set_symbol_x=None, set_symbol_zoom=None, canvas_w=1
     return int(set_symbol_x * canvas_w - (set_symbol_zoom * canvas_w) / 2)
 
 
-def _type_budget(type_left, has_set_symbol, set_symbol_left=None):
+def _type_budget(type_left, has_set_symbol, set_symbol_left=None, gap=None):
     """Type width budget (canvas px) bounded by the set symbol / field cap.
 
-    budget = boundary - origin - clearance, where {leftN} moves the type origin
+    budget = boundary - origin - gap, where {leftN} moves the type origin
     left by N*_TYPE_LEFT_GAIN px.  boundary is the set-symbol left edge when a
-    symbol occupies the right of the row, otherwise the field's right cap.
+    symbol occupies the right of the row (a per-card `set_symbol_left`, falling
+    back to the conservative constant), otherwise the field's right cap.
+    `gap` is the required clearance (defaults to _TYPE_CLEARANCE).
     """
+    if gap is None:
+        gap = _TYPE_CLEARANCE
     boundary = _SET_SYMBOL_LEFT if has_set_symbol else _TYPE_ROW_RIGHT
+    if has_set_symbol and set_symbol_left is not None:
+        boundary = set_symbol_left
     origin = _TYPE_ORIGIN - (type_left or 0) * _TYPE_LEFT_GAIN
-    return boundary - origin - _TYPE_CLEARANCE
+    return boundary - origin - gap
 
 
 def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
-                 has_set_symbol=True, set_symbol_left=None):
+                 has_set_symbol=True, set_symbol_left=None, gap=None):
     """
     Determine a type `(kerning, font_size)` pair that fits the type row.
 
@@ -702,6 +758,8 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
         has_set_symbol:  True if a set symbol occupies the right of the row;
         set_symbol_left: explicit symbol left edge (px) if known -- overrides the
                          fallback constant when True; None to use the constant.
+        gap:             required clearance (px) between the last letter and the
+                         boundary (default: _TYPE_CLEARANCE).
 
     Returns:
         (kerning, font_size)
@@ -713,7 +771,7 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
     if not type_text:
         return k, fs
 
-    budget = _type_budget(left, has_set_symbol, set_symbol_left)
+    budget = _type_budget(left, has_set_symbol, set_symbol_left, gap)
     type_w = _estimate_type_width(type_text, fs, k)
     if type_w <= budget:
         return k, fs  # no change needed

@@ -476,16 +476,30 @@ class TextMixin:
                 print(f"   [Debug] Read Type Text: '{current_type_text}'")
 
                 if current_type_text:
-                    from automator_utils import autofit_type
+                    from automator_utils import autofit_type, estimate_set_symbol_left
                     clean_text = re.sub(r'\{[^}]+\}', '', current_type_text).strip()
-                    # Reserve room for the set symbol on the right of the row so
-                    # a long type line never runs into it.
+                    # Reserve room for the symbol on the right of the row using
+                    # THIS card's live symbol edge (loaded from the project file)
+                    # when known, otherwise the conservative constant.  Gap = --type-gap.
+                    sl = None
+                    has_symbol = True
+                    try:
+                        geom = self.get_symbol_geometry()
+                        if geom:
+                            sl = estimate_set_symbol_left(
+                                float(geom['x']) if geom.get('x') is not None else None,
+                                float(geom['zoom']) if geom.get('zoom') is not None else None)
+                            has_symbol = bool(geom.get('source') or sl is not None)
+                    except Exception:
+                        has_symbol = True
                     final_type_kerning, final_type_fs = autofit_type(
                         clean_text,
                         self.type_kerning if self.type_kerning is not None else 0,
                         self.type_font_size if self.type_font_size is not None else 0,
                         self.type_left if self.type_left else 0,
-                        has_set_symbol=True)
+                        has_set_symbol=has_symbol,
+                        set_symbol_left=sl,
+                        gap=getattr(self, 'type_gap', None))
             except Exception as e:
                 print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
 

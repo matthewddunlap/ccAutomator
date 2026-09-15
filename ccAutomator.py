@@ -261,10 +261,18 @@ def main():
     )
 
     parser.add_argument(
-        '--pt-left',
+        '--type-left',
         type=int,
         metavar='NUM',
-        help="Add a {left#} tag to the Power/Toughness."
+        help="Add a {left#} tag to the Type text."
+    )
+    parser.add_argument(
+        '--type-gap',
+        type=int,
+        metavar='NUM',
+        help="When --auto-fit-type is set, the required clearance (px) between the "
+             "end of the type line and the set symbol / row edge that auto-fit "
+             "treats as the width target. (default: 45)"
     )
 
 
@@ -891,11 +899,12 @@ def main():
                 type_left=args.type_left,
                 flavor_font=args.flavor_font,
                 rules_down=args.rules_down,
-                white_border=args.white_border,
-                black_border=args.black_border,
-                auto_fit_type=args.auto_fit_type,
-                auto_fit_title=args.auto_fit_title
-            )
+                 white_border=args.white_border,
+                 black_border=args.black_border,
+                 auto_fit_type=args.auto_fit_type,
+                 auto_fit_title=args.auto_fit_title,
+                 type_gap=args.type_gap
+             )
             editor.save(os.path.join(args.output_dir if args.output_dir else '.', edited_project_file))
             print(f"--- Phase 2 Complete: Edited file saved to {edited_project_file} ---")
 
@@ -1003,7 +1012,8 @@ def main():
             overwrite_newer_than=args.overwrite_newer_than,
             debug=args.debug,
             auto_fit_type=args.auto_fit_type,
-            auto_fit_title=args.auto_fit_title
+            auto_fit_title=args.auto_fit_title,
+            type_gap=args.type_gap
         ) as automator:
             
             # Generate the full-art lands TEMPLATE (if needed)

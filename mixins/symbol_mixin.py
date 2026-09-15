@@ -28,6 +28,32 @@ class SymbolMixin:
     Mixin for handling interactions with the 'Set Symbol' tab in Card Conjurer.
     """
 
+    def get_symbol_geometry(self):
+        """
+        Read the CURRENT card's set-symbol geometry from the app's `card` global.
+
+        Card Conjurer keeps the active card as a JS object `card` (e.g. the
+        block at `ccAutomator.py` that sets `card.id` proves the object exists).
+        It carries the same fields as the .cardconjurer project files:
+        `setSymbolX` / `setSymbolZoom` (normalized 0-1) and `setSymbolSource`.
+
+        Returns:
+            dict with keys 'x', 'zoom', 'source' (any may be None), or None if
+            the app exposes no `card` object / it has no set symbol.
+        """
+        try:
+            return self.driver.execute_script("""
+                if (typeof card === 'undefined' || !card) { return null; }
+                return {
+                    'x':      card.setSymbolX,
+                    'zoom':   card.setSymbolZoom,
+                    'source': card.setSymbolSource || null
+                };
+            """)
+        except Exception as e:
+            print(f"      Could not read symbol geometry: {e}", file=sys.stderr)
+            return None
+
     def set_set_symbol(self, set_code, rarity=None, source=None):
         """
         Configure the Set Symbol tab and trigger a fetch.
