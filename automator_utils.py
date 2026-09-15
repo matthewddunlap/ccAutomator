@@ -1,3 +1,4 @@
+import math
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -586,10 +587,6 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
 #   effectively defines the row's right boundary.  We reserve room for it.
 # Re-run type_calibrate.py after any frame/font change to refresh the numbers.
 
-_TYPE_W_BASE = 23.054   # px per char at default (fontsize offset 0, kerning 0)
-_TYPE_W_FONT = 0.269    # px per char gained per +1 {fontsize} unit
-_TYPE_W_KERN = 0.473    # px per char gained per +1 {kerning} unit
-
 # Row right boundary, measured on the Seventh frame (canvas 1005px wide):
 #   * the type text field itself extends to ~897px (field x=0.1074, w=0.7852),
 #   * the very-long-type cap sits at ~909px,
@@ -599,19 +596,81 @@ _TYPE_W_KERN = 0.473    # px per char gained per +1 {kerning} unit
 _TYPE_ORIGIN = 108      # leftmost px of the type text at {left}=0 (field x=0.1074 -> 107px)
 _TYPE_LEFT_GAIN = 0.5   # {leftN} shifts the type N*0.5 px left (measured: left40 -> ~20px)
 _TYPE_ROW_RIGHT = 905   # right cap when NO set symbol occupies the row (measured very-long-type)
-_SET_SYMBOL_LEFT = 890  # right-side boundary to respect when a SET SYMBOL is present
-_TYPE_CLEARANCE = 30    # required gap between the type's last letter and the boundary
+_SET_SYMBOL_LEFT = 711  # tightest symbol-left edge observed (ons set, zoom=0.241);
+                        #   use as a floor (conservative) so the type never runs under
+                        #   a large symbol; cards with smaller symbols will be
+                        #   over-shrunk slightly but will never overrun
+_TYPE_CLEARANCE = 45    # required gap between the type's last letter and the boundary
+                        #   (45 px reads as clearly separated; matches title-line's gap)
 
 
-def _estimate_type_width(text, font_offset, kerning):
-    """Estimated rendered width of `text` (canvas px) at the given tags."""
+#   (canvas px at fontsize 0, kerning 0), solved by least-squares against MEASURED
+#   rendered widths of real MTG type lines on the Seventh frame.  A constant
+#   per-char cannot fit both wide-letter lines ("Legendary Creature -- Human
+#   Druid") and narrow-letter ("-- Phyrexian Dreadnought"); a per-category model
+#   can.  Cross-check error is within +-7 px on every line used for the fit.
+_TYPE_W_UL = 26.5        # uppercase
+_TYPE_W_LL = 21.5        # lowercase
+_TYPE_W_SPACE = 11.5     # space
+_TYPE_W_DASH = 16.0      # em-dash / hyphen
+_TYPE_W_COMMA = 8.5      # comma
+_TYPE_W_OTHER = 22.0     # digits / other
+# Per-char font-size / kerning scale coefficients (px per char per tag unit).
+# These scale all glyphs together, so a constant is fine -- the per-category
+# base above already handles the letter-shape differences.
+_TYPE_W_FONT = 0.5       # px per char gained per +1 {fontsize} unit
+_TYPE_W_KERN = 0.625     # px per char gained per +1 {kerning} unit
+
+def _estimate_type_width(text, font_offset=None, kerning=None):
+    """Estimated rendered width of `text` (canvas px) at the given tags.
+
+    Uses a per-glyph-category width table (upper/lower/space/em-dash/comma/other)
+    instead of a single per-char constant, because MTG type lines mix wide
+    (uppercase) and narrow (lowercase) letters -- e.g. "Phyrexian Dreadnought"
+    is mostly narrow letters while "Legendary Creature -- Human Druid" has more
+    wide ones.  A constant cannot fit both; a per-category model can.
+
+    font_offset / kerning are folded in as a small per-char adjustment on top
+    of the measured base (they mostly scale all glyphs together).
+    """
     if not text:
         return 0.0
-    n = len(text)
-    return n * (_TYPE_W_BASE + _TYPE_W_FONT * (font_offset or 0) + _TYPE_W_KERN * (kerning or 0))
+    tot = 0.0
+    n = 0
+    for ch in text:
+        n += 1
+        if ch.isupper():
+            tot += _TYPE_W_UL
+        elif ch.islower():
+            tot += _TYPE_W_LL
+        elif ch == "\u2014" or ch == "-":
+            tot += _TYPE_W_DASH
+        elif ch == " ":
+            tot += _TYPE_W_SPACE
+        elif ch == ",":
+            tot += _TYPE_W_COMMA
+        else:
+            tot += _TYPE_W_OTHER
+    if n:
+        tot += n * (_TYPE_W_FONT * (font_offset or 0) + _TYPE_W_KERN * (kerning or 0))
+    return tot
 
 
-def _type_budget(type_left, has_set_symbol):
+def estimate_set_symbol_left(set_symbol_x=None, set_symbol_zoom=None, canvas_w=1005):
+    """Estimate the set-symbol's left edge in canvas pixels from the card's own data.
+
+    The symbol is right-aligned in its box (x = set_symbol_x, width = set_symbol_zoom).
+    Its left edge = set_symbol_x*canvas_w − (set_symbol_zoom*canvas_w)/2.
+
+    Returns None if no set-symbol info is available (caller should fall back to
+    the _SET_SYMBOL_LEFT constant).
+    """
+    if set_symbol_x is None or set_symbol_zoom is None:
+        return None
+    return int(set_symbol_x * canvas_w - (set_symbol_zoom * canvas_w) / 2)
+
+
+def _type_budget(type_left, has_set_symbol, set_symbol_left=None):
     """Type width budget (canvas px) bounded by the set symbol / field cap.
 
     budget = boundary - origin - clearance, where {leftN} moves the type origin
@@ -623,7 +682,8 @@ def _type_budget(type_left, has_set_symbol):
     return boundary - origin - _TYPE_CLEARANCE
 
 
-def autofit_type(type_text, kerning=None, font_size=None, type_left=0, has_set_symbol=True):
+def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
+                 has_set_symbol=True, set_symbol_left=None):
     """
     Determine a type `(kerning, font_size)` pair that fits the type row.
 
@@ -639,7 +699,9 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0, has_set_s
         kerning:         starting kerning (absolute px) or None.
         font_size:       starting {fontsize} offset (relative px) or None.
         type_left:       value of the {left#} tag (positive = room gained).
-        has_set_symbol:  True if a set symbol occupies the right of the row.
+        has_set_symbol:  True if a set symbol occupies the right of the row;
+        set_symbol_left: explicit symbol left edge (px) if known -- overrides the
+                         fallback constant when True; None to use the constant.
 
     Returns:
         (kerning, font_size)
@@ -651,27 +713,38 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0, has_set_s
     if not type_text:
         return k, fs
 
-    budget = _type_budget(left, has_set_symbol)
+    budget = _type_budget(left, has_set_symbol, set_symbol_left)
     type_w = _estimate_type_width(type_text, fs, k)
     if type_w <= budget:
         return k, fs  # no change needed
 
     n = max(1, len(type_text))
+    base0 = _estimate_type_width(type_text, 0, 0)          # width at fs=0, k=0
+    per_font = n * _TYPE_W_FONT                              # px gained per +1 {fontsize}
+    per_kern = n * _TYPE_W_KERN                              # px gained per +1 {kerning}
 
     def fits(font_off, kern):
         return _estimate_type_width(type_text, font_off, kern) <= budget
 
-    # Largest kerning (clamped to <= the user's value and >= the floor) that fits.
-    if n > 1:
-        per_kern = n * _TYPE_W_KERN
-        ideal_k = (budget - n * (_TYPE_W_BASE + fs * _TYPE_W_FONT)) / per_kern
-        k = max(_KERNING_MIN, min(k, int(ideal_k + 1e-9)))
+    # Largest kerning (clamped to <= the user's value and >= the floor) that fits
+    # at the current font size.
+    if per_kern > 0:
+        ideal_k = (budget - (base0 + per_font * fs)) / per_kern
+        k = max(_KERNING_MIN, min(k, int(math.floor(ideal_k + 1e-9))))
 
-    # If it still overflows at that kerning, drop the font size to exactly fit.
-    if not fits(fs, k):
-        target_per_char = (budget - n * _TYPE_W_KERN * k) / n
-        fs = (target_per_char - _TYPE_W_BASE) / _TYPE_W_FONT
-        fs = max(_FONT_FLOOR, int(round(fs)))
+    # If it still overflows at that kerning, drop the font size to fit.
+    # Use floor (not round): we are SHRINKING, so rounding up would give a font
+    # size that is still too big, and the line would silently overrun.
+    if not fits(fs, k) and per_font > 0:
+        target_base = budget - per_kern * k
+        fs_exact = (target_base - base0) / per_font
+        fs = int(math.floor(fs_exact))
+        fs = max(_FONT_FLOOR, fs)
+
+    # Post-verify: integer floors can leave the result a couple of px over budget.
+    # Step down until it genuinely fits (bounded by the font floor).
+    while not fits(fs, k) and fs > _FONT_FLOOR:
+        fs -= 1
 
     print(f"   [Auto-Fit-Type] '{type_text}' (symbol={has_set_symbol}, left={left}) "
           f"-> kerning {kerning}->{k}, fontsize {font_size}->{fs} "

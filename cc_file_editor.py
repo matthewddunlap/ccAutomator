@@ -150,6 +150,10 @@ class CcFileEditor:
                 # row (when this card carries one), so a long type line never
                 # runs into it.
                 has_set_symbol = bool(data.get('setSymbolSource'))
+                # If the card carries a symbol, reserve room starting from its
+                # actual left edge (varies per set/zoom) instead of the constant.
+                set_symbol_left = estimate_set_symbol_left(
+                    data.get('setSymbolX'), data.get('setSymbolZoom')) if has_set_symbol else None
                 k0 = type_kerning if type_kerning is not None else 0
                 f0 = type_font_size if type_font_size is not None else 0
                 new_k, new_f = k0, f0
@@ -158,7 +162,8 @@ class CcFileEditor:
                     new_k, new_f = autofit_type(
                         clean_text, k0, f0,
                         type_left if type_left else 0,
-                        has_set_symbol=has_set_symbol)
+                        has_set_symbol=has_set_symbol,
+                        set_symbol_left=set_symbol_left)
 
                 # Write a tag when the user specified one, or when auto-fit
                 # changed the value (so we never emit a no-op {kerning0}/{fontsize0}).
