@@ -118,7 +118,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # shell (e.g. a tmux pane), that kill reaches the shell and closes the
         # pane.  A fresh session (os.setsid at chromedriver start) contains that
         # blast radius to the automation processes only.
-        from selenium.webdriver.common.service import Service
+        from selenium.webdriver.chrome.service import Service
         self.driver = webdriver.Chrome(
             service=Service(popen_kw={"preexec_fn": os.setsid}),
             options=chrome_options)
