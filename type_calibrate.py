@@ -169,7 +169,7 @@ def lstsq3(pts):
             if rr != c and M[rr][c]:
                 f = M[rr][c] / M[c][c]
                 M[rr] = [M[rr][i] - f*M[c][i] for i in range(3)]
-                b[rr] -= f * b[c][c]
+                b[rr] -= f * b[c]
     return [b[i]/M[i][i] for i in range(3)]
 
 
