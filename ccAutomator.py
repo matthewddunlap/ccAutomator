@@ -261,10 +261,10 @@ def main():
     )
 
     parser.add_argument(
-        '--type-left',
+        '--pt-left',
         type=int,
         metavar='NUM',
-        help="Add a {left#} tag to the Type text."
+        help="Add a {left#} tag to the Power/Toughness."
     )
     parser.add_argument(
         '--type-gap',
