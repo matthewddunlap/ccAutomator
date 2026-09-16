@@ -72,7 +72,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
               auto_fit_type=False,
               auto_fit_title=False,
               set_symbol_source='cardconjurer',
-              type_gap=None):
+              type_gap=None,
+              min_kerning=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -183,6 +184,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # set symbol / row edge -- the size of the gap that --auto-fit-type
         # computes the rest of the type fit against.  None => default (45).
         self.type_gap = type_gap
+        # Minimum {kerning} either auto-fit may shrink to before reducing the
+        # font size.  None => module default (0).
+        self.min_kerning = min_kerning
         # Where Card Conjurer fetches set symbols from: 'cardconjurer' (the
         # app's built-in asset set) or 'hexproof' (https://api.hexproof.io),
         # the latter of which covers every official set and is colorized per
@@ -661,7 +665,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     f0 = eff_title_fs if eff_title_fs is not None else 0
                     eff_title_kerning, eff_title_fs = autofit_title(
                         clean_title, title_mana_cost, k0, f0,
-                        self.title_left if self.title_left else 0)
+                        self.title_left if self.title_left else 0,
+                        min_kerning=self.min_kerning)
                 except Exception as e:
                     print(f"      Error during Title Auto-Fit: {e}", file=sys.stderr)
 
@@ -720,7 +725,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                             self.type_left if self.type_left else 0,
                             has_set_symbol=has_symbol,
                             set_symbol_left=sl,
-                            gap=self.type_gap)
+                            gap=self.type_gap,
+                            min_kerning=self.min_kerning)
 
                 except Exception as e:
                     print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)

@@ -449,7 +449,8 @@ class TextMixin:
                     f0 = eff_title_fs if eff_title_fs is not None else 0
                     eff_title_kerning, eff_title_fs = autofit_title(
                         clean_name, mana_cost, k0, f0,
-                        self.title_left if self.title_left else 0)
+                        self.title_left if self.title_left else 0,
+                        min_kerning=getattr(self, 'min_kerning', None))
             except Exception as e:
                 print(f"      Error during Title Auto-Fit: {e}", file=sys.stderr)
 
@@ -499,7 +500,8 @@ class TextMixin:
                         self.type_left if self.type_left else 0,
                         has_set_symbol=has_symbol,
                         set_symbol_left=sl,
-                        gap=getattr(self, 'type_gap', None))
+                        gap=getattr(self, 'type_gap', None),
+                        min_kerning=getattr(self, 'min_kerning', None))
             except Exception as e:
                 print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
 

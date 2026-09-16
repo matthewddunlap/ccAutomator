@@ -490,12 +490,23 @@ def count_mana_symbols(mana_cost):
 def estimate_name_width(name, font_offset, kerning):
     """Estimated rendered width of `name` (canvas px) at the given tags.
 
-    Calibrated linear law: width = n * (base + font_off*wf + kern*wk).
+    The base width is a per-glyph advance when a calibrated table
+    (type_glyphs.json, produced by type_calibrate.py) is available -- the
+    SAME model the type-line autofit uses, so both title and type line track
+    the renderer's real wide/narrow letter shapes.  Without the table it
+    falls back to a single per-char base constant.  In both cases the
+    {fontsize}/{kerning} tags contribute the same uniform per-char amount,
+    so the width is linear:  width = base + n*(wf*fs + wk*k).
     """
     if not name:
         return 0.0
     n = len(name)
-    return n * (_CHAR_W_BASE + _CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
+    table = _load_type_glyphs()
+    if table:
+        base = sum((table[ch] if ch in table else _CHAR_W_BASE) for ch in name)
+    else:
+        base = n * _CHAR_W_BASE
+    return base + n * (_CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
 
 
 def _title_budget(n_syms, title_left):
@@ -511,7 +522,8 @@ def _title_budget(n_syms, title_left):
     return cost_left - origin - _CLEARANCE_PX
 
 
-def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
+def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
+                  min_kerning=None):
     """
     Determine a title `(kerning, font_size)` pair that fits the name bar.
 
@@ -521,15 +533,18 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
         kerning:     starting kerning (absolute px) or None.
         font_size:   starting {fontsize} offset (relative px) or None.
         title_left:  value of `{left#}` tag (positive = room gained).
+        min_kerning: lowest {kerning} the fit may reach (default _KERNING_MIN).
+                     Kerning shrinks to this floor before the font size drops.
 
     Returns:
         (kerning, font_size):  may equal the inputs.  Kerning never below
-        _KERNING_MIN and font offset never below _FONT_FLOOR.  If the name
-        already fits, the inputs are returned unchanged.
+        min_kerning (>= _KERNING_MIN) and font offset never below _FONT_FLOOR.
+        If the name already fits, the inputs are returned unchanged.
     """
     k = kerning if kerning is not None else 0
     fs = font_size if font_size is not None else 0
     left = title_left if title_left else 0
+    k_min = max(_KERNING_MIN, min_kerning if min_kerning is not None else _KERNING_MIN)
 
     n_syms = count_mana_symbols(mana_cost)
     budget = _title_budget(n_syms, left)
@@ -540,27 +555,39 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0):
 
     # The name is too wide.  Reduce kerning first (letter-spacing is the most
     # cosmetic thing to give back), but only as far as needed -- and never above
-    # the user's starting value.  Only after kerning hits its floor do we cut the
-    # font size.  Both results are bounded so we never END up larger than the
-    # user's input.
+    # the user's starting value.  Only after kerning hits min_kerning do we cut
+    # the font size.  Both results are bounded so we never END up larger than
+    # the user's input.
     n = max(1, len(name))
 
     def fits(font_off, kern):
         return estimate_name_width(name, font_off, kern) <= budget
 
-    # Largest kerning (clamped to <= the user's value and >= floor) that fits
-    # at the current font size.
-    if n > 1:
-        per_kern = n * _CHAR_W_KERN
-        ideal_k = (budget - n * (_CHAR_W_BASE + fs * _CHAR_W_FONT)) / per_kern
-        k = max(_KERNING_MIN, min(k, int(ideal_k + 1e-9)))
-        k = max(k, _KERNING_MIN)
+    # Width is linear in the two tags in both modes:
+    #   table mode      :  width = base + n * (_CHAR_W_FONT*fs + _CHAR_W_KERN*k)
+    #   flat-law fallback:  width = n * (_CHAR_W_BASE + _CHAR_W_FONT*fs + _CHAR_W_KERN*k)
+    # (matching estimate_name_width exactly).
+    table = _load_type_glyphs()
+    n = max(1, len(name))
+    base = sum((table[ch] if ch in table else _CHAR_W_BASE) for ch in name) if table else n * _CHAR_W_BASE
+    a_per_fs   = n * _CHAR_W_FONT
+    b_per_kern = n * _CHAR_W_KERN       # same as the flat law: per-character kerning gain
 
-    # If it still overflows at that kerning, drop the font size to exactly fit.
-    if not fits(fs, k):
-        target_per_char = (budget - n * _CHAR_W_KERN * k) / n
-        fs = (target_per_char - _CHAR_W_BASE) / _CHAR_W_FONT
+    # Largest kerning (clamped to <= the user's value and >= k_min) that fits at
+    # the current font size.
+    if b_per_kern > 0:
+        ideal_k = (budget - base - a_per_fs * (fs or 0)) / b_per_kern
+        k = max(k_min, min(k, int(ideal_k + 1e-9)))
+        k = max(k, k_min)
+
+    # If it still overflows at that kerning, drop the font size to fit.
+    if not fits(fs, k) and a_per_fs > 0:
+        fs = (budget - base - b_per_kern * k) / a_per_fs
         fs = max(_FONT_FLOOR, int(round(fs)))
+
+    # Post-verify: integer floors can leave a couple of px over budget.
+    while not fits(fs, k) and fs > _FONT_FLOOR:
+        fs -= 1
 
     print(f"   [Auto-Fit-Title] '{name}' ({n_syms} cost, left={left}) "
           f"-> kerning {kerning}->{k}, fontsize {font_size}->{fs} "
@@ -653,6 +680,23 @@ def _load_type_glyphs():
     return table
 
 
+def _base_width(text, per_char_default):
+    """Base width (kerning 0, fontsize 0) of `text` in the current width model:
+    the per-glyph sum when the calibrated table is loaded, else `n * per_char_default`.
+    """
+    table = _load_type_glyphs()
+    if table:
+        return sum((table[ch] if ch in table else per_char_default) for ch in text)
+    return len(text) * per_char_default
+
+
+def _kern_gains(text):
+    """Kerning gain (px per +1 {kerning}) consistent with the current model:
+    (n-1) px in the per-glyph table (kerning lands between the n-1 glyph pairs),
+    n*{_CHAR_W_KERN} in the flat per-char fallback."""
+    return (max(0, len(text) - 1)) if _load_type_glyphs() else (len(text) * _CHAR_W_KERN)
+
+
 def _estimate_type_width(text, font_offset=None, kerning=None):
     """Estimated rendered width of `text` (canvas px) at the given tags.
 
@@ -739,7 +783,8 @@ def _type_budget(type_left, has_set_symbol, set_symbol_left=None, gap=None):
 
 
 def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
-                 has_set_symbol=True, set_symbol_left=None, gap=None):
+                 has_set_symbol=True, set_symbol_left=None, gap=None,
+                 min_kerning=None):
     """
     Determine a type `(kerning, font_size)` pair that fits the type row.
 
@@ -760,6 +805,8 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
                          fallback constant when True; None to use the constant.
         gap:             required clearance (px) between the last letter and the
                          boundary (default: _TYPE_CLEARANCE).
+        min_kerning:     lowest {kerning} the fit may reach (default _KERNING_MIN).
+                         Kerning shrinks to this floor before the font size drops.
 
     Returns:
         (kerning, font_size)
@@ -767,6 +814,7 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
     k = kerning if kerning is not None else 0
     fs = font_size if font_size is not None else 0
     left = type_left if type_left else 0
+    k_min = max(_KERNING_MIN, min_kerning if min_kerning is not None else _KERNING_MIN)
 
     if not type_text:
         return k, fs
@@ -788,7 +836,8 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
     # at the current font size.
     if per_kern > 0:
         ideal_k = (budget - (base0 + per_font * fs)) / per_kern
-        k = max(_KERNING_MIN, min(k, int(math.floor(ideal_k + 1e-9))))
+        k = max(k_min, min(k, int(math.floor(ideal_k + 1e-9))))
+        k = max(k, k_min)
 
     # If it still overflows at that kerning, drop the font size to fit.
     # Use floor (not round): we are SHRINKING, so rounding up would give a font

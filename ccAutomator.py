@@ -275,6 +275,15 @@ def main():
              "treats as the width target. (default: 45)"
     )
 
+    parser.add_argument(
+        '--min-kerning',
+        type=int,
+        metavar='NUM',
+        help="Minimum {kerning} that --auto-fit-type and --auto-fit-title are "
+             "allowed to shrink to before they start reducing the font size. "
+             "(default: 0)"
+    )
+
 
 
     parser.add_argument(
@@ -903,7 +912,8 @@ def main():
                  black_border=args.black_border,
                  auto_fit_type=args.auto_fit_type,
                  auto_fit_title=args.auto_fit_title,
-                 type_gap=args.type_gap
+                 type_gap=args.type_gap,
+                 min_kerning=args.min_kerning
              )
             editor.save(os.path.join(args.output_dir if args.output_dir else '.', edited_project_file))
             print(f"--- Phase 2 Complete: Edited file saved to {edited_project_file} ---")
@@ -1013,7 +1023,8 @@ def main():
             debug=args.debug,
             auto_fit_type=args.auto_fit_type,
             auto_fit_title=args.auto_fit_title,
-            type_gap=args.type_gap
+            type_gap=args.type_gap,
+            min_kerning=args.min_kerning
         ) as automator:
             
             # Generate the full-art lands TEMPLATE (if needed)
