@@ -680,23 +680,6 @@ def _load_type_glyphs():
     return table
 
 
-def _base_width(text, per_char_default):
-    """Base width (kerning 0, fontsize 0) of `text` in the current width model:
-    the per-glyph sum when the calibrated table is loaded, else `n * per_char_default`.
-    """
-    table = _load_type_glyphs()
-    if table:
-        return sum((table[ch] if ch in table else per_char_default) for ch in text)
-    return len(text) * per_char_default
-
-
-def _kern_gains(text):
-    """Kerning gain (px per +1 {kerning}) consistent with the current model:
-    (n-1) px in the per-glyph table (kerning lands between the n-1 glyph pairs),
-    n*{_CHAR_W_KERN} in the flat per-char fallback."""
-    return (max(0, len(text) - 1)) if _load_type_glyphs() else (len(text) * _CHAR_W_KERN)
-
-
 def _estimate_type_width(text, font_offset=None, kerning=None):
     """Estimated rendered width of `text` (canvas px) at the given tags.
 
