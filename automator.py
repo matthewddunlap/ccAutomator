@@ -71,9 +71,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                   overwrite=False, overwrite_older_than=None, overwrite_newer_than=None, debug=False,
               auto_fit_type=False,
               auto_fit_title=False,
-              set_symbol_source='cardconjurer',
-              type_gap=None,
-              min_kerning=None):
+               set_symbol_source='cardconjurer',
+               type_gap=None,
+               title_gap=None,
+               min_kerning=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -184,6 +185,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # set symbol / row edge -- the size of the gap that --auto-fit-type
         # computes the rest of the type fit against.  None => default (45).
         self.type_gap = type_gap
+        # Configurable clearance (px) between the card name and the leftmost
+        # mana symbol -- the size of the gap that --auto-fit-title computes the
+        # rest of the title fit against.  None => default (45).
+        self.title_gap = title_gap
         # Minimum {kerning} either auto-fit may shrink to before reducing the
         # font size.  None => module default (0).
         self.min_kerning = min_kerning
@@ -666,7 +671,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     eff_title_kerning, eff_title_fs = autofit_title(
                         clean_title, title_mana_cost, k0, f0,
                         self.title_left if self.title_left else 0,
-                        min_kerning=self.min_kerning)
+                        min_kerning=self.min_kerning,
+                        gap=self.title_gap)
                 except Exception as e:
                     print(f"      Error during Title Auto-Fit: {e}", file=sys.stderr)
 

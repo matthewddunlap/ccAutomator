@@ -509,21 +509,23 @@ def estimate_name_width(name, font_offset, kerning):
     return base + n * (_CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
 
 
-def _title_budget(n_syms, title_left):
+def _title_budget(n_syms, title_left, gap=None):
     """Name width budget (canvas px) for a cost of n_syms symbols.
 
-    budget = cost_left - name_origin - clearance, where the {leftN} tag moves
-    the name origin left by N*_LEFT_GAIN px (N is in the card's 2010px space,
+    budget = cost_left - name_origin - gap, where the {leftN} tag moves the
+    name origin left by N*_LEFT_GAIN px (N is in the card's 2010px space,
     measured canvas is half that).  A target clearance keeps the name visually
-    clear of the leftmost mana symbol.
+    clear of the leftmost mana symbol (defaults to _CLEARANCE_PX).
     """
+    if gap is None:
+        gap = _CLEARANCE_PX
     cost_left = _BAR_RIGHT_PX - n_syms * _SYMBOL_PX
     origin = _NAME_ORIGIN - (title_left or 0) * _LEFT_GAIN
-    return cost_left - origin - _CLEARANCE_PX
+    return cost_left - origin - gap
 
 
 def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
-                  min_kerning=None):
+                  min_kerning=None, gap=None):
     """
     Determine a title `(kerning, font_size)` pair that fits the name bar.
 
@@ -535,6 +537,8 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
         title_left:  value of `{left#}` tag (positive = room gained).
         min_kerning: lowest {kerning} the fit may reach (default _KERNING_MIN).
                      Kerning shrinks to this floor before the font size drops.
+        gap:         required clearance (px) between the name's last letter and
+                     the leftmost mana symbol (default: _CLEARANCE_PX).
 
     Returns:
         (kerning, font_size):  may equal the inputs.  Kerning never below
@@ -547,7 +551,7 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
     k_min = max(_KERNING_MIN, min_kerning if min_kerning is not None else _KERNING_MIN)
 
     n_syms = count_mana_symbols(mana_cost)
-    budget = _title_budget(n_syms, left)
+    budget = _title_budget(n_syms, left, gap)
 
     name_w = estimate_name_width(name, fs, k)
     if name_w <= budget:

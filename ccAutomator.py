@@ -276,6 +276,15 @@ def main():
     )
 
     parser.add_argument(
+        '--title-gap',
+        type=int,
+        metavar='NUM',
+        help="When --auto-fit-title is set, the required clearance (px) between the "
+             "end of the card name and the leftmost mana symbol that auto-fit "
+             "treats as the width target. (default: 45)"
+    )
+
+    parser.add_argument(
         '--min-kerning',
         type=int,
         metavar='NUM',
@@ -1024,6 +1033,7 @@ def main():
             auto_fit_type=args.auto_fit_type,
             auto_fit_title=args.auto_fit_title,
             type_gap=args.type_gap,
+            title_gap=args.title_gap,
             min_kerning=args.min_kerning
         ) as automator:
             
