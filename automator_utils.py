@@ -490,23 +490,19 @@ def count_mana_symbols(mana_cost):
 def estimate_name_width(name, font_offset, kerning):
     """Estimated rendered width of `name` (canvas px) at the given tags.
 
-    The base width is a per-glyph advance when a calibrated table
-    (type_glyphs.json, produced by type_calibrate.py) is available -- the
-    SAME model the type-line autofit uses, so both title and type line track
-    the renderer's real wide/narrow letter shapes.  Without the table it
-    falls back to a single per-char base constant.  In both cases the
-    {fontsize}/{kerning} tags contribute the same uniform per-char amount,
-    so the width is linear:  width = base + n*(wf*fs + wk*k).
+    Uses the TITLE-bar per-char law, calibrated to the name-bar font by
+    title_calibrate.py  (width = n * (base + font_off*wf + kern*wk)).
+
+    NOTE: this is deliberately *not* the type_glyphts.json per-glyph table.
+    That table is measured in the (smaller) TYPELINE font, so it would
+    UNDERSHOOT the wider name-bar font and would let a long name overrun the
+    mana cost.  Title and type line are different fonts and use different
+    width models.
     """
     if not name:
         return 0.0
     n = len(name)
-    table = _load_type_glyphs()
-    if table:
-        base = sum((table[ch] if ch in table else _CHAR_W_BASE) for ch in name)
-    else:
-        base = n * _CHAR_W_BASE
-    return base + n * (_CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
+    return n * (_CHAR_W_BASE + _CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
 
 
 def _title_budget(n_syms, title_left, gap=None):
@@ -567,15 +563,13 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
     def fits(font_off, kern):
         return estimate_name_width(name, font_off, kern) <= budget
 
-    # Width is linear in the two tags in both modes:
-    #   table mode      :  width = base + n * (_CHAR_W_FONT*fs + _CHAR_W_KERN*k)
-    #   flat-law fallback:  width = n * (_CHAR_W_BASE + _CHAR_W_FONT*fs + _CHAR_W_KERN*k)
-    # (matching estimate_name_width exactly).
-    table = _load_type_glyphs()
+    # Width is a single linear law in font_offset and kerning:
+    #   width = n * (_CHAR_W_BASE + _CHAR_W_FONT*fs + _CHAR_W_KERN*k)
+    # (matching estimate_name_width exactly, which uses the title-calibrated law).
     n = max(1, len(name))
-    base = sum((table[ch] if ch in table else _CHAR_W_BASE) for ch in name) if table else n * _CHAR_W_BASE
-    a_per_fs   = n * _CHAR_W_FONT
-    b_per_kern = n * _CHAR_W_KERN       # same as the flat law: per-character kerning gain
+    base     = n * _CHAR_W_BASE
+    a_per_fs = n * _CHAR_W_FONT
+    b_per_kern = n * _CHAR_W_KERN
 
     # Largest kerning (clamped to <= the user's value and >= k_min) that fits at
     # the current font size.
