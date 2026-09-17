@@ -351,6 +351,18 @@ class TextMixin:
         d.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
         time.sleep(self.render_delay)
 
+    def _close_pt_dialog(self):
+        """Close the P/T 'Edit Bounds' overlay if it is open.  Tolerant: a no-op
+        if the dialog is already closed (or the close control is absent).  Used
+        to make sure the #textbox-editor overlay never stays in its `opened`
+        state -- an open overlay covers the card's 'Save Card' button and
+        intercepts its click."""
+        try:
+            self.driver.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
+            time.sleep(self.render_delay)
+        except Exception:
+            pass
+
     def _set_pt_box_abs(self, base_gw, base_gx, new_w):
         """Open the P/T 'Edit Bounds' dialog, set width to `new_w` (dialog units,
         relative to the ORIGINAL width `base_gw`) and shift x left by exactly the
@@ -461,22 +473,28 @@ class TextMixin:
         base_gw, base_gx = base
 
         # (3) Pure math: how wide (du) must the box be so the P/T renders at
-        #     its natural user-fontsize size?
-        new_du, target_px, natural_px, widen = _af_pt(
-            pt_text,
-            font_size=getattr(self, 'pt_font_size', None),
-            kerning=getattr(self, 'pt_kerning', None),
-            base_box_du=base_gw,
-        )
+        #     its natural user-fontsize size, then set (and close) it.
+        #     The finally block guarantees the #textbox-editor overlay is closed
+        #     on EVERY path (widen / no-widen / exception), so a still-open
+        #     editor can never intercept a later 'Save Card' click.
+        try:
+            new_du, target_px, natural_px, widen = _af_pt(
+                pt_text,
+                font_size=getattr(self, 'pt_font_size', None),
+                kerning=getattr(self, 'pt_kerning', None),
+                base_box_du=base_gw,
+            )
 
-        if widen:
-            self._set_pt_box_abs(base_gw, base_gx, new_du)
-            print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
-                  f"> base-box {base_gw}du; widening to {new_du}du "
-                  f"(target {target_px:.0f}px, right edge held).")
-        else:
-            print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
-                  f"<= base box {base_gw}du; left alone.")
+            if widen:
+                self._set_pt_box_abs(base_gw, base_gx, new_du)
+                print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
+                      f"> base-box {base_gw}du; widening to {new_du}du "
+                      f"(target {target_px:.0f}px, right edge held).")
+            else:
+                print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
+                      f"<= base box {base_gw}du; left alone.")
+        finally:
+            self._close_pt_dialog()
 
     def apply_hide_reminder_text(self):
         """
