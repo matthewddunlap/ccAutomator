@@ -14,7 +14,7 @@ and measures ACTUAL rendered pixels.  From that it:
 Run with a reachable CardConjurer instance:
     python title_calibrate.py --url http://mtgproxy:4242/
 """
-import argparse, io, time, base64, json, re, sys
+import argparse, io, time, base64, json, re, os, sys
 from collections import Counter
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -81,6 +81,12 @@ class R:
         if not best: return None
         return dict(c_left=best[2], c_right=best[3], c_w=(best[3]-best[2]), y=best[1])
 
+def title_magenta_extent(img):
+    """(min_x, max_x) of magenta ink in the name-bar band, else None."""
+    W, H = img.size; px = img.load()
+    def is_mag(p): r,g,b=p; return r>150 and b>150 and g<150
+    xs=[x for y in range(60,200) for x in range(W) if is_mag(px[x,y])]
+    return (min(xs), max(xs)) if xs else None
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--url", default="http://mtgproxy:4242/")
@@ -166,6 +172,19 @@ def main():
             print(f"  {c:16} cost_left={s['c_left']:4}  usable={usable:5}  fits up to fs={b[0]}, kern={b[1]} (w={b[2]})")
         else:
             print(f"  {c:16} cost_left={s['c_left']:4}  usable={usable:5}  NO grid point fits (needs fs<= floor)")
+    # --- per-glyph advance table (emit title_glyphs.json for autofit_title) ---
+    print("\n=== per-glyph advance table (title font) ===")
+    from glyph_measure import measure_glyph_table, measure_uniform_kern, write_table
+    def set_title(text):
+        r.set("Title", text)
+        r.set("Mana Cost", ""); r.set("Rules Text",""); time.sleep(0.6)
+    glyph_table = measure_glyph_table(set_title, r.png, title_magenta_extent)
+    glyph_table["kern_per_gap"] = measure_uniform_kern(
+        set_title, r.png, title_magenta_extent, "Rofellos, Llanowar Emissary")
+    print(f"  measured {len(glyph_table['glyphs'])} glyph advances")
+    table_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_glyphs.json")
+    write_table(glyph_table, table_path)
+
     out = dict(
         law=dict(fontsize=a_coef, kerning=c_coef, base=b0),
         name_chars=len(name0),

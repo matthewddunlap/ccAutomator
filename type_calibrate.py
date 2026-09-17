@@ -126,37 +126,6 @@ def symbol_left_edge(img, min_x_frac=0.68):
     return best
 
 
-def glyph_widths(r, glyphs, n=8):
-    """Measure the rendered advance of each printable glyph in `glyphs`.
-
-    Renders N copies of a single letter, tinted magenta, in the Type field and
-    reads the pixel extent; the per-glyph advance is extent / N (at
-    fontsize 0 / kerning 0 where the tags are consumed by the parser and only
-    the glyphs are visible).  Repeating IDENTICAL letters gives identical
-    inter-glyph gaps, so extent = N * advance -- no cross-glyph kerning to
-    confound the fit, and no cross-character averaging as with per-class
-    widths.  A ' ' (space) has no visible ink and is returned as None; the
-    autofit falls back to its class-based space width in that case.
-
-    Returns {glyph: advance_px} for glyphs that rendered, {} on failure.
-    """
-    out = {}
-    SKIP = set(' {[]()<>/*"\'')          # markup / invisible chars that would be
-                                          # parsed as tags or have no ink
-    for g in glyphs:
-        if not g.isprintable() or g in "\n\t " or g in SKIP:
-            continue
-        r.set_field("Type", "{fontsize0}{kerning0}{fontcolor#FF00FF}" + g * n)
-        e = magenta_extent(r.png())
-        adv = (e[1] - e[0]) / n if e else None
-        if adv is not None and adv > 0:
-            out[g] = adv
-            print(f"  '{g}' x{n} extent={e} -> advance {adv:.2f} px")
-        else:
-            print(f"  '{g}' x{n} extent={e} -> (no ink, skipped)")
-    return out
-
-
 def lstsq3(pts):
     """Solve width = a*fs + c*kern + b for points [(fs, kern, width)]."""
     A = [[p[0], p[1], 1.0] for p in pts]; Y = [float(p[2]) for p in pts]; n = len(pts)
@@ -250,21 +219,21 @@ def main():
         if sl is not None and (sym_left is None or sl < sym_left):
             sym_left = sl
 
-    # --- 5. Per-glyph base advances (emit type_glyphs.json for autofit_type) ---
-    print("\n=== per-glyph advances ===")
-    GLYPHS = (list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-              + list("abcdefghijklmnopqrstuvwxyz")
-              + list("0123456789")
-              + ["-", "\u2014", ",", "(", ")", "/"])
-    glyph_table = glyph_widths(r, sorted(set(GLYPHS)))
-    print(f"  measured {len(glyph_table)} glyph advances")
+    # --- 5. Per-glyph advance TABLE (emit type_glyphs.json for autofit_type) ---
+    # Advances measured at fontsize -6,-3,0,3,6 (kerning 0); the calibrator
+    # fits advance = base + slope*fontsize per glyph and reports residual.
+    print("\n=== per-glyph advance table ===")
+    from glyph_measure import measure_glyph_table, measure_uniform_kern, write_table
+    set_type = lambda text: r.set_field("Type", text)
+    glyph_table = measure_glyph_table(set_type, r.png, magenta_extent)
+    glyph_table["kern_per_gap"] = measure_uniform_kern(
+        set_type, r.png, magenta_extent, "Dragon Wizard")
+    print(f"  measured {len(glyph_table['glyphs'])} glyph advances")
 
-    # Write the per-glyph advance table (autofit_type loads this at runtime so
-    # it can SUM a given type line's widths instead of using per-class averages).
+    # Write the per-glyph table (autofit_type loads this at runtime so it can
+    # SUM a given type line's base+slopes instead of using per-class averages).
     table_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "type_glyphs.json")
-    with open(table_path, "w") as f:
-        json.dump(glyph_table, f, indent=2)
-    print(f"  wrote {table_path}")
+    write_table(glyph_table, table_path)
 
     out = dict(
         frame=a.frame, sample=SAMPLE, chars=N, canvas=[W, H],

@@ -437,29 +437,93 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
 # Title Auto-Fit (width model measured from the LIVE renderer)
 # ==============================================================================
 #
-# The CardConjurer name bar is a fixed band: the name sits left-aligned and the
-# mana cost is right-aligned in the same row.  The name therefore has a budget
-# that shrinks as the cost gets longer.  We do NOT derive this from the JSON
-# box geometry -- the real pixel relationship is measured from the renderer
-# itself (see title_calibrate.py) and encoded below as per-character constants.
+# ==============================================================================
+# Shared per-character width tables (calibrated by the *_calibrate.py scripts)
+# ==============================================================================
 #
-# CardConjurer tag semantics (app "Text Codes" reference):
-#   * `{fontsize#}`  -- RELATIVE size adjustment: the value is in canvas px.
-#   * `{kerning#}`   -- ABSOLUTE letter-spacing applied between glyphs.
-#   * `{left#}`      -- shift text N px left (frees N px on the right).
+# Each table is produced by driving the live CardConjurer renderer and is
+# shaped:
+#   { "kern_per_gap":  <px per gap (between adjacent chars) per +1 {kerning}>,
+#     "glyphs": { "<ch>": {"base": px, "slope": px per +1 {fontsize} unit,
+#                          "residual": max |fit-measured| px,
+#                          "pts": [[fontsize, width_px], ...]}, ... } }
 #
-# Measured ground truth (canvas px) for 'Rofellos, Llanowar Emissary' (27 chars),
-# rendered with NO {left} tag (origin 88px):
-#   name width = 6.20 * {fontsize}  +  13.0 * {kerning}  +  660
-#   -> per char:  base 24.444, +0.230 per fontsize unit, +0.4815 per kerning unit
-#   (the renderer caps the name at the title box for very large settings, so these
-#    hold up to that cap, which is well above any sensible autofit range)
-#   mana cost right edge fixed at 931, one symbol ~ 52.4 px, name origin ~ 88 px.
-# Re-run title_calibrate.py after any frame/font change to refresh the numbers.
+# width law used by the estimators below (linear in both tags):
+#   width(text, fs, k) = sum over chars [ base(ch) + slope(ch) * fs ]
+#                        + k * kern_per_gap * (len(text) - 1)
+#
+# Kerning acts between adjacent glyphs (len-1 gaps) and is measured UNIFORM per
+# field; title and type use different fonts, so the two tables differ in base,
+# slope AND kern_per_gap.  (A 0.5 px/gap default matches the old type law where
+# 6.06 px/kern / 12 gaps = 0.505 px/gap.)
+#
+# Tables are measured at fontsize -6,-3,0,3,6 (kerning 0) and fit by
+# least squares; check the "residual" field for any glyph flagged non-linear.
+# Re-run title_calibrate.py / type_calibrate.py after any frame/font change.
 
-_CHAR_W_BASE = 24.444    # px per char at default (fontsize offset 0, kerning 0)
-_CHAR_W_FONT = 0.230     # px per char gained per +1 {fontsize} unit
-_CHAR_W_KERN = 0.4815    # px per char gained per +1 {kerning} unit
+_TITLE_GLYPHS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_glyphs.json")
+_TYPE_GLYPHS_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "type_glyphs.json")
+
+_glyph_table_cache = {}
+
+
+def _load_glyph_table(path):
+    """Load a calibrated glyph table. Returns (glyphs, kern_per_gap, mean).
+
+    glyphs: {char: (base, slope)}; kern_per_gap: px per gap per kerning unit;
+    mean: (mean_base, mean_slope) fallback for chars missing from the table.
+    Missing/unreadable table -> ({}, 0.5, (20.0, 0.05)) with a one-time warning.
+    """
+    if path in _glyph_table_cache:
+        return _glyph_table_cache[path]
+    glyphs = {}
+    kern_per_gap = 0.5
+    try:
+        with open(path) as fh:
+            raw = json.load(fh)
+        for ch, entry in raw.get("glyphs", {}).items():
+            if len(ch) == 1 and isinstance(entry, dict):
+                try:
+                    glyphs[ch] = (float(entry["base"]), float(entry.get("slope", 0.0)))
+                except (KeyError, TypeError, ValueError):
+                    pass
+        kpc = raw.get("kern_per_gap")
+        kern_per_gap = float(kpc) if isinstance(kpc, (int, float)) else kern_per_gap
+    except Exception:
+        print(f"   [glyph-table] WARNING: could not read {os.path.basename(path)}; "
+              f"falling back to generic per-char estimates", file=sys.stderr)
+    if glyphs:
+        mean = (sum(b for b, _ in glyphs.values()) / len(glyphs),
+                sum(s for _, s in glyphs.values()) / len(glyphs))
+    else:
+        mean = (20.0, 0.05)
+    _glyph_table_cache[path] = (glyphs, kern_per_gap, mean)
+    return _glyph_table_cache[path]
+
+
+def estimate_name_width(name, font_offset, kerning):
+    """Estimated rendered width of `name` (canvas px) at the given tags.
+
+    Uses title_glyphs.json (calibrated to the NAME-BAR font by
+    title_calibrate.py): width = sum(base + slope*fs) + kern*kern_per_gap*(n-1).
+    A char missing from the table falls back to the table's mean (base, slope).
+"""
+    if not name:
+        return 0.0
+    glyphs, kpc, (m_base, m_slope) = _load_glyph_table(_TITLE_GLYPHS_FILE)
+    fs = font_offset or 0
+    k = kerning or 0
+    tot = 0.0
+    n = 0
+    for ch in name:
+        n += 1
+        if glyphs and ch in glyphs:
+            b, s = glyphs[ch]
+        else:
+            b, s = m_base, m_slope
+        tot += b + s * fs
+    tot += k * kpc * max(0, n - 1)
+    return tot
 
 _BAR_RIGHT_PX  = 931     # right edge of the rightmost mana symbol (measured)
 _SYMBOL_PX     = 52.4    # horizontal room consumed by one mana symbol
@@ -487,22 +551,27 @@ def count_mana_symbols(mana_cost):
     return len(re.findall(r'\{[^}]+\}', mana_cost))
 
 
-def estimate_name_width(name, font_offset, kerning):
-    """Estimated rendered width of `name` (canvas px) at the given tags.
+def _width_coeff(text, path):
+    """Decompose `text` into width-model coefficients against the glyph table.
 
-    Uses the TITLE-bar per-char law, calibrated to the name-bar font by
-    title_calibrate.py  (width = n * (base + font_off*wf + kern*wk)).
-
-    NOTE: this is deliberately *not* the type_glyphts.json per-glyph table.
-    That table is measured in the (smaller) TYPELINE font, so it would
-    UNDERSHOOT the wider name-bar font and would let a long name overrun the
-    mana cost.  Title and type line are different fonts and use different
-    width models.
+    Returns (base_sum, slope_sum, n) where
+        width(text, fs, k) = base_sum + slope_sum*fs + (n-1)*k*kern_per_gap
+    (kern_per_gap is read by the caller from _load_glyph_table).  A char not in
+    the table uses the table's mean (base, slope).
     """
-    if not name:
-        return 0.0
-    n = len(name)
-    return n * (_CHAR_W_BASE + _CHAR_W_FONT * (font_offset or 0) + _CHAR_W_KERN * (kerning or 0))
+    glyphs, _kpc, (m_base, m_slope) = _load_glyph_table(path)
+    base_sum = 0.0
+    slope_sum = 0.0
+    n = 0
+    for ch in text:
+        n += 1
+        if glyphs and ch in glyphs:
+            b, s = glyphs[ch]
+        else:
+            b, s = m_base, m_slope
+        base_sum += b
+        slope_sum += s
+    return base_sum, slope_sum, n
 
 
 def _title_budget(n_syms, title_left, gap=None):
@@ -559,28 +628,27 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
     # the font size.  Both results are bounded so we never END up larger than
     # the user's input.
     n = max(1, len(name))
+    _glyphs, kpc, _mean = _load_glyph_table(_TITLE_GLYPHS_FILE)
+    base_sum, slope_sum, _n = _width_coeff(name, _TITLE_GLYPHS_FILE)
 
     def fits(font_off, kern):
         return estimate_name_width(name, font_off, kern) <= budget
 
-    # Width is a single linear law in font_offset and kerning:
-    #   width = n * (_CHAR_W_BASE + _CHAR_W_FONT*fs + _CHAR_W_KERN*k)
-    # (matching estimate_name_width exactly, which uses the title-calibrated law).
-    n = max(1, len(name))
-    base     = n * _CHAR_W_BASE
-    a_per_fs = n * _CHAR_W_FONT
-    b_per_kern = n * _CHAR_W_KERN
+    # Width is linear in both tags (per the glyph table law):
+    #   width = base_sum + slope_sum*fs + max(0, n-1)*kpc*k  (matching estimate_name_width)
+    a_per_fs = slope_sum
+    b_per_kern = max(0, n - 1) * kpc
 
     # Largest kerning (clamped to <= the user's value and >= k_min) that fits at
     # the current font size.
     if b_per_kern > 0:
-        ideal_k = (budget - base - a_per_fs * (fs or 0)) / b_per_kern
+        ideal_k = (budget - base_sum - a_per_fs * (fs or 0)) / b_per_kern
         k = max(k_min, min(k, int(ideal_k + 1e-9)))
         k = max(k, k_min)
 
     # If it still overflows at that kerning, drop the font size to fit.
     if not fits(fs, k) and a_per_fs > 0:
-        fs = (budget - base - b_per_kern * k) / a_per_fs
+        fs = (budget - base_sum - b_per_kern * k) / a_per_fs
         fs = max(_FONT_FLOOR, int(round(fs)))
 
     # Post-verify: integer floors can leave a couple of px over budget.
@@ -631,104 +699,25 @@ _TYPE_CLEARANCE = 45    # required gap between the type's last letter and the bo
                         #   (45 px reads as clearly separated; matches title-line's gap)
 
 
-#   (canvas px at fontsize 0, kerning 0), solved by least-squares against MEASURED
-#   rendered widths of real MTG type lines on the Seventh frame.  A constant
-#   per-char cannot fit both wide-letter lines ("Legendary Creature -- Human
-#   Druid") and narrow-letter ("-- Phyrexian Dreadnought"); a per-category model
-#   can.  Cross-check error is within +-7 px on every line used for the fit.
-_TYPE_W_UL = 26.5        # uppercase
-_TYPE_W_LL = 21.5        # lowercase
-_TYPE_W_SPACE = 11.5     # space
-_TYPE_W_DASH = 16.0      # em-dash / hyphen
-_TYPE_W_COMMA = 8.5      # comma
-_TYPE_W_OTHER = 22.0     # digits / other
-# Per-char font-size / kerning scale coefficients (px per char per tag unit).
-# These scale all glyphs together, so a constant is fine -- the base width
-# term (per-glyph or per-category) already carries the letter-shape differences.
-_TYPE_W_FONT = 0.5       # px per char gained per +1 {fontsize} unit
-_TYPE_W_KERN = 0.625     # px per char gained per +1 {kerning} unit
-
-_TYPE_GLYPHS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "type_glyphs.json")
-_type_glyphs_cache = None
-
-
-def _load_type_glyphs():
-    """Load the per-glyph base-width table written by type_calibrate.py.
-
-    Returns a dict mapping a single character -> base advance (px) at
-    fontsize 0 / kerning 0, or {} if the table is absent / unreadable.
-    Result is cached for the process lifetime.
-    """
-    global _type_glyphs_cache
-    if _type_glyphs_cache is not None:
-        return _type_glyphs_cache
-    table = {}
-    try:
-        with open(_TYPE_GLYPHS_FILE) as fh:
-            raw = json.load(fh)
-        for key, val in raw.items():
-            if len(key) == 1 and isinstance(val, (int, float)):
-                try:
-                    table[key] = float(val)
-                except Exception:
-                    pass
-    except Exception:
-        table = {}
-    _type_glyphs_cache = table
-    return table
+#   (canvas px), now solved per-character from type_glyphs.json (written by
+#   type_calibrate.py).  A constant per-char cannot fit both wide-letter lines
+#   ("Legendary Creature -- Human Druid") and narrow-letter ("-- Phyrexian
+#   Dreadnought"); a per-character table can.  See the shared width-table
+#   section above: width = sum(base + slope*fs) + n*k*c* ... (kern uniform).
 
 
 def _estimate_type_width(text, font_offset=None, kerning=None):
     """Estimated rendered width of `text` (canvas px) at the given tags.
 
-    The base width is a per-glyph advance when a calibrated table
-    (type_glyphs.json, produced by type_calibrate.py) is available -- each
-    character is looked up individually, which is what makes a type line's
-    summed width track the renderer closely even when it mixes wide
-    uppercase letters and narrow lowercase ones.  Without the table it falls
-    back to per-character-class widths (upper/lower/space/dash/comma/other).
-
-    font_offset / kerning are folded in as a small per-char adjustment on top
-    of the base (they mostly scale all glyphs together).
-    """
+    Uses type_glyphs.json (calibrated to the TYPELINE font by
+    type_calibrate.py): width = sum(base + slope*fs) + kern*kern_per_gap*(n-1).
+    A char missing from the table falls back to the table's mean (base, slope).
+"""
     if not text:
         return 0.0
-    table = _load_type_glyphs()
-    tot = 0.0
-    n = 0
-    for ch in text:
-        n += 1
-        if table:
-            if ch in table:
-                tot += table[ch]
-            elif ch.isupper():
-                tot += _TYPE_W_UL
-            elif ch.islower():
-                tot += _TYPE_W_LL
-            elif ch == "\u2014" or ch == "-":
-                tot += _TYPE_W_DASH
-            elif ch == " ":
-                tot += _TYPE_W_SPACE
-            elif ch == ",":
-                tot += _TYPE_W_COMMA
-            else:
-                tot += _TYPE_W_OTHER
-        else:
-            if ch.isupper():
-                tot += _TYPE_W_UL
-            elif ch.islower():
-                tot += _TYPE_W_LL
-            elif ch == "\u2014" or ch == "-":
-                tot += _TYPE_W_DASH
-            elif ch == " ":
-                tot += _TYPE_W_SPACE
-            elif ch == ",":
-                tot += _TYPE_W_COMMA
-            else:
-                tot += _TYPE_W_OTHER
-    if n:
-        tot += n * (_TYPE_W_FONT * (font_offset or 0) + _TYPE_W_KERN * (kerning or 0))
-    return tot
+    _glyphs, kpc, _mean = _load_glyph_table(_TYPE_GLYPHS_FILE)
+    base_sum, slope_sum, n = _width_coeff(text, _TYPE_GLYPHS_FILE)
+    return base_sum + slope_sum * (font_offset or 0) + (kerning or 0) * kpc * max(0, n - 1)
 
 
 def estimate_set_symbol_left(set_symbol_x=None, set_symbol_zoom=None, canvas_w=1005):
@@ -806,9 +795,12 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
         return k, fs  # no change needed
 
     n = max(1, len(type_text))
-    base0 = _estimate_type_width(type_text, 0, 0)          # width at fs=0, k=0
-    per_font = n * _TYPE_W_FONT                              # px gained per +1 {fontsize}
-    per_kern = n * _TYPE_W_KERN                              # px gained per +1 {kerning}
+    # width law from the type table: width = base_sum + slope_sum*fs + n*kpc*k
+    _glyphs, kpc, _mean = _load_glyph_table(_TYPE_GLYPHS_FILE)
+    base_sum, slope_sum, n = _width_coeff(type_text, _TYPE_GLYPHS_FILE)
+    base0 = base_sum                                         # width at fs=0, k=0
+    per_font = slope_sum                                     # px gained per +1 {fontsize}
+    per_kern = max(0, n - 1) * kpc                            # px gained per +1 {kerning}
 
     def fits(font_off, kern):
         return _estimate_type_width(type_text, font_off, kern) <= budget
