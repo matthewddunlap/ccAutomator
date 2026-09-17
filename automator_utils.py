@@ -691,10 +691,10 @@ def autofit_title(name, mana_cost, kerning=None, font_size=None, title_left=0,
 _TYPE_ORIGIN = 108      # leftmost px of the type text at {left}=0 (field x=0.1074 -> 107px)
 _TYPE_LEFT_GAIN = 0.5   # {leftN} shifts the type N*0.5 px left (measured: left40 -> ~20px)
 _TYPE_ROW_RIGHT = 905   # right cap when NO set symbol occupies the row (measured very-long-type)
-_SET_SYMBOL_LEFT = 711  # tightest symbol-left edge observed (ons set, zoom=0.241);
-                        #   use as a floor (conservative) so the type never runs under
-                        #   a large symbol; cards with smaller symbols will be
-                        #   over-shrunk slightly but will never overrun
+_SET_SYMBOL_LEFT = 818  # tightest (smallest) real symbol-left edge we measured
+                        #   across ddn/ons/usg/mir/uds/vow (usg); use as a floor
+                        #   (conservative) so the type never runs under a symbol
+                        #   when per-card geometry is unavailable
 _TYPE_CLEARANCE = 45    # required gap between the type's last letter and the boundary
                         #   (45 px reads as clearly separated; matches title-line's gap)
 
@@ -721,17 +721,22 @@ def _estimate_type_width(text, font_offset=None, kerning=None):
 
 
 def estimate_set_symbol_left(set_symbol_x=None, set_symbol_zoom=None, canvas_w=1005):
-    """Estimate the set-symbol's left edge in canvas pixels from the card's own data.
+    """Estimate the set-symbol's left (text-facing) edge in canvas pixels.
 
-    The symbol is right-aligned in its box (x = set_symbol_x, width = set_symbol_zoom).
-    Its left edge = set_symbol_x*canvas_w − (set_symbol_zoom*canvas_w)/2.
+    set_symbol_x is the symbol's text-facing (LEFT) edge as a fraction of
+    canvas width, so  left_edge ≈ set_symbol_x * canvas_w.  (set_symbol_zoom is
+    kept in the signature for callers that pass it, but the left edge does not
+    depend on it.)  Verified live against the rendered card: ddn/ons/usg/mir/
+    uds/vow symbols all matched x*canvas_w within ~7px, while the old
+    "centered" model (x*CW − zoom*CW/2) under-reported the edge by 80-130px and
+    over-shrank the type line.
 
     Returns None if no set-symbol info is available (caller should fall back to
     the _SET_SYMBOL_LEFT constant).
     """
-    if set_symbol_x is None or set_symbol_zoom is None:
+    if set_symbol_x is None:
         return None
-    return int(set_symbol_x * canvas_w - (set_symbol_zoom * canvas_w) / 2)
+    return int(set_symbol_x * canvas_w)
 
 
 def _type_budget(type_left, has_set_symbol, set_symbol_left=None, gap=None):
