@@ -837,6 +837,136 @@ def autofit_type(type_text, kerning=None, font_size=None, type_left=0,
     return k, fs
 
 
+# ==============================================================================
+# Power/Toughness box auto-fit  (CALIBRATION MODEL -- no runtime rendering)
+# ==============================================================================
+#
+# Unlike the name bar / type row (left-aligned, grow until they hit a right
+# wall), the P/T sits in a small FIXED box (bottomInfo text/pt).  CardConjurer
+# SCALE-FITS text that is too wide for the box, so raising {fontsize} does
+# NOTHING once the P/T is wide enough to be squeezed: the rendered size freezes
+# at ~box width.  "3/4" fits the default box, but "12/12" (or "2/1" at a large
+# {fontsize}) is scale-fit and its size freezes no matter what {fontsize} you
+# set.
+#
+# The fix is to WIDEN the box (and shift its x left by exactly the added width
+# so the RIGHT edge stays put -- there is no room to grow right, it is already
+# at the card edge).  The box only needs to be at least as wide (px) as the
+# P/T's NATURAL ink width at the user's {fontsize}/{kerning}; once it is, the
+# scale-fit stops and the user's large {fontsize} is preserved.
+#
+# This mirrors autofit_type()/autofit_title(): calibrate ONCE against the live
+# renderer (pt_calibrate.py -> pt_calib.json), then at card time it is PURE
+# MATH -- read the P/T text, compute its natural width from the glyph law,
+# convert to the box width via the box-law, and set it once.  No magenta, no
+# binary search, no per-card re-render.
+#
+#   pt_calib.json: {
+#     base_box_du, px_per_du, du_offset, kern_per_gap,
+#     glyphs: {ch: {base, slope}}            # width(px) = base + slope*fontsize
+#   }
+#
+_PT_CALIB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pt_calib.json")
+_PT_MARGIN_PX = 12.0   # clearance the box should keep around the P/T ink
+_PT_TABLE_CACHE = {}
+
+
+def _load_pt_calib():
+    """Load pt_calib.json.  Returns a dict on success, None if absent/bad."""
+    if _PT_CALIB_FILE in _PT_TABLE_CACHE:
+        return _PT_TABLE_CACHE[_PT_CALIB_FILE]
+    data = None
+    try:
+        with open(_PT_CALIB_FILE) as fh:
+            data = json.load(fh)
+        if data.get("px_per_du") and data.get("glyphs"):
+            data["_glyphs"] = {ch: (float(e["base"]), float(e.get("slope", 0.0)))
+                               for ch, e in data["glyphs"].items() if len(ch) == 1}
+    except Exception:
+        data = None
+    _PT_TABLE_CACHE[_PT_CALIB_FILE] = data
+    return data
+
+
+def _pt_natural_width(pt_text, fontsize, kerning):
+    """Natural ink width (preview px) of a P/T string at the given tags.
+
+    width = sum over chars (base + slope*fontsize)  +  kerning * kern_per_gap * (n-1).
+    Returns 0.0 when the table is unavailable.  A char missing from the table
+    falls back to the table's mean (base, slope).
+    """
+    cal = _load_pt_calib()
+    if not cal:
+        return 0.0
+    glyphs = cal["_glyphs"]
+    if not glyphs:
+        return 0.0
+    mean_b = sum(b for b, _ in glyphs.values()) / len(glyphs)
+    mean_s = sum(s for _, s in glyphs.values()) / len(glyphs)
+    fs = fontsize or 0
+    total = 0.0
+    n = 0
+    for ch in pt_text:
+        n += 1
+        b, s = glyphs.get(ch, (mean_b, mean_s))
+        total += b + s * fs
+    total += (kerning or 0) * (cal.get("kern_per_gap", 0.0)) * max(0, n - 1)
+    return total
+
+
+def autofit_pt(pt_text, font_size=None, kerning=None, base_box_du=None,
+               margin_px=_PT_MARGIN_PX, min_widen_ratio=1.02):
+    """Compute the P/T box width (DIALOG UNITS) that lets a P/T of natural width
+    render at full {fontsize} (un-scale-fitted), holding the box's RIGHT edge.
+
+    Pure math against pt_calib.json (no rendering).  The box is ONLY ever
+    widened: if the P/T already fits the base box at the requested font size,
+    the base box is returned unchanged (narrow P/Ts like 3/4, 8/8).  A small
+    min_widen_ratio is left in to honor the P/T ink clearance.
+
+    Args:
+        pt_text:      raw P/T, e.g. '12/12', '2/1', '3/4' (tags stripped).
+        font_size:    the {fontsize} tag value (absolute px, may be None/0).
+        kerning:      the {kerning} tag value (may be None/0).
+        base_box_du:  the base P/T box width in dialog units (live value).
+        margin_px:    clearance to keep around the ink (preview px).
+        min_widen_ratio: minimum widen ratio to apply (to cover the margin).
+
+    Returns:
+        (new_box_du, target_px, natural_px, needs_widening)
+        new_box_du is always >= base_box_du; needs_widening is False when the
+        P/T already fits the base box.
+    """
+    cal = _load_pt_calib()
+    base = base_box_du if base_box_du else (cal.get("base_box_du") if cal else 275)
+    base = int(base) if base else 275
+
+    if not pt_text:
+        return base, 0.0, 0.0, False
+    if not cal:
+        print("   [Auto-Fit-PT] no pt_calib.json available; leaving the box as-is.",
+              file=sys.stderr)
+        return base, 0.0, 0.0, False
+
+    natural = _pt_natural_width(pt_text, font_size, kerning)
+    if natural <= 0:
+        return base, 0.0, 0.0, False
+
+    px_per_du = float(cal["px_per_du"])
+    du_offset = float(cal.get("du_offset", 0.0))
+    if px_per_du <= 0:
+        return base, 0.0, natural, False
+
+    base_cap_px = px_per_du * base + du_offset
+    if base_cap_px >= natural + margin_px:
+        # already fits with clearance -- leave the box untouched
+        return base, base_cap_px, natural, False
+
+    need_px = natural + margin_px
+    need_du = max(base, int(math.ceil((need_px - du_offset) / px_per_du)))
+    return need_du, px_per_du * need_du + du_offset, natural, True
+
+
 def autofit_land_symbols(n_small_lines, symbol_max=64, symbol_min=30, symbol_step=12):
     """
     Compute the largest large-symbol point size that can share the fixed

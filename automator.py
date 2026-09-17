@@ -64,6 +64,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                  type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
                  flavor_font=None, rules_down=None, rules_bounds_y=None, rules_bounds_height=None, rules_bounds_x=None, rules_bounds_width=None,
+                  pt_bounds_x=None, pt_bounds_y=None, pt_bounds_width=None, pt_bounds_height=None,
+                  auto_fit_pt=False,
                  hide_reminder_text=False,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
@@ -173,6 +175,11 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.rules_bounds_height = rules_bounds_height
         self.rules_bounds_x = rules_bounds_x
         self.rules_bounds_width = rules_bounds_width
+        self.pt_bounds_x = pt_bounds_x
+        self.pt_bounds_y = pt_bounds_y
+        self.pt_bounds_width = pt_bounds_width
+        self.pt_bounds_height = pt_bounds_height
+        self.auto_fit_pt = auto_fit_pt
         self.hide_reminder_text = hide_reminder_text
 
         self.type_font_size = type_font_size
@@ -740,8 +747,21 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             self._apply_text_mods(
                 "Type", final_type_fs, self.type_shadow, final_type_kerning, self.type_left)
     
+            # --- P/T: apply the user's text tags, then (opt-in) widen the P/T BOX
+            #     so a wide P/T (e.g. 12/12) isn't scale-fitted down to the box at
+            #     a large {fontsize}.  Narrow P/Ts (3/4, 8/8) are left untouched. ---
             self._apply_text_mods(
                  "Power/Toughness", self.pt_font_size, self.pt_shadow, self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left)
+
+            # Manual P/T box deltas (--pt-bounds-*), applied before the auto-fit
+            # so the auto-fit's measurement sees the current box.
+            self.apply_pt_bounds_mods()
+
+            if getattr(self, 'auto_fit_pt', False):
+                try:
+                    self.apply_auto_fit_pt()
+                except Exception as e:
+                    print(f"      Auto-Fit P/T box failed: {e}", file=sys.stderr)
     
             # Extract Scryfall data for frame color logic, rules text, flavor, and symbol
             scryfall_data = print_data.get('scryfall_data', {})

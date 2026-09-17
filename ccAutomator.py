@@ -331,6 +331,43 @@ def main():
     )
 
     parser.add_argument(
+        '--pt-bounds-x',
+        type=int,
+        metavar='NUM',
+        help="Adjust the X of the Power/Toughness box by this amount (delta, as with --rules-bounds-*)."
+    )
+
+    parser.add_argument(
+        '--pt-bounds-y',
+        type=int,
+        metavar='NUM',
+        help="Adjust the Y of the Power/Toughness box by this amount (delta)."
+    )
+
+    parser.add_argument(
+        '--pt-bounds-width',
+        type=int,
+        metavar='NUM',
+        help="Adjust the Width of the Power/Toughness box by this amount (delta)."
+    )
+
+    parser.add_argument(
+        '--pt-bounds-height',
+        type=int,
+        metavar='NUM',
+        help="Adjust the Height of the Power/Toughness box by this amount (delta)."
+    )
+
+    parser.add_argument(
+        '--auto-fit-pt',
+        action='store_true',
+        help="Auto-fit the Power/Toughness box: widen (and shift left, holding the "
+             "right edge) until a WIDE P/T (e.g. 12/12) is no longer scale-fitted "
+             "down to the box, so your {fontsize} is honored.  Narrow P/Ts "
+             "(3/4, 8/8) are left untouched."
+    )
+
+    parser.add_argument(
         '--hide-reminder-text',
         action='store_true',
         help="Check the 'Hide reminder text' checkbox."
@@ -848,6 +885,11 @@ def main():
                 rules_bounds_height=args.rules_bounds_height,
                 rules_bounds_x=args.rules_bounds_x,
                 rules_bounds_width=args.rules_bounds_width,
+                pt_bounds_x=args.pt_bounds_x,
+                pt_bounds_y=args.pt_bounds_y,
+                pt_bounds_width=args.pt_bounds_width,
+                pt_bounds_height=args.pt_bounds_height,
+                auto_fit_pt=args.auto_fit_pt,
                 pt_left=args.pt_left,
                 pt_up=args.pt_up,
                 hide_reminder_text=args.hide_reminder_text,
@@ -1012,6 +1054,11 @@ def main():
             rules_bounds_height=args.rules_bounds_height,
             rules_bounds_x=args.rules_bounds_x,
             rules_bounds_width=args.rules_bounds_width,
+            pt_bounds_x=args.pt_bounds_x,
+            pt_bounds_y=args.pt_bounds_y,
+            pt_bounds_width=args.pt_bounds_width,
+            pt_bounds_height=args.pt_bounds_height,
+            auto_fit_pt=args.auto_fit_pt,
             hide_reminder_text=args.hide_reminder_text,
             set_symbol_source=args.set_symbol_source,
             image_server=args.image_server,

@@ -314,6 +314,170 @@ class TextMixin:
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_rules_text_bounds_mods: {e}", file=sys.stderr)
 
+    def _pt_geo(self):
+        """{w,h,x,y,width,height,text} for the P/T -- canvas px for w/h, the app's
+        normalised [0,1] units for the box -- or None if there is no card P/T box.
+        """
+        return self.driver.execute_script("""
+            var cv = (typeof cardCanvas!=='undefined' && cardCanvas) ? cardCanvas : document.querySelector('canvas');
+            if (!cv || !cv.width) return null;
+            if (typeof card==='undefined' || !card || !card.text || !card.text.pt) return null;
+            var t = card.text.pt;
+            return {w: cv.width, h: cv.height, x: t.x, y: t.y,
+                    width: t.width, height: t.height, text: t.text};
+        """)
+
+    def _open_pt_dialog(self):
+        """Open the P/T 'Edit Bounds' dialog and return its current (w, x) integer
+        values (the dialog's own units)."""
+        d = self.driver
+        d.find_element(By.XPATH, "//h3[text()='Text']").click(); time.sleep(0.2)
+        d.find_element(By.XPATH, "//h4[text()='Power/Toughness']").click(); time.sleep(0.3)
+        d.find_element(By.XPATH, "//button[contains(text(), 'Edit Bounds')]").click()
+        self.wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div#textbox-editor.opened")))
+        gw = int(d.find_element(By.ID, "textbox-editor-width").get_attribute('value') or 0)
+        gx = int(d.find_element(By.ID, "textbox-editor-x").get_attribute('value') or 0)
+        return gw, gx
+
+    def _set_pt_dialog(self, width, x):
+        """Set the P/T box width and x (dialog units) and close the dialog.
+        Assumes the dialog is already open."""
+        d = self.driver
+        def setv(id, val):
+            inp = d.find_element(By.ID, id)
+            inp.clear(); inp.send_keys(str(int(val))); inp.send_keys(Keys.RETURN); time.sleep(0.3)
+        setv("textbox-editor-width", width)
+        setv("textbox-editor-x", x)
+        d.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
+        time.sleep(self.render_delay)
+
+    def _set_pt_box_abs(self, base_gw, base_gx, new_w):
+        """Open the P/T 'Edit Bounds' dialog, set width to `new_w` (dialog units,
+        relative to the ORIGINAL width `base_gw`) and shift x left by exactly the
+        added width so the box's RIGHT edge stays put (no room to grow right -- it
+        is at the card edge), then close it.  Absolute against base_gw, so repeated
+        calls never compound and the right edge is always held."""
+        if base_gw <= 0:
+            return False
+        self._open_pt_dialog()                          # ensure it's open/visible
+        new_w = max(int(new_w), base_gw)                # only ever widen
+        added = new_w - base_gw
+        new_x = base_gx - added                         # hold the right edge
+        if new_x < 0:
+            new_w = base_gw + base_gx; new_x = 0        # cap: never off-card
+        self._set_pt_dialog(new_w, new_x)
+        return True
+
+    def apply_pt_bounds_mods(self):
+        """
+        Modifies the X / Y / Width / Height of the Power/Toughness box by opening
+        the 'Edit Bounds' dialog and adjusting each provided value by the relative
+        delta in self.pt_bounds_x / _y / _width / _height (only the ones provided
+        are touched).  Mirrors apply_rules_text_bounds_mods() exactly.
+
+        The P/T box's right edge is at the card edge, so to WIDEN it pass a
+        positive width AND a negative x of the same size.  --auto-fit-pt (see
+        apply_auto_fit_pt()) does this calculation for you; use the manual deltas to
+        override.
+        """
+        if (self.pt_bounds_x is None and self.pt_bounds_y is None
+                and self.pt_bounds_width is None and self.pt_bounds_height is None):
+            return
+
+        print(f"   Applying P/T bounds modifications (x={self.pt_bounds_x}, "
+              f"y={self.pt_bounds_y}, w={self.pt_bounds_width}, "
+              f"h={self.pt_bounds_height})...")
+        try:
+            self.text_tab.click()
+            field_button_selector = "//h4[text()='Power/Toughness']"
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+            time.sleep(0.4)
+
+            self.wait.until(EC.element_to_be_clickable(
+                (By.XPATH, "//button[contains(text(), 'Edit Bounds')"))).click()
+            self.wait.until(EC.visibility_of_element_located(
+                (By.CSS_SELECTOR, "div#textbox-editor.opened")))
+
+            def bump(id, delta):
+                if delta is None:
+                    return
+                inp = self.driver.find_element(By.ID, id)
+                cur = int(inp.get_attribute('value') or 0)
+                tgt = cur + delta
+                # width grows toward the LEFT (right edge fixed); x follows the
+                # right edge so it shifts left by the same added width.
+                inp.clear(); inp.send_keys(str(tgt)); inp.send_keys(Keys.RETURN)
+                print(f"      P/T {id.split('-')[-1]}: {cur} -> {tgt} (delta {delta})")
+                time.sleep(0.3)
+
+            # Independent deltas (exactly like --rules-bounds-*).  The P/T box's
+            # right edge is at the card edge, so to WIDEN it you typically pass a
+            # positive width AND a negative x of the same size.
+            bump("textbox-editor-x", self.pt_bounds_x)
+            bump("textbox-editor-y", self.pt_bounds_y)
+            bump("textbox-editor-width", self.pt_bounds_width)
+            bump("textbox-editor-height", self.pt_bounds_height)
+
+            self.driver.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
+            time.sleep(self.render_delay)
+        except (TimeoutException, NoSuchElementException) as e:
+            print(f"      While modifying P/T bounds: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"      An unexpected error modifying P/T bounds: {e}", file=sys.stderr)
+
+    def apply_auto_fit_pt(self, margin_px=12.0):
+        """Opt-in P/T box auto-fit: widen the P/T box (holding its right edge)
+        so a WIDE P/T (e.g. 12/12, 50/50) is NOT scale-fitted down at a large
+        {fontsize}.  Narrow P/Ts (3/4, 8/8, 2/1) that already fit the base box
+        are returned untouched.
+
+        PURE MATH -- reads pt_calib.json (calibrated once offline by
+        pt_calibrate.py), reads the card's P/T text + the user's {fontsize}/
+        {kerning} tags, and computes the required dialog-unit width.  Then sets
+        it once.  No magenta, no binary search, no re-render (unlike the earlier
+        pixel-hunt implementation).  Mirrors autofit_type()/autofit_title()
+        which are themselves pure-math against their glyph tables.
+        """
+        from automator_utils import autofit_pt as _af_pt
+
+        # (1) Read the P/T text from the live card (already has the user's
+        #     {fontsize/#shadow/#kerning} tags applied by _apply_text_mods).
+        d = self.driver
+        d.find_element(By.XPATH, "//h3[text()='Text']").click(); time.sleep(0.2)
+        d.find_element(By.XPATH, "//h4[text()='Power/Toughness']").click(); time.sleep(0.3)
+        raw = d.find_element(By.ID, "text-editor").get_attribute("value") or ""
+        import re as _re
+        pt_text = _re.sub(r'\{[^}]+\}', '', raw).strip()
+        if not pt_text:
+            print("   [Auto-Fit-PT] no P/T text on the card; skipping.")
+            return
+
+        # (2) Read the base box (dialog units).
+        base = self._open_pt_dialog()
+        if not base:
+            print("   [Auto-Fit-PT] no P/T 'Edit Bounds' dialog; skipping.")
+            return
+        base_gw, base_gx = base
+
+        # (3) Pure math: how wide (du) must the box be so the P/T renders at
+        #     its natural user-fontsize size?
+        new_du, target_px, natural_px, widen = _af_pt(
+            pt_text,
+            font_size=getattr(self, 'pt_font_size', None),
+            kerning=getattr(self, 'pt_kerning', None),
+            base_box_du=base_gw,
+        )
+
+        if widen:
+            self._set_pt_box_abs(base_gw, base_gx, new_du)
+            print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
+                  f"> base-box {base_gw}du; widening to {new_du}du "
+                  f"(target {target_px:.0f}px, right edge held).")
+        else:
+            print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
+                  f"<= base box {base_gw}du; left alone.")
+
     def apply_hide_reminder_text(self):
         """
         Clicks the 'Hide reminder text' checkbox if the flag is enabled.
