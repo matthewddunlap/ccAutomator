@@ -7,7 +7,7 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [IN PROGRESS — see AGENT_DOING.md]
+### T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [DONE 2026-09-18 → AGENT_DONE.md]
 **Problem:** `scryfall_query_with_fallback` (automator_utils.py:325-434):
 no `timeout=` on the four `requests.get` calls (367/394/410/426); no
 429/Retry-After handling; "Fallback 1" (375-400) strips `not:covered`, which

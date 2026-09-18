@@ -129,3 +129,20 @@ Commit: (this commit).
 **Verify:** `py_compile` clean. End-to-end pending: cc-file mode on
 `long.cardconjurer` → output PNG is 2010×2814 (needs the app/server).
 Commit: (this commit).
+
+## T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [2026-09-18]
+**Change (automator_utils.py):**
+- New `scryfall_search(query)` helper: `requests.get(..., timeout=(10, 60))`
+  (the four inline calls previously had no timeout at all); on 429 → sleep
+  `Retry-After` (default 10s, capped 60s) and retry once; transient network
+  errors retried once then reported; returns the `data` list.
+- Replaced the four inline `requests.get` blocks in
+  `scryfall_query_with_fallback` with the helper.
+- Deleted the old "Fallback 1" (stripped `not:covered`, which
+  `build_scryfall_query` never adds → byte-identical duplicate of Try 1);
+  surviving fallbacks renumbered (log messages now Step 1 / Step 2).
+**Verify:** `py_compile` clean; AST parses; no dangling refs
+(`is_basic_land`/`current_*` only remain inside `build_scryfall_query`);
+`time`/`sys` already imported. Live check pending: Scryfall 429 behavior
+under rate limit.
+Commit: (this commit).
