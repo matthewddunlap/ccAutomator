@@ -5,6 +5,7 @@ import math
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 class TextMixin:
@@ -310,9 +311,18 @@ class TextMixin:
             time.sleep(self.render_delay)
 
         except (TimeoutException, NoSuchElementException) as e:
+            # A failed close (e.g. the button wasn't there) is NOT fatal; the
+            # finally below still guarantees the overlay is dismissed.
             print(f"      An error occurred while modifying rules text bounds: {e}", file=sys.stderr)
+            time.sleep(self.render_delay)
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_rules_text_bounds_mods: {e}", file=sys.stderr)
+        finally:
+            # #textbox-editor.opened is added only by the 'Edit Bounds' click and
+            # removed only by its close button (Card Conjurer's creator.js).  If any
+            # step above threw before the close ran, the overlay would stay open and
+            # intercept the NEXT field's click.  Guarantee it is dismissed.
+            self._close_textbox_editor()
 
     def _pt_geo(self):
         """{w,h,x,y,width,height,text} for the P/T -- canvas px for w/h, the app's
@@ -331,6 +341,11 @@ class TextMixin:
         """Open the P/T 'Edit Bounds' dialog and return its current (w, x) integer
         values (the dialog's own units)."""
         d = self.driver
+        # Defensive: dismiss any #textbox-editor overlay left open by a previous
+        # card / failed step.  The overlay is a full-card layer that intercepts
+        # clicks on the underlying P/T <h4>, so a stale overlay here would make
+        # the field click below raise "element click intercepted".
+        self._close_textbox_editor()
         d.find_element(By.XPATH, "//h3[text()='Text']").click(); time.sleep(0.2)
         d.find_element(By.XPATH, "//h4[text()='Power/Toughness']").click(); time.sleep(0.3)
         d.find_element(By.XPATH, "//button[contains(text(), 'Edit Bounds')]").click()
@@ -348,30 +363,45 @@ class TextMixin:
             inp.clear(); inp.send_keys(str(int(val))); inp.send_keys(Keys.RETURN); time.sleep(0.3)
         setv("textbox-editor-width", width)
         setv("textbox-editor-x", x)
-        d.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
+        self._close_textbox_editor()
         time.sleep(self.render_delay)
 
-    def _close_pt_dialog(self):
-        """Close the P/T 'Edit Bounds' overlay if it is open.  Tolerant: a no-op
-        if the dialog is already closed (or the close control is absent).  Used
-        to make sure the #textbox-editor overlay never stays in its `opened`
-        state -- an open overlay covers the card's 'Save Card' button and
-        intercepts its click."""
+    def _close_textbox_editor(self):
+        """Force-close the '#textbox-editor' 'Edit Bounds' overlay (idempotent).
+
+        The app toggles this overlay purely via a class on <div id='textbox-editor'>:
+        the 'Edit Bounds' button ADDS 'opened' and the close <h2> (h2.textbox-editor-
+        close) does ``parentElement.classList.remove("opened")`` (creator.js:3323 / the
+        h2's inline onclick).  An open overlay is a full-card layer that intercepts
+        clicks on the underlying <h4>/'Save Card' button.  We therefore close by
+        removing the 'opened' class directly via JS (no focus/interception
+        dependency), exactly mirroring the app's own close button, instead of a raw
+        element.click().  Never raises; safe when already closed."""
         try:
-            self.driver.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
+            self.driver.execute_script("""
+                var el = document.querySelector('#textbox-editor');
+                if (el) el.classList.remove('opened');
+            """)
             time.sleep(self.render_delay)
         except Exception:
             pass
 
+    def _close_pt_dialog(self):
+        """Close the P/T 'Edit Bounds' overlay (kept as an alias over the shared
+        JS-based close so an open overlay never remains and intercepts clicks)."""
+        self._close_textbox_editor()
+
     def _set_pt_box_abs(self, base_gw, base_gx, new_w):
-        """Open the P/T 'Edit Bounds' dialog, set width to `new_w` (dialog units,
-        relative to the ORIGINAL width `base_gw`) and shift x left by exactly the
-        added width so the box's RIGHT edge stays put (no room to grow right -- it
-        is at the card edge), then close it.  Absolute against base_gw, so repeated
-        calls never compound and the right edge is always held."""
+        """Set the P/T box width to `new_w` (dialog units) and shift x left by
+        exactly the added width so the box's RIGHT edge stays put (no room to grow
+        right -- it is at the card edge), then close the dialog.  Absolute against
+        base_gw, so repeated calls never compound and the right edge is always held.
+        Assumes the 'Edit Bounds' dialog is ALREADY OPEN -- re-clicking 'Edit
+        Bounds' while open toggles the `opened` class OFF, leaving the overlay
+        up (which then intercepts a later 'Save Card' click), so it must NOT be
+        re-opened here."""
         if base_gw <= 0:
             return False
-        self._open_pt_dialog()                          # ensure it's open/visible
         new_w = max(int(new_w), base_gw)                # only ever widen
         added = new_w - base_gw
         new_x = base_gx - added                         # hold the right edge
@@ -399,6 +429,9 @@ class TextMixin:
         print(f"   Applying P/T bounds modifications (x={self.pt_bounds_x}, "
               f"y={self.pt_bounds_y}, w={self.pt_bounds_width}, "
               f"h={self.pt_bounds_height})...")
+        # Defensive: a prior card may have left the #textbox-editor overlay open
+        # ("Edit Bounds"); an open overlay intercepts the P/T <h4> click below.
+        self._close_textbox_editor()
         try:
             self.text_tab.click()
             field_button_selector = "//h4[text()='Power/Toughness']"
@@ -431,12 +464,15 @@ class TextMixin:
             bump("textbox-editor-width", self.pt_bounds_width)
             bump("textbox-editor-height", self.pt_bounds_height)
 
-            self.driver.find_element(By.CSS_SELECTOR, "h2.textbox-editor-close").click()
-            time.sleep(self.render_delay)
+            self._close_textbox_editor()
         except (TimeoutException, NoSuchElementException) as e:
             print(f"      While modifying P/T bounds: {e}", file=sys.stderr)
         except Exception as e:
             print(f"      An unexpected error modifying P/T bounds: {e}", file=sys.stderr)
+        finally:
+            # A throw above (before the close) would otherwise leave
+            # #textbox-editor.opened, which intercepts the next field's click.
+            self._close_textbox_editor()
 
     def apply_auto_fit_pt(self, margin_px=12.0):
         """Opt-in P/T box auto-fit: widen the P/T box (holding its right edge)
@@ -452,6 +488,13 @@ class TextMixin:
         which are themselves pure-math against their glyph tables.
         """
         from automator_utils import autofit_pt as _af_pt
+
+        # Defensive: a prior card may have left the #textbox-editor ('Edit Bounds')
+        # overlay open (creator.js removes 'opened' ONLY via the close <h2>, so an
+        # open one lingers and is a full-card layer that intercepts the P/T <h4>
+        # click below -- this is exactly the "element click intercepted" on a wide
+        # P/T).  Dismiss it before any interaction.
+        self._close_textbox_editor()
 
         # (1) Read the P/T text from the live card (already has the user's
         #     {fontsize/#shadow/#kerning} tags applied by _apply_text_mods).
