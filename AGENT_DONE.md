@@ -55,4 +55,16 @@ Commit: a867ec1.
 **Verify:** `python -m py_compile` clean; AST scan of
 `_prepare_art_asset` confirms all top-level returns are 4-tuples (the only
 2-tuples are inside the nested `get_dims` helper, which is correct).
+Commit: 27f7c68.
+
+## T4 — C4: naive/aware datetime TypeError  [2026-09-18]
+**Change (automator.py, local-save branch of should_skip_file):**
+`datetime.fromtimestamp(os.path.getmtime(output_path))` →
+`datetime.fromtimestamp(os.path.getmtime(output_path), tz=timezone.utc)`
+(`timezone` was already imported at automator.py:22).
+**Verify:** `python -m py_compile` clean; snippet reproduced the old
+`TypeError: can't compare offset-naive and offset-aware datetimes` with the
+old expression and confirmed the fixed expression compares against
+`parse_time_string`'s aware-UTC values without error. Full end-to-end run
+with `--overwrite-older-than` pending (needs the app/server).
 Commit: (this commit).

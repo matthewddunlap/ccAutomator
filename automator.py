@@ -371,7 +371,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     # print(f"   '{filename}' exists locally, but --overwrite is enabled. Proceeding.")
                     return False
                 elif self.overwrite_older_than_dt or self.overwrite_newer_than_dt:
-                    local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path))
+                    # Must be timezone-aware (UTC) to compare against the
+                    # overwrite_*_dt values, which parse_time_string builds as UTC.
+                    local_mod_time = datetime.fromtimestamp(os.path.getmtime(output_path), tz=timezone.utc)
                     if self.overwrite_older_than_dt and local_mod_time < self.overwrite_older_than_dt:
                         # print(f"   '{filename}' exists locally (modified {local_mod_time}), but is older than --overwrite-older-than. Proceeding.")
                         return False

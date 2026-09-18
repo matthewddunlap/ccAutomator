@@ -7,16 +7,6 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T4 — C4: naive/aware datetime TypeError  [TODO]
-**Problem:** automator.py:374 `datetime.fromtimestamp(os.path.getmtime(...))`
-(naive) compared against aware-UTC `overwrite_*_dt` (parse_time_string,
-automator_utils.py:35-44, returns UTC-aware) → TypeError with
-`--overwrite-older-than`/`--overwrite-newer-than` in local-save mode.
-**Fix:** one line — add `tz=timezone.utc` (`timezone` already imported,
-automator.py:22).
-**Verify:** existing local output + `--overwrite-older-than
-2020-01-01-00-00-00` → clean skip, no TypeError.
-
 ### T5 — C8: requirements  [TODO]
 **Problem:** `requirments.txt` (typo name, tracked) missing `selenium`.
 **Fix:** `git mv requirments.txt requirements.txt`; add `selenium` line
