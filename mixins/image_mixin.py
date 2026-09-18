@@ -15,6 +15,12 @@ from automator_utils import (
     get_image_mime_type_and_extension,
 )
 
+class UploadError(RuntimeError):
+    """Raised when an image (card PNG, art asset, project file) fails to be
+    saved or uploaded. Callers must not count the card as a success when this
+    propagates out of their pipeline."""
+
+
 class ImageMixin:
     def _trim_art_url(self, art_url_to_apply):
         """
@@ -137,9 +143,11 @@ class ImageMixin:
             # This catches specific HTTP errors like 403 Forbidden, 405 Method Not Allowed, 500 Server Error, etc.
             print(f"   Error: Upload failed with status {e.response.status_code}.", file=sys.stderr)
             print(f"   Server Response: {e.response.text}", file=sys.stderr)
+            raise UploadError(f"Upload of '{filename}' failed with status {e.response.status_code}") from e
         except requests.exceptions.RequestException as e:
             # This catches network-level errors (e.g., DNS failure, connection refused).
             print(f"   Error: A network error occurred during upload: {e}", file=sys.stderr)
+            raise UploadError(f"Network error while uploading '{filename}': {e}") from e
 
     def _upload_art_asset(self, image_data, sub_dir, filename):
         """
@@ -165,8 +173,10 @@ class ImageMixin:
         except requests.exceptions.HTTPError as e:
             print(f"   Error: Upload failed with status {e.response.status_code}.", file=sys.stderr)
             print(f"   Server Response: {e.response.text}", file=sys.stderr)
+            raise UploadError(f"Art asset upload failed for '{filename}' with status {e.response.status_code}") from e
         except requests.exceptions.RequestException as e:
             print(f"   Error: A network error occurred during upload: {e}", file=sys.stderr)
+            raise UploadError(f"Network error while uploading art asset '{filename}': {e}") from e
 
     def _save_or_upload_image(self, img_bytes: bytes, sub_dir: str, filename: str):
         """
@@ -191,7 +201,12 @@ class ImageMixin:
                 print(f"   Saved image locally to: {local_file_path}")
             except Exception as e:
                 print(f"   Error: Local save error for '{filename}': {e}", file=sys.stderr)
+                raise UploadError(f"Local save failed for '{filename}': {e}") from e
         else:
+            # No destination configured: callers that need the file persisted
+            # (selenium card/art pipeline) will not reach this branch, and the
+            # json path legitimately falls back to the remote Scryfall URL, so
+            # this stays a warning rather than an error.
             print(f"   Warning: No output destination configured for '{filename}'. Image not saved/uploaded.", file=sys.stderr)
 
     def _fetch_image_bytes(self, url: str, purpose: str = "generic") -> bytes:

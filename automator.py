@@ -42,7 +42,7 @@ from automator_utils import (
 )
 
 # Import Mixins
-from mixins import CanvasMixin, TextMixin, ImageMixin, PrintMixin, CollectorMixin, SymbolMixin
+from mixins import CanvasMixin, TextMixin, ImageMixin, UploadError, PrintMixin, CollectorMixin, SymbolMixin
 
 # Import Scryfall API utilities from the local package
 try:
@@ -1151,9 +1151,12 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     
             else:
                 print("   Error: Download timed out. No .cardconjurer file found.", file=sys.stderr)
-                
+                raise UploadError("Download of saved cards timed out: no .cardconjurer file found")
+
         except Exception as e:
             print(f"   Error downloading saved cards: {e}", file=sys.stderr)
+            # A lost project file must be fatal, not a silent success.
+            raise
 
 
 
@@ -1404,6 +1407,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
         except Exception as e:
             print(f"   Error rendering project file: {e}", file=sys.stderr)
+            # Propagate so the caller's handler counts this as a failure
+            # (a swallowed render failure used to exit 0).
+            raise
 
     def close(self):
         if self.driver:
