@@ -1,16 +1,16 @@
 # AGENT DOING — current work item
 
-## T1 — C5: surface upload failures  [IN PROGRESS 2026-09-18]
+## T3 — C3: `_prepare_art_asset` None-return crash  [IN PROGRESS 2026-09-18]
 
 Steps:
-- [ ] `class UploadError(RuntimeError)` in mixins/image_mixin.py
-- [ ] `_upload_image`: raise UploadError from e in both except branches
-- [ ] `_upload_art_asset`: same
-- [ ] `_save_or_upload_image`: same
-- [ ] automator.py `download_saved_cards` (1155): add `raise` after print
-- [ ] automator.py `render_project_file` (1405): add `raise` after print
+- [ ] image_mixin.py:360 `return None, None` → `return (None, type_line, None, None)`
+- [ ] image_mixin.py:424 `return None` → `return (None, type_line, None, None)`
+- [ ] Fix signature annotation `-> tuple[str, str]` → 4-tuple (with Optional)
+- [ ] Audit land_generator.py:160 + ccAutomator.py:1277 for None-art handling
+      (must not write artSource: null)
 - [ ] `python -m py_compile` on touched files
 - [ ] Move item to AGENT_DONE.md, update AGENT_TODO.md, commit
 
 Notes / partial progress:
-- (empty)
+- automator.py caller (648-657) already guards `if final_art_url:` →
+  "Using default art" — verified safe.

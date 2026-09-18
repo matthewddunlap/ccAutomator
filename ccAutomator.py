@@ -1010,6 +1010,7 @@ def main():
                 
         except Exception as e:
             print(f"\nA critical error occurred during combo mode: {e}", file=sys.stderr)
+            sys.exit(1)
         sys.exit(0)
 
     try:
@@ -1370,6 +1371,11 @@ def main():
         sys.exit(1)
 
     print("\nAutomation complete.")
+
+    # A failing batch must exit non-zero: per-card failures are counted in the
+    # summary above (fatal exceptions already exit 1 in the handler).
+    if error_count:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

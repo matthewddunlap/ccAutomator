@@ -7,36 +7,6 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T1 — C5: surface upload failures  [TODO]
-**Problem:** `_upload_image` (mixins/image_mixin.py:107-142) prints
-HTTP/network errors but never raises; `capture_card` returns normally and
-`results['captured'] += 1` (automator.py:882) counts a card whose PNG never
-reached the server as a success. Same swallow pattern: `_upload_art_asset`
-(image_mixin.py:144-170), `_save_or_upload_image` (171+), and the broad
-excepts in `download_saved_cards` (automator.py:1155-1156) and
-`render_project_file` (automator.py:1405-1406).
-**Fix:**
-- Add `class UploadError(RuntimeError)` in `mixins/image_mixin.py`.
-- `_upload_image`: `raise UploadError(...) from e` after each existing print
-  (HTTPError + RequestException branches). Same for `_upload_art_asset` and
-  `_save_or_upload_image`.
-- `capture_card` path: verified no inner try/except around automator.py:880-882
-  → `UploadError` propagates to per-card handler ccAutomator.py:1155-1169 →
-  counted in `error_count`/`error_list` (no change needed there).
-- `download_saved_cards` (automator.py:1155): add `raise` after the print.
-- `render_project_file` (automator.py:1405): add `raise` after the print.
-**Verify:** upload run where the server rejects the PUT (403/405) → card in
-"Error:" summary, not "Success:"; `python -m py_compile` on touched files.
-
-### T2 — H1: non-zero exit on failure  [TODO]
-**Problem:** failing batch exits 0. Summary at ccAutomator.py:1342-1344 then
-implicit exit 0 even with `error_count > 0`. Combo critical handler exits 0
-(ccAutomator.py:1011-1013).
-**Fix:** compute `exit_code = 1 if error_count else 0` and `sys.exit(exit_code)`
-at the very end of `main()` (after `--no-close` input / "Automation complete.").
-Combo handler: `sys.exit(0)` → `sys.exit(1)`.
-**Verify:** run with one bogus card name → exit code 1; clean run → 0.
-
 ### T3 — C3: `_prepare_art_asset` None-return crash  [TODO]
 **Problem:** failure path returns bare `None` (image_mixin.py:424); all
 callers unpack 4 → TypeError. Callers: automator.py:649,
