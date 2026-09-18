@@ -7,17 +7,6 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T3 — C3: `_prepare_art_asset` None-return crash  [TODO]
-**Problem:** failure path returns bare `None` (image_mixin.py:424); all
-callers unpack 4 → TypeError. Callers: automator.py:649,
-land_generator.py:160, ccAutomator.py:1277.
-**Fix:** image_mixin.py:424 → `return (None, type_line, None, None)`.
-automator.py:648-657 already guards `if final_art_url:` → "Using default
-art" (verified). Fix the annotation to the real 4-tuple. Audit
-land_generator.py:160 and ccAutomator.py:1277 for None-art handling (don't
-write `artSource: null`).
-**Verify:** mocked art-fetch failure → 4-tuple returned, no TypeError.
-
 ### T4 — C4: naive/aware datetime TypeError  [TODO]
 **Problem:** automator.py:374 `datetime.fromtimestamp(os.path.getmtime(...))`
 (naive) compared against aware-UTC `overwrite_*_dt` (parse_time_string,

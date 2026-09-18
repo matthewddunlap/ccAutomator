@@ -1,16 +1,13 @@
 # AGENT DOING — current work item
 
-## T3 — C3: `_prepare_art_asset` None-return crash  [IN PROGRESS 2026-09-18]
+## T4 — C4: naive/aware datetime TypeError  [IN PROGRESS 2026-09-18]
 
 Steps:
-- [ ] image_mixin.py:360 `return None, None` → `return (None, type_line, None, None)`
-- [ ] image_mixin.py:424 `return None` → `return (None, type_line, None, None)`
-- [ ] Fix signature annotation `-> tuple[str, str]` → 4-tuple (with Optional)
-- [ ] Audit land_generator.py:160 + ccAutomator.py:1277 for None-art handling
-      (must not write artSource: null)
-- [ ] `python -m py_compile` on touched files
+- [ ] automator.py:374 `datetime.fromtimestamp(os.path.getmtime(output_path))`
+      → add `tz=timezone.utc` (timezone already imported, automator.py:22)
+- [ ] `python -m py_compile automator.py`
 - [ ] Move item to AGENT_DONE.md, update AGENT_TODO.md, commit
 
 Notes / partial progress:
-- automator.py caller (648-657) already guards `if final_art_url:` →
-  "Using default art" — verified safe.
+- `parse_time_string` (automator_utils.py:35-44) verified to return
+  timezone-aware UTC datetimes, so the fix is only on the local-mtime side.

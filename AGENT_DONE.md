@@ -37,4 +37,22 @@ Commit: 76519cd.
   the success-path `sys.exit(0)` after it.
 **Verify:** `python -m py_compile` clean. Runtime check (bogus card name →
 `echo $?` = 1) pending live run.
+Commit: a867ec1.
+
+## T3 — C3: `_prepare_art_asset` None-return crash  [2026-09-18]
+**Change (mixins/image_mixin.py):**
+- Both failure paths that returned inconsistent values now return the full
+  4-tuple: `return None` (original-art fetch failed) and
+  `return None, None` (no Scryfall art_crop URL) → `return (None,
+  type_line, None, None)`.
+- Signature annotation was `-> tuple[str, str]`; now
+  `-> tuple[Optional[str], Optional[str], Optional[int], Optional[int]]`
+  with a docstring stating the "art is None → use default art" contract.
+- Audit of all callers: automator.py (~649) guards `if final_art_url:`
+  ("Using default art"); land_generator.py:167 falls back to the Scryfall
+  art_crop URL; ccAutomator.py:1280 guards `if final_art_url:`. None of them
+  write `artSource: null` on the None path.
+**Verify:** `python -m py_compile` clean; AST scan of
+`_prepare_art_asset` confirms all top-level returns are 4-tuples (the only
+2-tuples are inside the nested `get_dims` helper, which is correct).
 Commit: (this commit).

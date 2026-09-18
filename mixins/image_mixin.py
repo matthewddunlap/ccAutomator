@@ -2,6 +2,7 @@ import os
 import sys
 import requests
 import io
+from typing import Optional
 from PIL import Image
 from pathlib import Path
 from urllib.parse import urljoin
@@ -343,10 +344,14 @@ class ImageMixin:
             print(f"   Error fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}): {e}", file=sys.stderr)
             return None, None
 
-    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str, scryfall_data: dict = None) -> tuple[str, str]:
+    def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str, scryfall_data: dict = None) -> tuple[Optional[str], Optional[str], Optional[int], Optional[int]]:
         """
         Prepares the art asset for a card, including fetching, upscaling, and saving/uploading.
-        Returns the URL of the final art asset to be used in Card Conjurer.
+        Always returns a 4-tuple:
+            (final_art_url, type_line, width, height)
+        On failure the art fields are None (callers must treat `final_art_url
+        is None` as "no custom art -- use the app's default art"); raising
+        UploadError is reserved for save/upload failures.
         """
         print(f"   Preparing art asset for '{card_name}' ({set_code}/{collector_number})...")
         
@@ -372,7 +377,7 @@ class ImageMixin:
 
         if not art_crop_url:
             print(f"   Warning: Could not get Scryfall art_crop URL for '{card_name}'. Skipping art preparation.", file=sys.stderr)
-            return None, None
+            return (None, type_line, None, None)
 
         final_art_source_url = art_crop_url
         hosted_original_art_url = None
@@ -436,7 +441,7 @@ class ImageMixin:
                         local_original_art_path = str(Path(self.download_dir) / self.art_path.strip('/') / "original" / filename_to_output)
             else:
                 print(f"   Error: Failed to fetch original art from Scryfall for '{card_name}'. Cannot proceed with art preparation.", file=sys.stderr)
-                return None
+                return (None, type_line, None, None)
 
         # 3. Upscale if requested and original bytes are available
         if self.upscale_art and original_art_bytes_for_pipeline and self.ilaria_url:
