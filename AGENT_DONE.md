@@ -107,7 +107,25 @@ Commit: 69389ce.
   selenium + cc-file paths reach the summary, both with `automator`
   defined; json/combo `sys.exit` earlier).
 **Verify:** `py_compile` clean on symbol_mixin.py, automator.py,
-ccAutomator.py (classifier retry pending at write time — confirm before
-commit if not yet run). Live check pending: card from a set lacking a
+ccAutomator.py. Live check pending: card from a set lacking a
 symbol asset → stderr warning + summary line, card still produced.
+Commit: (this commit).
+
+## T7 — H3: full-res capture in `render_project_file`  [2026-09-18]
+**Change (automator.py):**
+- `render_project_file` (per-card loop): replaced the inline preview-canvas
+  capture+save block (`_get_canvas_data_url()` → base64 decode →
+  `_upload_image` / local `open(...,'wb')` — half-res, 1005×1407) with a
+  single `self.capture_card(filename)` call. `capture_card`
+  (automator.py:953) prefers the full-res `cardCanvas` (2010×2814, 3
+  retries), falls back to the preview canvas, blank-checks the frame, and
+  handles upload/local-save; upload failures raise `UploadError` (T1) so a
+  failed card can no longer be counted as captured.
+- Kept the pre-capture canvas-stabilization call and the
+  metadata/filename generation (`set_code`/`collector_number` from
+  `card_metadata_list[i]` with `MTG`/`0` defaults,
+  `_generate_final_filename`).
+- No import churn: `base64` still used elsewhere (automator.py:896/945/999).
+**Verify:** `py_compile` clean. End-to-end pending: cc-file mode on
+`long.cardconjurer` → output PNG is 2010×2814 (needs the app/server).
 Commit: (this commit).

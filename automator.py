@@ -1382,34 +1382,22 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
                 self.current_canvas_hash = canvas_hash
 
-                # Get image data
-                img_data_b64 = self._get_canvas_data_url()
-                if img_data_b64:
-                     # Parse base64
-                    header, encoded = img_data_b64.split(",", 1)
-                    image_data = base64.b64decode(encoded)
+                # Read Collector Info from the loaded JSON data
+                # (We assume the order in valid_options matches the order in the JSON file)
+                set_code = 'MTG'
+                collector_number = '0'
 
-                    # Read Collector Info from the loaded JSON data
-                    # We assume the order in valid_options matches the order in the JSON file (which it should)
-                    set_code = 'MTG'
-                    collector_number = '0'
+                if i < len(card_metadata_list):
+                    meta = card_metadata_list[i]
+                    set_code = meta.get('set_code', 'MTG')
+                    collector_number = meta.get('collector_number', '0')
 
-                    if i < len(card_metadata_list):
-                        meta = card_metadata_list[i]
-                        set_code = meta.get('set_code', 'MTG')
-                        collector_number = meta.get('collector_number', '0')
+                filename = self._generate_final_filename(card_name, set_code, collector_number)
 
-                    filename = self._generate_final_filename(card_name, set_code, collector_number)
-
-                    # Upload/Save
-                    if self.upload_path:
-                        self._upload_image(image_data, filename)
-                    else:
-                        # Save locally
-                        save_path = os.path.join(self.download_dir, filename)
-                        with open(save_path, "wb") as f:
-                            f.write(image_data)
-                        print(f"      Saved to {save_path}")
+                # Full-res capture: capture_card prefers cardCanvas (2010x2814,
+                # 3 retries), falls back to the preview canvas, blank-checks,
+                # and does upload/local-save; upload failures raise UploadError.
+                self.capture_card(filename)
 
         except Exception as e:
             print(f"   Error rendering project file: {e}", file=sys.stderr)

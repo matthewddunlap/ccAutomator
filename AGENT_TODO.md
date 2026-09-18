@@ -7,17 +7,7 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T7 — H3: full-res capture in `render_project_file`  [IN PROGRESS — see AGENT_DOING.md]
-**Problem:** captures half-res preview canvas (`_get_canvas_data_url()`,
-1005×1407) at automator.py:1376-1403 while selenium mode uses full-res
-`cardCanvas` (2010×2814). **User ruling: cardCanvas is the correct source.**
-**Fix:** replace the inline capture+save block with `self.capture_card(filename)`
-(automator.py:947-1013) — already does cardCanvas-preferred (3 retries),
-preview fallback, blank check, upload/local-save. Keep filename/metadata
-generation (1385-1393). Inherits T1 `UploadError` propagation.
-**Verify:** cc-file mode on `long.cardconjurer` → PNG is 2010×2814.
-
-### T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [TODO]
+### T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [IN PROGRESS — see AGENT_DOING.md]
 **Problem:** `scryfall_query_with_fallback` (automator_utils.py:325-434):
 no `timeout=` on the four `requests.get` calls (367/394/410/426); no
 429/Retry-After handling; "Fallback 1" (375-400) strips `not:covered`, which
