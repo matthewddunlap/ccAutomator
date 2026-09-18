@@ -1,5 +1,8 @@
 output/*
 *.txt
+# Keep the dependency list tracked despite the blanket *.txt rule above
+# (decklists and the like stay ignored).
+!requirements.txt
 copy*
 
 # Byte-compiled / optimized / DLL files

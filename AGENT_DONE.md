@@ -67,4 +67,17 @@ Commit: 27f7c68.
 old expression and confirmed the fixed expression compares against
 `parse_time_string`'s aware-UTC values without error. Full end-to-end run
 with `--overwrite-older-than` pending (needs the app/server).
+Commit: 88309f9.
+
+## T5 — C8: requirements  [2026-09-18]
+**Change:**
+- Renamed `requirments.txt` → `requirements.txt`.
+- Added the missing `selenium` dependency (it was imported throughout but
+  absent from the file).
+- Discovery: the file was never tracked — `.gitignore` has a blanket
+  `*.txt` rule (for decklists). Added `!requirements.txt` negation so the
+  dependency list is version-controlled while decklists stay ignored.
+**Verify:** `git check-ignore -v requirements.txt` → matches the negation
+(no longer ignored); `git status` shows it untracked-and-addable; file now
+lists gradio_client, pillow, lxml, requests, selenium.
 Commit: (this commit).

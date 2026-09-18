@@ -7,12 +7,6 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T5 — C8: requirements  [TODO]
-**Problem:** `requirments.txt` (typo name, tracked) missing `selenium`.
-**Fix:** `git mv requirments.txt requirements.txt`; add `selenium` line
-(keep unpinned style).
-**Verify:** file lists gradio_client, pillow, lxml, requests, selenium.
-
 ### T6 — H2: surface set-symbol fetch failures  [TODO]
 **Problem:** `set_set_symbol` (mixins/symbol_mixin.py:57-139) fires async
 `fetchSetSymbol()` then only `time.sleep(render_delay)`; 404 symbol asset →
