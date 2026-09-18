@@ -204,6 +204,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # the latter of which covers every official set and is colorized per
         # the print's Scryfall rarity.  See --set-symbol-source.
         self.set_symbol_source = set_symbol_source or 'cardconjurer'
+        # Cards whose set symbol failed to load (asset 404 / stale / CORS).
+        # Warnings, not errors -- the card is still produced, just without
+        # its symbol.  Reported in the run summary (see ccAutomator.py).
+        self.symbol_failures = 0
         print(f"DEBUG: CardConjurerAutomator initialized with auto_fit_type={self.auto_fit_type}")
 
         self.app_url = url
@@ -1377,26 +1381,26 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 # We use wait_for_change=False because we just want to ensure it's stable before capturing.
                 canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
                 self.current_canvas_hash = canvas_hash
-                
+
                 # Get image data
                 img_data_b64 = self._get_canvas_data_url()
                 if img_data_b64:
                      # Parse base64
                     header, encoded = img_data_b64.split(",", 1)
                     image_data = base64.b64decode(encoded)
-                    
+
                     # Read Collector Info from the loaded JSON data
                     # We assume the order in valid_options matches the order in the JSON file (which it should)
                     set_code = 'MTG'
                     collector_number = '0'
-                    
+
                     if i < len(card_metadata_list):
                         meta = card_metadata_list[i]
                         set_code = meta.get('set_code', 'MTG')
                         collector_number = meta.get('collector_number', '0')
-                    
+
                     filename = self._generate_final_filename(card_name, set_code, collector_number)
-                    
+
                     # Upload/Save
                     if self.upload_path:
                         self._upload_image(image_data, filename)

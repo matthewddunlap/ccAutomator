@@ -1343,6 +1343,10 @@ def main():
             print(f"Success: {success_count}")
             print(f"Skipped: {skipped_count}")
             print(f"Error: {error_count}")
+            symbol_failures = getattr(automator, 'symbol_failures', 0)
+            if symbol_failures:
+                print(f"Symbol failures: {symbol_failures} "
+                      f"(cards produced without their set symbol)")
             
             if error_list:
                 print("\n--- Summary of Errors ---")

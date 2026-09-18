@@ -135,5 +135,80 @@ class SymbolMixin:
             # settle with the new symbol drawn.
             time.sleep(self.render_delay)
 
+            # Verify the asset actually loaded.  fetchSetSymbol() is async,
+            # so a 404'd / stale symbol used to render silently without its
+            # set symbol and still count as success (H2).
+            self._verify_symbol_loaded(set_code_lc, rarity, source)
+
         except Exception as e:
             print(f"      Error setting set symbol: {e}", file=sys.stderr)
+
+    def _verify_symbol_loaded(self, set_code, rarity=None, source=None):
+        """
+        Check that the set symbol actually made it onto the card.
+
+        Two failure modes after fetchSetSymbol():
+          * 'stale'/'none' -- the app's `card.setSymbolSource` doesn't point
+            at THIS card's asset (the fetch failed, or it never ran and the
+            previous card's URL is still there).  For the 'cardconjurer'
+            source we know the exact asset pattern
+            (/img/setSymbols/official/{set}-{c|u|r|m}.svg) so a mismatch is
+            definitive.
+          * 'failed' -- the URL looks right but the asset itself 404s or is
+            blocked by CORS.  We load it in-page with crossOrigin='anonymous'
+            (the same way the app draws it to cardCanvas) so we see the same
+            result the app sees.
+
+        A failure prints a stderr warning and bumps self.symbol_failures
+        (counted in the run summary) but does NOT abort -- the card is still
+        produced, just without its set symbol.
+        """
+        expected = None
+        if (source or '').lower() == 'cardconjurer' and rarity is not None:
+            expected = f"{set_code}-{_rarity_to_value(rarity)}.svg"
+
+        try:
+            result = self.driver.execute_script("""
+                var url = (typeof card !== 'undefined' && card && card.setSymbolSource)
+                          ? card.setSymbolSource : '';
+                var expected = arguments[0] || null;
+                // 1) Does the recorded asset belong to THIS card?
+                if (expected && url.indexOf(expected) === -1) { return 'stale'; }
+                if (!url) { return 'none'; }
+                // 2) Does the recorded asset actually load (CORS-aware)?
+                return new Promise(function (resolve) {
+                    var im = new Image();
+                    im.crossOrigin = 'anonymous';
+                    var done = false;
+                    var finish = function (ok) {
+                        if (!done) { done = true; resolve(ok ? 'ok' : 'failed'); }
+                    };
+                    im.onload = function () { finish(true); };
+                    im.onerror = function () { finish(false); };
+                    im.src = url;
+                    setTimeout(function () {
+                        finish(im.complete && im.naturalWidth > 0);
+                    }, 10000);
+                });
+            """, expected)
+        except Exception as e:
+            print(f"      Could not verify set symbol load: {e}", file=sys.stderr)
+            return  # unverifiable -- don't count against the run
+
+        if result == 'ok':
+            return
+
+        self.symbol_failures += 1
+        if result == 'stale':
+            print(f"      WARNING: set symbol for set '{set_code}' was not applied "
+                  f"(app's recorded symbol doesn't match the expected asset "
+                  f"'{expected}'). The card will render WITHOUT its set symbol.",
+                  file=sys.stderr)
+        elif result == 'none':
+            print(f"      WARNING: no set symbol recorded on the card for set "
+                  f"'{set_code}' (app has no asset for this set/rarity?). "
+                  f"The card will render WITHOUT its set symbol.", file=sys.stderr)
+        else:
+            print(f"      WARNING: set symbol asset for set '{set_code}' failed to "
+                  f"load (404 or blocked by CORS). The card will render WITHOUT "
+                  f"its set symbol.", file=sys.stderr)

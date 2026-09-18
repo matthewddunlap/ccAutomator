@@ -80,4 +80,34 @@ Commit: 88309f9.
 **Verify:** `git check-ignore -v requirements.txt` → matches the negation
 (no longer ignored); `git status` shows it untracked-and-addable; file now
 lists gradio_client, pillow, lxml, requests, selenium.
+Commit: 69389ce.
+
+## T6 — H2: surface set-symbol fetch failures  [2026-09-18]
+**Change:**
+- `mixins/symbol_mixin.py`: new `_verify_symbol_loaded(set_code, rarity,
+  source)`, called at the end of `set_set_symbol` (after the existing
+  fetch + `render_delay` sleep). It checks the app's own record —
+  `card.setSymbolSource` holds the RESOLVED asset URL (confirmed from
+  saved projects, e.g. `.../img/setSymbols/official/ddn-m.svg`):
+  - 'stale' — for the 'cardconjurer' source (default; main call site
+    automator.py:696-699 always passes set+rarity+source) the expected
+    asset is `{set}-{c|u|r|m}.svg`; recorded URL not matching → the fetch
+    never applied to THIS card (previous card's URL still there).
+  - 'none' — no URL recorded at all.
+  - 'failed' — URL looks right but the asset doesn't load: we load it
+    in-page with `crossOrigin='anonymous'` (same way the app draws it to
+    cardCanvas) so we see the same 404/CORS result the app sees.
+  - JS error → "could not verify", NOT counted (unverifiable ≠ failure).
+  Each counted case prints a stderr warning and does
+  `self.symbol_failures += 1`. Card still renders (warning, not error).
+- `automator.py` `__init__`: `self.symbol_failures = 0` (next to
+  `set_symbol_source`).
+- `ccAutomator.py` final summary: `Symbol failures: N (cards produced
+  without their set symbol)` when N > 0 (`getattr`-defensive; only
+  selenium + cc-file paths reach the summary, both with `automator`
+  defined; json/combo `sys.exit` earlier).
+**Verify:** `py_compile` clean on symbol_mixin.py, automator.py,
+ccAutomator.py (classifier retry pending at write time — confirm before
+commit if not yet run). Live check pending: card from a set lacking a
+symbol asset → stderr warning + summary line, card still produced.
 Commit: (this commit).

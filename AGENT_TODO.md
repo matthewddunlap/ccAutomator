@@ -7,21 +7,7 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence)
 
-### T6 — H2: surface set-symbol fetch failures  [TODO]
-**Problem:** `set_set_symbol` (mixins/symbol_mixin.py:57-139) fires async
-`fetchSetSymbol()` then only `time.sleep(render_delay)`; 404 symbol asset →
-card captured without its symbol, reported as success.
-**Fix:**
-- After fetch + sleep (line 136): verify via JS that the symbol `<img>`
-  (src matching /setSymbol/i) has `complete && naturalWidth > 0`; fallback
-  check `card.setSymbolSource` non-empty. Confirm selector against live DOM.
-- On failure: clear stderr warning + `self.symbol_failures += 1` (init `0`
-  in `CardConjurerAutomator.__init__`). Card still renders (warning, not error).
-- Summary (ccAutomator.py:1342-1344): `Symbol failures: N` line when N > 0.
-**Verify:** card from a set lacking a symbol asset → warning + summary line,
-card still produced.
-
-### T7 — H3: full-res capture in `render_project_file`  [TODO]
+### T7 — H3: full-res capture in `render_project_file`  [IN PROGRESS — see AGENT_DOING.md]
 **Problem:** captures half-res preview canvas (`_get_canvas_data_url()`,
 1005×1407) at automator.py:1376-1403 while selenium mode uses full-res
 `cardCanvas` (2010×2814). **User ruling: cardCanvas is the correct source.**
