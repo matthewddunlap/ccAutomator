@@ -109,7 +109,7 @@ Commit: 69389ce.
 **Verify:** `py_compile` clean on symbol_mixin.py, automator.py,
 ccAutomator.py. Live check pending: card from a set lacking a
 symbol asset → stderr warning + summary line, card still produced.
-Commit: (this commit).
+Commit: f0c350e.
 
 ## T7 — H3: full-res capture in `render_project_file`  [2026-09-18]
 **Change (automator.py):**
@@ -128,7 +128,7 @@ Commit: (this commit).
 - No import churn: `base64` still used elsewhere (automator.py:896/945/999).
 **Verify:** `py_compile` clean. End-to-end pending: cc-file mode on
 `long.cardconjurer` → output PNG is 2010×2814 (needs the app/server).
-Commit: (this commit).
+Commit: 53b8141.
 
 ## T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [2026-09-18]
 **Change (automator_utils.py):**
@@ -145,4 +145,4 @@ Commit: (this commit).
 (`is_basic_land`/`current_*` only remain inside `build_scryfall_query`);
 `time`/`sys` already imported. Live check pending: Scryfall 429 behavior
 under rate limit.
-Commit: (this commit).
+Commit: 9d3b101.

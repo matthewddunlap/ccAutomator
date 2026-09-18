@@ -10,7 +10,7 @@ Commits (branch `user-agent`):
 - T5 `69389ce` — C8: requirements filename + missing selenium
 - T6 `f0c350e` — H2: surface set-symbol fetch failures
 - T7 `53b8141` — H3: full-res cardCanvas capture in render_project_file
-- T8 (this commit) — H4: Scryfall timeouts, 429 retry, drop duplicate fallback
+- T8 `9d3b101` — H4: Scryfall timeouts, 429 retry, drop duplicate fallback
 
 ### Pending live verification (needs app/server)
 - [ ] T1+T2: upload-failure run — failed card counts as error, batch exits 1
