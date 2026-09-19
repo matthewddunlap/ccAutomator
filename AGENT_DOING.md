@@ -1,5 +1,10 @@
 # AGENT DOING — current work item
 
+No item in flight.
+
+- T9 (P/T box stateful set/restore, the Karn left-shift bug) was completed
+  2026-09-19 — see `AGENT_DONE.md` (full change + offline/live verification).
+
 ## All ordered fixes T1-T8 complete  [2026-09-18]
 
 Commits (branch `user-agent`):

@@ -158,7 +158,14 @@ class CanvasMixin:
 
             select.select_by_value(frame_value)
             print(f"Successfully set frame by value to '{frame_value}'.")
-            
+
+            # A different frame can have a different default P/T box, so the
+            # cached frame-default geometry (TextMixin._pt_base) and the "box at
+            # home" state are stale: drop them so the next card re-reads the
+            # default.  (No-op when the frame was already set, above.)
+            if hasattr(self, "_reset_pt_box_state"):
+                self._reset_pt_box_state()
+
             if wait:
                 print("Waiting for frame to apply...")
                 self.current_canvas_hash = self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)

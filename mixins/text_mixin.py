@@ -391,23 +391,33 @@ class TextMixin:
         JS-based close so an open overlay never remains and intercepts clicks)."""
         self._close_textbox_editor()
 
-    def _set_pt_box_abs(self, base_gw, base_gx, new_w):
-        """Set the P/T box width to `new_w` (dialog units) and shift x left by
-        exactly the added width so the box's RIGHT edge stays put (no room to grow
-        right -- it is at the card edge), then close the dialog.  Absolute against
-        base_gw, so repeated calls never compound and the right edge is always held.
-        Assumes the 'Edit Bounds' dialog is ALREADY OPEN -- re-clicking 'Edit
-        Bounds' while open toggles the `opened` class OFF, leaving the overlay
-        up (which then intercepts a later 'Save Card' click), so it must NOT be
-        re-opened here."""
-        if base_gw <= 0:
-            return False
-        new_w = max(int(new_w), base_gw)                # only ever widen
-        added = new_w - base_gw
-        new_x = base_gx - added                         # hold the right edge
-        if new_x < 0:
-            new_w = base_gw + base_gx; new_x = 0        # cap: never off-card
-        self._set_pt_dialog(new_w, new_x)
+    def _pt_state_init(self):
+        """Ensure the P/T box state attributes exist (lazy, so bare TextMixin
+        test objects that never ran CardConjurerAutomator.__init__ still work)."""
+        if not hasattr(self, "_pt_base"):
+            self._pt_base = None
+        if not hasattr(self, "_pt_current"):
+            self._pt_current = None
+
+    def _reset_pt_box_state(self):
+        """Drop the cached P/T home geometry and the box state.  Called when the
+        frame changes: a different frame can have a different default P/T box, so
+        the cached values are stale and the next card re-reads them."""
+        self._pt_state_init()
+        self._pt_base = None
+        self._pt_current = None
+
+    def _set_pt_box(self, width, x):
+        """Set the P/T box to (width, x) in dialog units via the 'Edit Bounds'
+        dialog, then record the result in the box state (self._pt_current).
+
+        Opens the dialog itself (fresh; the defensive close inside
+        _open_pt_dialog means a lingering overlay can never intercept the click)
+        and closes it via _set_pt_dialog, so callers leave no overlay behind.
+        Raises on failure -- callers decide how best-effort to be."""
+        self._open_pt_dialog()
+        self._set_pt_dialog(int(width), int(x))
+        self._pt_current = (int(width), int(x))
         return True
 
     def apply_pt_bounds_mods(self):
@@ -421,9 +431,19 @@ class TextMixin:
         positive width AND a negative x of the same size.  --auto-fit-pt (see
         apply_auto_fit_pt()) does this calculation for you; use the manual deltas to
         override.
+
+        NOTE: when --auto-fit-pt is on it OWNS the box width/x.  Its "home"
+        geometry already includes --pt-bounds-width/--pt-bounds-x and is applied
+        (or restored) exactly once whenever a card's geometry changes, so bumping
+        width/x here as well would double-apply (and re-bump on every card).  In
+        that mode only the y/height deltas are applied by this method.
         """
-        if (self.pt_bounds_x is None and self.pt_bounds_y is None
-                and self.pt_bounds_width is None and self.pt_bounds_height is None):
+        auto_fit_on = bool(getattr(self, "auto_fit_pt", False))
+        if auto_fit_on:
+            if self.pt_bounds_y is None and self.pt_bounds_height is None:
+                return
+        elif (self.pt_bounds_x is None and self.pt_bounds_y is None
+              and self.pt_bounds_width is None and self.pt_bounds_height is None):
             return
 
         print(f"   Applying P/T bounds modifications (x={self.pt_bounds_x}, "
@@ -446,6 +466,13 @@ class TextMixin:
 
             def bump(id, delta):
                 if delta is None:
+                    return
+                if auto_fit_on and id in ("textbox-editor-x", "textbox-editor-width"):
+                    # width/x are owned by the stateful auto-fit: its home
+                    # geometry already includes these deltas (applied exactly
+                    # once per state change), so bumping them here would
+                    # double-apply.
+                    print(f"      P/T {id.split('-')[-1]} delta skipped: applied by --auto-fit-pt home geometry.")
                     return
                 inp = self.driver.find_element(By.ID, id)
                 cur = int(inp.get_attribute('value') or 0)
@@ -475,19 +502,41 @@ class TextMixin:
             self._close_textbox_editor()
 
     def apply_auto_fit_pt(self, margin_px=12.0):
-        """Opt-in P/T box auto-fit: widen the P/T box (holding its right edge)
-        so a WIDE P/T (e.g. 12/12, 50/50) is NOT scale-fitted down at a large
-        {fontsize}.  Narrow P/Ts (3/4, 8/8, 2/1) that already fit the base box
-        are returned untouched.
+        """Opt-in P/T box auto-fit -- STATEFUL across the cards of a session.
 
-        PURE MATH -- reads pt_calib.json (calibrated once offline by
-        pt_calibrate.py), reads the card's P/T text + the user's {fontsize}/
-        {kerning} tags, and computes the required dialog-unit width.  Then sets
-        it once.  No magenta, no binary search, no re-render (unlike the earlier
-        pixel-hunt implementation).  Mirrors autofit_type()/autofit_title()
-        which are themselves pure-math against their glyph tables.
+        Widen the P/T box (holding its right edge) so a WIDE P/T (e.g. 12/12,
+        50/50) is NOT scale-fitted down at a large {fontsize}; leave narrow P/Ts
+        (3/4, 8/8, 2/1) in the frame's default box.  PURE MATH against
+        pt_calib.json (calibrated once offline by pt_calibrate.py) -- no magenta,
+        no binary search, no re-render.  Mirrors autofit_type()/autofit_title().
+
+        WHY STATE: CardConjurer CARRIES the P/T box geometry over to
+        subsequently loaded cards -- a box widened for one card (12/12) would
+        otherwise leak onto the next card's narrower P/T (4/4 after 12/12),
+        floating it left of the frame edge.  The box is therefore owned by this
+        state machine for the whole session:
+
+          * _pt_base     -- the frame's DEFAULT box (width, x) in dialog units,
+                            read live ONCE per frame (before anything has
+                            touched the box, so it is the true default) and
+                            cached.  Invalidated on a frame change.
+          * _pt_current  -- the geometry the box was last set to; None means
+                            "at the frame default" (the session starts there).
+
+        Per card the box is moved ONLY when this card's target geometry (home,
+        or a widened box) differs from the current one:
+
+          * narrow card, box at home        -> no dialog at all (fast path)
+          * wide card, box at home          -> one set (widen)
+          * narrow card after a wide card   -> one set (restore to home)
+          * consecutive cards, same target  -> no dialog at all
+
+        so a mixed deck pays at most one dialog round-trip per geometry CHANGE,
+        never one per card.  A set failure is logged with a warning and does NOT
+        fail the card (best effort).
         """
         from automator_utils import autofit_pt as _af_pt
+        self._pt_state_init()
 
         # Defensive: a prior card may have left the #textbox-editor ('Edit Bounds')
         # overlay open (creator.js removes 'opened' ONLY via the close <h2>, so an
@@ -508,36 +557,107 @@ class TextMixin:
             print("   [Auto-Fit-PT] no P/T text on the card; skipping.")
             return
 
-        # (2) Read the base box (dialog units).
-        base = self._open_pt_dialog()
-        if not base:
-            print("   [Auto-Fit-PT] no P/T 'Edit Bounds' dialog; skipping.")
+        # (2) The frame's default box (dialog units), read live ONCE per frame.
+        #     This read happens before anything else has set the box this frame,
+        #     so the values are the true default (a widened box is never cached
+        #     as the default).
+        if self._pt_base is None:
+            try:
+                base = self._open_pt_dialog()
+            except Exception as e:
+                print(f"   [Auto-Fit-PT] could not read the P/T box geometry: {e}; skipping.",
+                      file=sys.stderr)
+                return
+            finally:
+                self._close_pt_dialog()
+            if not base or base[0] <= 0:
+                print("   [Auto-Fit-PT] no P/T box geometry; skipping.", file=sys.stderr)
+                return
+            self._pt_base = (int(base[0]), int(base[1]))
+            print(f"   [Auto-Fit-PT] cached frame-default P/T box: "
+                  f"width={self._pt_base[0]}du x={self._pt_base[1]}du.")
+
+        # (3) HOME = frame default + manual --pt-bounds-width/x (owned by this
+        #     state machine, applied exactly once per state change -- never
+        #     re-bumped per card).
+        home = (self._pt_base[0] + (getattr(self, "pt_bounds_width", None) or 0),
+                self._pt_base[1] + (getattr(self, "pt_bounds_x", None) or 0))
+
+        # (4) Pure math: how wide (du) the box must be so the P/T renders at
+        #     its natural user-fontsize size.
+        new_du, target_px, natural_px, widen = _af_pt(
+            pt_text,
+            font_size=getattr(self, 'pt_font_size', None),
+            kerning=getattr(self, 'pt_kerning', None),
+            base_box_du=home[0],
+            margin_px=margin_px,
+        )
+        target = (new_du, home[1] - (new_du - home[0])) if widen else home  # hold the right edge
+
+        # (5) Move the box ONLY if it is not already exactly where this card
+        #     needs it.  (A never-set box sits at the frame default.)
+        current = self._pt_current if self._pt_current is not None else self._pt_base
+        if current == target:
+            print(f"   [Auto-Fit-PT] '{pt_text}': box already at "
+                  f"{target[0]}du x={target[1]}du; no change.")
             return
-        base_gw, base_gx = base
 
-        # (3) Pure math: how wide (du) must the box be so the P/T renders at
-        #     its natural user-fontsize size, then set (and close) it.
-        #     The finally block guarantees the #textbox-editor overlay is closed
-        #     on EVERY path (widen / no-widen / exception), so a still-open
-        #     editor can never intercept a later 'Save Card' click.
+        if widen:
+            try:
+                self._set_pt_box(target[0], target[1])
+            except Exception as e:
+                # Best effort: a failed set must not fail the card.  The state
+                # is then unknown; the next card re-decides from what it reads.
+                print(f"   [Auto-Fit-PT] WARNING: widening the P/T box to {target[0]}du "
+                      f"failed: {e} -- the card proceeds with the current box.",
+                      file=sys.stderr)
+                self._pt_current = None
+                return
+            print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
+                  f"> home box {home[0]}du; widening to {target[0]}du x={target[1]}du "
+                  f"(right edge held).")
+        else:
+            # A previous wide card left the box widened (CardConjurer carries the
+            # geometry across cards); put it back to home before this card is
+            # saved/captured.  restore_pt_box() is itself best-effort.
+            self.restore_pt_box()
+
+    def restore_pt_box(self):
+        """Best-effort restore of the P/T box to its HOME geometry (the cached
+        frame default plus any --pt-bounds-width/x), using the same
+        'Edit Bounds' dialog path the auto-fit uses (_open_pt_dialog /
+        _set_pt_dialog / _close_textbox_editor).
+
+        No-op (with a log line) when the state tracker already shows the box at
+        home, so repeated cards never pay a dialog round-trip.  A failure is
+        logged with a warning and does NOT fail the card; the state is then
+        assumed to be home.  Returns True if the box is (now believed to be) at
+        home.
+        """
+        self._pt_state_init()
+        if self._pt_current is None and not (
+                getattr(self, "pt_bounds_width", None) or getattr(self, "pt_bounds_x", None)):
+            print("   [Auto-Fit-PT] P/T box already at home; nothing to restore.")
+            return True
+        if self._pt_base is None:
+            print("   [Auto-Fit-PT] WARNING: no cached P/T home geometry; assuming the "
+                  "box is at home.", file=sys.stderr)
+            self._pt_current = None
+            return False
+        home = (self._pt_base[0] + (getattr(self, "pt_bounds_width", None) or 0),
+                self._pt_base[1] + (getattr(self, "pt_bounds_x", None) or 0))
+        was = self._pt_current
         try:
-            new_du, target_px, natural_px, widen = _af_pt(
-                pt_text,
-                font_size=getattr(self, 'pt_font_size', None),
-                kerning=getattr(self, 'pt_kerning', None),
-                base_box_du=base_gw,
-            )
-
-            if widen:
-                self._set_pt_box_abs(base_gw, base_gx, new_du)
-                print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
-                      f"> base-box {base_gw}du; widening to {new_du}du "
-                      f"(target {target_px:.0f}px, right edge held).")
-            else:
-                print(f"   [Auto-Fit-PT] '{pt_text}': natural {natural_px:.0f}px "
-                      f"<= base box {base_gw}du; left alone.")
-        finally:
-            self._close_pt_dialog()
+            self._set_pt_box(home[0], home[1])
+        except Exception as e:
+            print(f"   [Auto-Fit-PT] WARNING: restoring the P/T box to home "
+                  f"({home[0]}du/{home[1]}du) failed: {e} -- assuming home; the card proceeds.",
+                  file=sys.stderr)
+            self._pt_current = None
+            return False
+        print(f"   [Auto-Fit-PT] P/T box restored to home {home[0]}du x={home[1]}du"
+              + (f" (was {was[0]}du x={was[1]}du)." if was else "."))
+        return True
 
     def apply_hide_reminder_text(self):
         """

@@ -146,3 +146,49 @@ Commit: 53b8141.
 `time`/`sys` already imported. Live check pending: Scryfall 429 behavior
 under rate limit.
 Commit: 9d3b101.
+
+## T9 — P/T box: stateful set/restore (Karn left-shift bug)  [2026-09-19]
+**Problem:** CardConjurer carries the P/T box geometry over to subsequently
+loaded cards. The old auto-fit was widen-only (`_set_pt_box_abs`: `new_w =
+max(new_w, base)`, fits → "leave alone"), so Karn (4/4) — loaded after
+Phyrexian Dreadnought (12/12) — inherited Dreadnought's widened 423du box and
+rendered with its P/T floated left of the frame edge (old
+`long.cardconjurer`: Karn x=0.7338/w=0.2104, identical to Dreadnought).
+**Fix (user-mandated design — keep state, move only when needed):**
+- `mixins/text_mixin.py`: `_set_pt_box_abs` replaced with `_pt_state_init` /
+  `_reset_pt_box_state` / `_set_pt_box(width, x)`. `apply_auto_fit_pt` is now a
+  state machine over the whole session: `_pt_base` = the frame-default P/T box
+  (width, x) in dialog units, read live ONCE per frame and cached;
+  `_pt_current` = last set geometry (None = at home). HOME = base + manual
+  `--pt-bounds-width/x`. Per card the box moves ONLY when the target differs
+  from the current: narrow card at home → no dialog (fast path); wide card →
+  one widen (right edge held); narrow card after a wide card → one
+  `restore_pt_box()`. New `restore_pt_box()`: best-effort restore to home via
+  the existing `_open_pt_dialog`/`_set_pt_dialog`/`_close_textbox_editor`
+  path — logged warning on failure, never raises, state then assumed home.
+  `apply_pt_bounds_mods` now defers width/x to the auto-fit when
+  `--auto-fit-pt` is on (prevents double-apply of `--pt-bounds-x/width`) and
+  applies only y/height deltas in that mode.
+- `mixins/canvas_mixin.py` `set_frame`: invalidates the P/T state on an
+  actual frame change (a different frame may have a different default box);
+  no-op when the frame was already set.
+- `automator.py` `__init__`: initializes `_pt_base`/`_pt_current` to None.
+**Verify:**
+- Offline (PASS): stub-driver state-machine test simulating the app's
+  box carry-over — long.txt order yields
+  base/base/base/base/base/(423,1475)/base with only 3 dialog opens (1
+  base-read + 1 widen + 1 restore); consecutive identical wides de-duped; two
+  different wides both set (423du then 428du); manual-delta home applied
+  exactly once; frame change re-reads the base; a failed widen or restore is
+  contained (warning, no exception).
+- Live (PASS): `.venv/bin/python ccAutomator.py @custom.conf --debug
+  --overwrite --save-cc-file decks/long.txt` → Success: 3, Error: 0. Log shows
+  Kamahl 4/3 "box already at 275du x=1623du; no change", Dreadnought 12/12
+  "widening to 423du x=1475du (right edge held)", Karn 4/4 "P/T box restored
+  to home 275du x=1623du (was 423du x=1475du)". Re-dumped
+  `long.cardconjurer`: Karn now x=0.8075/w=0.1368 (base box, matching Kamahl
+  0.8074/0.1367 to rounding; right edge 0.9443 like the others) vs the old
+  buggy 0.7338/0.2104; Dreadnought still 0.7338/0.2104 (widen preserved).
+NOTE: the runtime interpreter is `.venv/bin/python` (has gradio_client);
+system `python3` does not.
+Commit: (this commit).

@@ -180,6 +180,14 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.pt_bounds_width = pt_bounds_width
         self.pt_bounds_height = pt_bounds_height
         self.auto_fit_pt = auto_fit_pt
+        # P/T box state (TextMixin stateful auto-fit): _pt_base = the frame's
+        # default P/T box (width, x) in dialog units, cached from the first card
+        # of a frame; _pt_current = the box's last set geometry, None = "at the
+        # frame default".  Reset by TextMixin._reset_pt_box_state() on a frame
+        # change.  (Also lazily initialized by TextMixin._pt_state_init() for
+        # bare-mixin test objects.)
+        self._pt_base = None
+        self._pt_current = None
         self.hide_reminder_text = hide_reminder_text
 
         self.type_font_size = type_font_size
