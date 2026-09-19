@@ -191,4 +191,4 @@ rendered with its P/T floated left of the frame edge (old
   buggy 0.7338/0.2104; Dreadnought still 0.7338/0.2104 (widen preserved).
 NOTE: the runtime interpreter is `.venv/bin/python` (has gradio_client);
 system `python3` does not.
-Commit: (this commit).
+Commit: 29690da.
