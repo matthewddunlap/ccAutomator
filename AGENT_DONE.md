@@ -192,3 +192,87 @@ rendered with its P/T floated left of the frame edge (old
 NOTE: the runtime interpreter is `.venv/bin/python` (has gradio_client);
 system `python3` does not.
 Commit: 29690da.
+
+## Live verification of T1-T8  [2026-09-19]
+
+All six pending live verifications (AGENT_DOING checklist) completed PASS.
+Environment: app live at `http://mtgproxy:4242/` (custom.conf target),
+chromium + chromedriver present, `.venv/bin/python`. No writes to the shared
+image server were attempted (T1+T2 test deliberately pointed the image server
+at an unreachable `.invalid` host).
+
+**T1 — upload failure surfacing: PASS.**
+- Offline (14/14 checks, mock transport): `_upload_image` 403 →
+  `UploadError`; network error → `UploadError`; 200 → ok.
+  `_upload_art_asset` 500 / network error → `UploadError`.
+  `_save_or_upload_image` local-save failure → `UploadError`; success writes
+  the file; empty bytes → warning (documented non-raising path).
+  `UploadError` is a `RuntimeError` subclass → caught by the per-card
+  `except Exception`.
+- LIVE: selenium run of `Karn, Silver Golem` with `--image-server
+  http://uploadfail.invalid:4242` → `UploadError: Network error while
+  uploading art asset ...` propagated out of the pipeline → card counted as
+  **Error, not captured** (`Success: 0 / Error: 1`).
+
+**T2 — non-zero exit on failure: PASS.**
+- LIVE, two paths: (a) unresolvable card name (`Bloodsoaked Chasm`, does not
+  exist) → `Error: 1` → **exit code 1**; (b) the T1 upload-failure run above
+  → `Error: 1` → **exit code 1**.
+- Successful runs exit 0 (T6/T4/T7 runs above and in T9).
+- Combo-mode critical handler `sys.exit(1)` confirmed by read
+  (ccAutomator.py:1013).
+
+**T4 — `--overwrite-older-than` datetime fix: PASS.**
+- Offline (9/9 checks against the REAL `should_skip_file` +
+  `parse_time_string`, file ages set with `utime`): pre-fix expression
+  reproduced the `TypeError: can't compare offset-naive and offset-aware
+  datetimes`; fixed code: 2h-old file + 1h cutoff → proceed; fresh file + 1h
+  cutoff → skip; `--overwrite` wins; `--overwrite-newer-than` both
+  directions; missing file → never skip. `parse_time_string('2h')` =
+  aware-UTC `now-2h` (cutoff is "how old"; regex accepts m/h only).
+- LIVE: fresh `action-news-crew_tmt_1.png` + `--overwrite-older-than 1h`
+  (no `--overwrite`) → `Skipping ... file exists locally.` → `Skipped: 1`,
+  exit 0 (the pre-fix code would have raised TypeError here); same file aged
+  2h → re-rendered → `Success: 1`, exit 0.
+
+**T6 — set-symbol failure surfacing: PASS.**
+- Probe: on the app server, `img/setSymbols/official/` has sld/ddn/m21
+  symbols but **all tmt symbols 404**.
+- LIVE with `Action News Crew | tmt` (tmt/1 common): stderr `WARNING: set
+  symbol for set 'tmt' was not applied (app's recorded symbol doesn't match
+  the expected asset 'tmt-c.svg')...`; summary line `Symbol failures: 1
+  (cards produced without their set symbol)`; card still produced
+  (`Success: 1`, exit 0); card PNG visually confirmed — type line
+  "Creature — Human Citizen" with NO symbol at the right.
+
+**T7 — full-res capture in render_project_file: PASS.**
+- LIVE cc-file mode on `long.cardconjurer` (Kamahl, Karn, Dreadnought) →
+  3/3 output PNGs exactly **2010x2814** (PIL-verified). Pre-fix this path
+  captured the 1005x1407 preview canvas.
+
+**T8 — Scryfall timeouts / 429 / duplicate fallback: PASS (offline).**
+- 26/26 mock-transport checks: `timeout=(10, 60)` passed on every call;
+  429 → `Retry-After` honored (clamped to 1-60s; garbage value → default
+  10s), exactly one retry then give up (`[]`); transient network error
+  retried once then data returned / one retry then `[]`; 500 → no retry.
+- Fallback orchestration: full-miss chain = exactly 3 DISTINCT queries
+  (full filters → sets stripped keeping paper/layout → broadest), no
+  byte-identical duplicate (old Fallback 1 gone); early stop on first hit.
+- Live 429 under real Scryfall rate-limiting can't be forced on demand;
+  logic verified against a mocked transport.
+
+### Observations (not T1-T8 items; noted for later)
+
+- **cc-file summary counter**: a successful cc-file render prints
+  `Success: 0 / Skipped: 0 / Error: 0` even though all cards were captured
+  (the cc-file branch never increments `success_count`). Cosmetic; exit code
+  is still correct (0 on success, 1 on render failure via re-raise).
+- **Local-save mode art renders black**: with no `--image-server`, custom
+  art is saved to a local path and that *filesystem path* is applied as the
+  card's art URL — the browser can't fetch it, so the art box renders black
+  (seen on the T6 card). Production (`custom.conf`) uses image-server mode
+  where the art is uploaded and referenced by URL; likely fine there, but
+  worth a look if local mode is ever used with custom art.
+
+(Verification campaign: no code changes were needed — all T1-T8 fixes
+already in place behaved correctly.)
