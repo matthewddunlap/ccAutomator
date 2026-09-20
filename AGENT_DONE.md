@@ -276,3 +276,4 @@ at an unreachable `.invalid` host).
 
 (Verification campaign: no code changes were needed — all T1-T8 fixes
 already in place behaved correctly.)
+Commit: ae1c4c7 (notes; verification runs used no new code).
