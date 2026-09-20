@@ -277,3 +277,42 @@ at an unreachable `.invalid` host).
 (Verification campaign: no code changes were needed — all T1-T8 fixes
 already in place behaved correctly.)
 Commit: ae1c4c7 (notes; verification runs used no new code).
+
+## Startup decklist validation (user-requested feature, H6-adjacent)  [2026-09-20]
+**Request:** validate the decklist at startup, before the expensive
+CardConjurer/Selenium phase, so bad names fail fast. NOT limited to the
+Scryfall cache -- use whatever source the run resolves with: local
+Scryfall cache first, then the Scryfall API (mirrors
+`scryfall_query_with_fallback`). `#` lines (category headers / comment-out,
+a user-ruling FEATURE) are already stripped by `parse_card_file` and are
+never validated.
+**Change:**
+- `automator_utils.py`: new `validate_decklist(cards, label=, api_delay=)`
+  (after `scryfall_query_with_fallback`). Per card: (1) local Scryfall
+  cache -- name+set, then name in any set (the run's fallback chain strips
+  set criteria, so a set-miss that still resolves validates fine);
+  (2) Scryfall API with the broadest query the run's fallback ends on --
+  `!"<name>" unique:art not:token` or `... is:token`, token-ness from the
+  `# Tokens` category, same rule as automator.py:456. A card that exists
+  only on the *other* side of the token boundary gets an actionable hint
+  ("exists ONLY as a token -- list it under '# Tokens'") instead of a bare
+  not-found. Dedupes (name, set, is-token); 0.5s between API calls
+  (cache hits are free); returns failure strings (empty = all resolved);
+  prints ✓/✗ per line.
+- `ccAutomator.py`: wired into the selenium/combo block right after
+  `parse_card_file` (before pre-flight check, before any automator
+  construction): validates `cards_to_process` plus the `--prime-file`
+  cards; on any failure prints the list to stderr and `sys.exit(1)`.
+  New `--skip-validation` escape flag (store_true).
+**Verify (2026-09-20, live API, no local cache in test env -- cache path
+failed over to API as designed):**
+- Unit: decklist `Dark Ritual` ✓, `Tundra | 3ED` ✓, real token `Bat` ✓
+  under `# Tokens` (and ✓ in the main section too -- a non-token "Bat"
+  exists on Scryfall), typo `Dark Ritull` ✗ "not found in local cache or
+  on Scryfall", fake card ✗. All assertions passed.
+- CLI: invalid deck → 2-card ✗ report + `Refusing to start...` + **exit
+  1, browser never launched**; valid deck → "all cards resolved." →
+  proceeds to pre-flight → browser; `--skip-validation` on invalid deck →
+  no validation output (grep-verified) → proceeds to pre-flight.
+- `python -m py_compile` clean on both touched files.
+Commit: ff132e4.

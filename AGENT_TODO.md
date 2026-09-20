@@ -35,10 +35,13 @@ Try 1 (stale log line).
   N/A), Type mods ARE needed, full-art lands do NOT get a title. Verify Type
   mods applied + title appropriately absent. Likely mostly intentional.
   (Also the `--upload-path` stub at ccAutomator.py:1312-1314.)
-- **H6-adjacent feature:** validate the decklist against Scryfall at startup
-  (before any rendering) so bad names fail fast. NOTE: `#` comment-out of
-  cards in decklists is an intentional FEATURE (user ruling) — validation
-  must skip `#` lines, not flag them.
+- ~~**H6-adjacent feature:** validate the decklist at startup so bad names
+  fail fast~~ — **DONE 2026-09-20 → AGENT_DONE.md**
+  (`validate_decklist` in automator_utils.py; wired into the
+  selenium/combo startup in ccAutomator.py; `--skip-validation` flag;
+  validates against local Scryfall cache then API, mirroring the run's
+  own resolution; `#` lines are category headers and are already stripped
+  by parse_card_file, per the user ruling that comment-out is a feature).
 - **H7** `apply_set_filters` no-op placeholder (automator_utils.py:223-243),
   imported but never called (ccAutomator.py:12) — dead code.
 - **H8** live-path `_apply_text_mods` tag-duplication on re-run with changed
