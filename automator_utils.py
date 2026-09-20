@@ -425,6 +425,97 @@ def scryfall_query_with_fallback(card_name, section='deck', set_code=None, colle
 
     return None
 
+
+def validate_decklist(cards, label="decklist", api_delay=0.5):
+    """
+    Validate a parsed decklist against the sources a run actually uses --
+    the local Scryfall cache first, then the Scryfall API -- so bad names
+    fail fast, before the expensive CardConjurer/Selenium phase starts.
+
+    `cards` is the list of {'name', 'category', 'set'} dicts produced by
+    parse_card_file (lines starting with '#' are category headers and are
+    already stripped there, so every entry here is a card line).  Each card
+    is checked the same way the run resolves it:
+
+      1. local Scryfall cache (name+set, then name in any set) -- the run
+         prefers the cache for exactly this lookup (scryfall_query_with_fallback),
+      2. the Scryfall API with the broadest query the run's fallback chain
+         ends on, so a card the run would eventually find validates fine.
+
+    A near-miss where the card exists on the *other* side of the token
+    boundary is reported with a hint instead of a bare "not found".
+
+    Returns a list of human-readable failure strings (empty = every card
+    resolved).  Duplicates (same name+set) are checked once; a short delay
+    separates API calls to stay inside Scryfall's rate limits.
+    """
+    from scryfall_cache import ScryfallCache
+
+    failures = []
+    checked = {}          # (name, set) -> (found, note)
+    api_calls_made = 0
+
+    def check_one(name, set_code, is_token):
+        nonlocal api_calls_made
+        cache = ScryfallCache()
+        if set_code and cache.get_card(name, set_code):
+            return True, None
+        # In some set is enough: the run's fallback chain strips set
+        # criteria, so it would find this card too.
+        if cache.get_card(name):
+            return True, None
+
+        if is_token:
+            query = f'!"{name}" unique:art is:token'
+            alt_query = f'!"{name}" unique:art not:token'
+            alt_note = (f"'{name}' exists on Scryfall but NOT as a token -- "
+                        f"list it outside a '# Tokens' category")
+        else:
+            query = f'!"{name}" unique:art not:token'
+            alt_query = f'!"{name}" unique:art is:token'
+            alt_note = (f"'{name}' exists on Scryfall ONLY as a token -- "
+                        f"list it under a '# Tokens' category")
+
+        if api_calls_made:
+            time.sleep(api_delay)  # be polite between API calls (cache hits are free)
+        api_calls_made += 1
+        if scryfall_search(query):
+            return True, None
+        if scryfall_search(alt_query):
+            return False, alt_note
+        return False, None
+
+    print(f"--- Validating {label} ({len(cards)} card(s)) against Scryfall: local cache, then API ---")
+    for card in cards:
+        name = (card.get('name') or '').strip()
+        if not name:
+            continue
+        set_code = (card.get('set') or '').strip() or None
+        # Same token detection the run uses (automator.py): the category
+        # from a '# Tokens' header is lowercased by parse_card_file.
+        is_token = bool(card.get('category') and 'token' in card['category'])
+        # Token-ness is part of the key: a token name listed in the main
+        # deck (validates as not:token) and under '# Tokens' (validates as
+        # is:token) are different checks with different answers.
+        key = (name.lower(), (set_code or '').lower(), is_token)
+        if key not in checked:
+            checked[key] = check_one(name, set_code, is_token)
+
+        found, note = checked[key]
+        suffix = f" (set: {set_code})" if set_code else ''
+        if found:
+            print(f"  ✓ {name}{suffix}")
+        else:
+            detail = f" -- {note}" if note else " -- not found in local cache or on Scryfall"
+            print(f"  ✗ {name}{suffix}", file=sys.stderr)
+            failure_line = f"{name}{suffix}{detail}"
+            if failure_line not in failures:  # decklists may repeat a card
+                failures.append(failure_line)
+
+    if not failures:
+        print(f"   {label}: all cards resolved.")
+    return failures
+
 # ==============================================================================
 # Title Auto-Fit (width model measured from the LIVE renderer)
 # ==============================================================================

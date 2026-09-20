@@ -168,6 +168,11 @@ def main():
         action='store_true',
         help="Run the browser in non-headless mode for debugging purposes."
     )
+    parser.add_argument(
+        '--skip-validation',
+        action='store_true',
+        help="Skip the pre-run decklist validation against Scryfall (local cache, then API)."
+    )
 
     parser.add_argument(
         '--white-border',
@@ -783,6 +788,24 @@ def main():
         else:
             cards_to_process = all_cards
             print(f"Found {len(cards_to_process)} cards to process for capture.")
+
+        # --- DECKLIST VALIDATION (fail fast before the expensive Selenium run) ---
+        # Uses the same sources the run resolves with (local Scryfall cache,
+        # then Scryfall API) so an unresolvable name is caught here instead
+        # of wasting a browser session per bad card.
+        if not args.skip_validation:
+            from automator_utils import validate_decklist
+            all_failures = validate_decklist(cards_to_process, label="decklist")
+            if args.prime_file:
+                prime_cards = parse_card_file(args.prime_file)
+                if prime_cards:
+                    all_failures += validate_decklist(prime_cards, label="prime list")
+            if all_failures:
+                print(f"\n--- Decklist validation FAILED: {len(all_failures)} unresolvable card(s) ---", file=sys.stderr)
+                for failure in all_failures:
+                    print(f"  {failure}", file=sys.stderr)
+                print("Refusing to start the CardConjurer run. Fix the card names above, or pass --skip-validation to proceed anyway.", file=sys.stderr)
+                sys.exit(1)
 
         # --- PRE-FLIGHT CHECK (Early Exit) ---
         if args.card_builder in ['selenium', 'combo'] and not args.overwrite:
