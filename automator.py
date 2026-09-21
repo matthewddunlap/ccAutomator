@@ -418,10 +418,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 # CardConjurer mode priming
                 all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
                 if all_cc_prints:
-                    initial_hash = self.current_canvas_hash
                     dropdown = Select(self.driver.find_element(By.ID, 'import-index'))
                     dropdown.select_by_value(all_cc_prints[0]['index'])
-                    self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
+                    # Stability-only wait: priming just warms the renderer with
+                    # ANY print, so waiting for a CHANGE is both wrong (the
+                    # same card may already be showing -> hash never changes,
+                    # full 20s burn) and racy (the app may have already loaded
+                    # it -> change missed, another 20s burn).  A stale settle
+                    # is harmless here; the per-card waits gate real output.
+                    self.current_canvas_hash = self._wait_for_canvas_stabilization(None, wait_for_change=False)
                 else:
                     print(f"   Error: No prints found for priming card '{card_name}'.", file=sys.stderr)
             return results
@@ -1185,16 +1190,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             all_cc_prints, _ = self._get_and_filter_prints(card_name, is_priming=True, set_code=set_code)
             
             if all_cc_prints:
-                initial_hash = self.current_canvas_hash
                 dropdown_element = self.driver.find_element(By.ID, 'import-index')
                 dropdown = Select(dropdown_element)
                 dropdown.select_by_value(all_cc_prints[0]['index'])
-                
+
                 # Force the change event to ensure the card loads
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", dropdown_element)
-                
-                # Wait for stabilization
-                self.current_canvas_hash = self._wait_for_canvas_stabilization(initial_hash, wait_for_change=True)
+
+                # Wait for the canvas to SETTLE (stability-only).  Waiting
+                # for a CHANGE here was both wrong and racy: the same card
+                # may already be showing (app persists the last card in
+                # browser storage) so the hash never changes -> full 20s
+                # burn; or the app has already loaded the new card so the
+                # change was missed -> another 20s burn.  Priming just needs
+                # the renderer warm with any print, so a stale settle is
+                # harmless -- the per-card waits (art apply, pre-capture)
+                # gate the real output.
+                self.current_canvas_hash = self._wait_for_canvas_stabilization(None, wait_for_change=False)
                 print(f"   Primed with '{card_name}'.")
             else:
                 print(f"   Warning: Could not find priming card '{card_name}' on Scryfall.", file=sys.stderr)
