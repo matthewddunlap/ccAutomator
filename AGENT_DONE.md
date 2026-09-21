@@ -420,3 +420,60 @@ False" counts), A/B #3 (WIN above). Baselines run-to-run variance ~±12s
 `test_apply_text_tags.py` 34/34; `py_compile` clean on all touched files.
 Logs: `$CLAUDE_JOB_DIR/tmp/ab3_base.log`, `ab3_new.log` (job ac1fc71f).
 Commits: 989c7a9 (priming fix), 9d03303 (perf).
+
+## #4 H9 — scryfall_cache false-success + hardcoded paths  [2026-09-21]
+**Problem:** `except (BlockingIOError, IOError)` wrapped the entire
+`update_scryfall_cache` body, and every `requests` exception subclasses
+`IOError` — so ANY network failure (DNS, refused, timeout, 5xx via
+`raise_for_status`) was reported as "Another instance is currently
+updating the cache" and the function returned **True** although nothing
+had been updated (holding the EX lock and re-flocking LOCK_SH on the same
+fd succeeds instantly, so the "waiting" was fiction). Also: hardcoded
+`/data/ccAutomator/` paths (uncaught FileNotFoundError on this dev box,
+where /data doesn't exist — silently absorbed by get_card's except); the
+staleness check accepted ANY existing file as fresh for a week, including
+a zero-byte DB that `sqlite3.connect()` creates; the streaming download
+had no timeout (could hang forever); the conversion held the whole ~500MB
+JSON array in memory plus a second json.dumps'd copy while inserting.
+**Change (scryfall_cache.py rewritten + new test_scryfall_cache.py):**
+- Lock contention is now handled ONLY by `except BlockingIOError` around
+  the `flock(EX|NB)` call — the one case that genuinely means "another
+  instance". After waiting, the result is VERIFIED: True only if a usable
+  cache exists (fresh, when `force`); otherwise honest False + warning.
+- Expected update failures (requests.RequestException, sqlite3.Error,
+  ValueError, OSError) caught in one targeted except → real error printed,
+  False returned. 60s failure cooldown so a dead network does not make
+  every card lookup pay the connect timeout again.
+- `_db_is_usable()` (readonly open, `cards` table, COUNT(*)>0) gates the
+  staleness check and `_get_conn`; on a failed update `_get_conn` raises
+  instead of creating an empty 0-byte DB. `get_card`'s existing
+  `except Exception → None` preserves the API fallback at every call site
+  (ccAutomator.py:812/1154 pre-flight + skip-check,
+  automator_utils.py validate_decklist + scryfall_query_with_fallback —
+  all audited: a failed cache lookup degrades to "assume it needs work",
+  which is the conservative direction).
+- Paths: `DATA_DIR = os.environ.get("CC_AUTOMATOR_DATA_DIR",
+  "/data/ccAutomator")` (production default unchanged); dev-box guard
+  (`_cache_dir_ready`): default dir absent on the machine → no creation,
+  no ~500MB download, immediate False → API fallback; explicit env var =
+  opt-in bootstrap.
+- Download `timeout=(20, 300)`; conversion now streams via
+  `_iter_json_array_elements()` (1MB chunks + `raw_decode`, elements
+  spanning chunk boundaries, unicode, nested) with 1000-row batch inserts;
+  zero-row downloads refused (no "fresh" empty cache).
+**Verify:** `test_scryfall_cache.py` **17/17** (false-success regression;
+cooldown throttling; contention usable→True / none→False /
+stale+force→False; chunk-boundary streaming at 16-byte chunks; truncation
+/ not-array / empty-file errors; 1503-card batch boundary; zero-row
+refusal; fresh-cache short-circuit with a network-call sentinel;
+missing-default-dir guard asserts no dir created + no network; full
+fake-download success with get_card round-trip). `test_apply_text_tags.py`
+34/34 + `test_wait_for_render.py` 8/8 (no regressions); py_compile clean.
+Dev-box smoke: get_card → None in 0.00s, /data NOT created. Live run
+(2026-09-21, `decks/long.txt @custom.conf --debug --overwrite
+--save-cc-file --upload-path /local_art/card_images/h9_new`): **EXIT 0,
+Success 3 / Skipped 0 / Error 0**, 5m12.5s (within the ~±12s run band),
+and `compare_pngs.py ab_new h9_new` → **all 3 cards BYTE-IDENTICAL**
+(7.4–7.8 MB) to the A/B #3 verified set. Log:
+`$CLAUDE_JOB_DIR/tmp/h9_new.log` (job ac1fc71f).
+Commit: da1b06d.

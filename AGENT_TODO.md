@@ -100,9 +100,17 @@ Try 1 (stale log line).
   — **DONE 2026-09-20 → AGENT_DONE.md** (commit 41c31f5; 34/34 unit tests;
   shared `apply_text_tags` helper in automator_utils.py; live + JSON +
   land-generator paths all delegate to it; gate/return/pt_* body fixed).
-- **H9** scryfall_cache.py:90-95 catches all requests errors as IOError →
+- ~~**H9** scryfall_cache.py:90-95 catches all requests errors as IOError →
   false "another instance updated the cache" + returns True; hardcoded
-  `/data/ccAutomator/` paths; whole 500MB JSON loaded into memory.
+  `/data/ccAutomator/` paths; whole 500MB JSON loaded into memory~~
+  — **DONE 2026-09-21 → AGENT_DONE.md** (commit da1b06d): contention-only
+  flock catch + verified-after-wait result, targeted failure except (real
+  error, honest False), `_db_is_usable` gate (kills the zero-byte-DB-
+  fresh-for-a-week landmine), 60s failure cooldown, `CC_AUTOMATOR_DATA_DIR`
+  env override + dev-box no-create guard, download timeout, streaming
+  JSON→SQLite (chunked raw_decode + batched inserts). 17/17 tests, live
+  run EXIT 0 with 3/3 cards, all 3 output PNGs byte-identical to the
+  verified A/B #3 set.
 - ~~**H10** `_update_tag` integer-only regex misses decimal tags
   (cc_file_editor.py:238-253, land_generator.py:336-342) → old tag survives~~
   — **Resolved as a side effect of the H8 fix (2026-09-20):** the shared

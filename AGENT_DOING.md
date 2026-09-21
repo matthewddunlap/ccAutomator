@@ -1,13 +1,105 @@
 # AGENT DOING — current work item
 
 **NEXT SESSION, START HERE (2026-09-21):**
-**#3 perf — state-based waits: DONE** (fix commits **989c7a9** + **9d03303**;
-A/B #3 final: new 4m58.4s vs baseline 5m05.7s, EXIT 0 both, all 3 output
-PNGs byte-identical, tests 8/8 + 34/34). Next: **plan item #4 — H9 residual**
-(scryfall_cache false-success + hardcoded `/data/ccAutomator/` paths).
-H8 is DONE (34/34, commit 41c31f5). Keep the AGENT_ files current; one
-commit per fix + a notes commit recording the hash (trailer:
-`Co-Authored-By: Claude Code <noreply@anthropic.com>`).
+**#4 H9 residual — scryfall_cache: DONE** (fix commit **da1b06d**; 17/17
+unit tests, live run EXIT 0 with 3/3 cards, all 3 output PNGs
+byte-identical to the verified A/B #3 set). Next: **H7** — delete the dead
+no-op `apply_set_filters` (automator_utils.py:223-243, imported but never
+called). Keep the AGENT_ files current; one commit per fix + a notes commit
+recording the hash (trailer: `Co-Authored-By: Claude Code
+<noreply@anthropic.com>`).
+(#3 perf DONE — 989c7a9 + 9d03303; H8 DONE — 41c31f5.)
+
+## #4 H9 — scryfall_cache false-success + hardcoded paths  [DONE 2026-09-21, commit da1b06d]
+
+**Implementation (scryfall_cache.py rewritten + new test_scryfall_cache.py,
+committed da1b06d):**
+
+*Headline bug (fixed):* `except (BlockingIOError, IOError)` wrapped the
+WHOLE update — and `requests.exceptions.*` all subclass `IOError` — so ANY
+network failure (DNS, refused, timeout, 5xx via raise_for_status) was
+reported as "Another instance is currently updating the cache" and the
+function returned **True** although nothing had been updated. Worse, holding
+the EX lock and re-flocking LOCK_SH on the same fd succeeded instantly, so
+the "waiting for another instance" message was pure fiction.
+
+*Fix (scryfall_cache.py):*
+- Lock contention now handled ONLY by `except BlockingIOError` around the
+  `flock(EX|NB)` call itself — the one case that genuinely means "another
+  instance". After waiting (LOCK_SH), the result is VERIFIED: True only if
+  a usable cache exists (and is fresh, when `force`); otherwise honest
+  False + warning.
+- Expected update failures (requests.RequestException, sqlite3.Error,
+  ValueError from the JSON iterator, OSError) are caught in ONE targeted
+  except around the update body → real error printed → False. No more
+  blanket swallow; no false "another instance".
+- **Zero-byte-DB landmine closed:** `_db_is_usable()` (table exists,
+  COUNT(*)>0, readonly open) gates BOTH the staleness check and
+  `_get_conn`; on a failed update `_get_conn` raises instead of letting
+  `sqlite3.connect()` create an empty DB the old code would have treated
+  as "fresh" for a week. `get_card`'s existing `except Exception → None`
+  preserves the API fallback at every call site (verified:
+  ccAutomator.py:812/1154 pre-flight + skip-check, automator_utils.py
+  validate_decklist + scryfall_query_with_fallback).
+- **Failure cooldown:** `_UPDATE_RETRY_COOLDOWN = 60s` — a failed update is
+  not re-attempted (full connect timeout each time) on every card lookup.
+- **Paths no longer hardcoded:** `DATA_DIR = os.environ.get(
+  "CC_AUTOMATOR_DATA_DIR", "/data/ccAutomator")` — production default
+  unchanged. Plus a **dev-box guard** (`_cache_dir_ready`): if the DEFAULT
+  dir does not exist on the machine (true on this dev box — /data is
+  absent), a card lookup must NOT create it or start a ~500MB download;
+  it returns False immediately → API fallback (old code died with an
+  uncaught FileNotFoundError at `lock_path.touch()`; same net result,
+  no traceback, no side effects). Explicit env var = opt-in bootstrap.
+- **Timeout on the streaming download** (`timeout=(20, 300)`) — the old
+  `requests.get(download_uri, stream=True)` had none and could hang
+  forever.
+- **Memory (the "whole 500MB JSON in memory" item):** new
+  `_iter_json_array_elements()` streams the bulk JSON in 1MB chunks via
+  `json.JSONDecoder().raw_decode` (handles elements spanning chunk
+  boundaries, unicode, nested structures); conversion inserts in 1000-row
+  batches. Peak extra memory is now ~one chunk + one card instead of the
+  full cards list PLUS a full json.dumps'd copy. Zero-row downloads are
+  refused (count==0 → False, no install) so a bad payload can't become a
+  "fresh" empty cache.
+- `_db_is_usable` also guards the contention branch and the fresh-cache
+  short-circuit (which still skips the download entirely — unit-tested
+  with a network-call sentinel).
+
+*Verify (so far):*
+- `test_scryfall_cache.py` (repo root, NEW): **17/17 PASS** — iterator
+  (basic / whitespace+unicode+nested / chunk-boundary at 16-byte chunks /
+  empty array / truncated+not-array+empty-file ValueError); `_db_is_usable`
+  (missing / zero-byte / non-DB / empty-table / valid); **H9 regression**
+  (network failure → False, not True; no DB left behind); cooldown
+  throttling; contention ×3 (usable→True, none→False, stale+force→False);
+  full fake-download success (URI pick from 2 entries, round-trip
+  get_card, JSON cleaned, no .tmp left); 1503-card batch boundary;
+  zero-row refusal; fresh-cache short-circuit (no network call);
+  missing-default-dir guard (no dir created, no network).
+- `test_apply_text_tags.py` 34/34, `test_wait_for_render.py` 8/8 (no
+  regressions), py_compile clean.
+- Dev-box smoke: `ScryfallCache().get_card('Kamahl, Fist of Krosa')` →
+  None in 0.00s, **/data NOT created** (old code: uncaught FileNotFoundError
+  inside get_card's silent except).
+- **Live run (2026-09-21):** `decks/long.txt @custom.conf --debug
+  --overwrite --save-cc-file --upload-path /local_art/card_images/h9_new`
+  → **EXIT 0, Success: 3 / Skipped: 0 / Error: 0**, 5m12.5s (within the
+  ~±12-14s run variance of the 4m51-5m12s A/B band), log
+  `$CLAUDE_JOB_DIR/tmp/h9_new.log`.
+- **PNG compare (2026-09-21):** `.venv/bin/python
+  $CLAUDE_JOB_DIR/tmp/compare_pngs.py ab_new h9_new` → **ALL 3 CARDS
+  BYTE-IDENTICAL** (7.4–7.8 MB; the A/B #3 `ab_new` set was itself verified
+  identical to the baseline, so this run's outputs equal the verified
+  outputs end-to-end).
+- **Commits:** fix commit **da1b06d** (scryfall_cache.py +
+  test_scryfall_cache.py, +648/−43); notes commit: this one.
+
+**Verification summary:** 17/17 unit tests (incl. the H9 false-success
+regression, contention ×3, chunk-boundary streaming, cooldown, full
+fake-download success, zero-row refusal, dev-box guard); other suites
+34/34 + 8/8; py_compile clean; dev-box smoke (no /data created, 0.00s
+fallback); live run EXIT 0, 3/3 cards, byte-identical PNGs.
 
 ## #3 PERF — fixed sleeps → state-based waits  [DONE 2026-09-21]
 
@@ -171,11 +263,10 @@ convergence — recommended to keep; user's call.
 
 ## Next up
 
-**#3 perf — DONE** (2026-09-21, commits 989c7a9 + 9d03303; A/B #3 WIN,
-see above). Per the user's ordered plan, next is:
+**#3 perf — DONE** (2026-09-21, commits 989c7a9 + 9d03303; A/B #3 WIN).
+**#4 H9 residual — IN PROGRESS** (implementation + 17/17 tests + live run
+done; PNG compare + commits pending — see "#4 H9" above). After H9:
 
-1. **H9 residual** (plan item #4): scryfall_cache false-success
-   (`except (BlockingIOError, IOError)` swallows request errors → false
-   "another instance updated the cache", returns True) + hardcoded
-   `/data/ccAutomator/` paths + whole ~500MB JSON loaded into memory.
-2. **H7**: delete dead no-op `apply_set_filters`.
+1. **H7**: delete dead no-op `apply_set_filters`.
+2. H10 keep/revert call is still the user's (flagged in TODO/DONE since
+   2026-09-20).
