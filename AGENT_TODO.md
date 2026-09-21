@@ -5,9 +5,49 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 (with outcome + verification). One commit per fix (user instruction,
 2026-09-18).
 
-## Now (ordered — user-specified sequence)
+## Now (ordered — user-specified sequence, 2026-09-20)
 
-### T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [DONE 2026-09-18 → AGENT_DONE.md]
+### 1) H8 — live-path text-mod tag duplication on re-run  [DONE 2026-09-20 → AGENT_DONE.md, commit 41c31f5]
+Tests 34/34 (`test_apply_text_tags.py`); fix + test committed 41c31f5;
+notes committed with this file. (Was briefly blocked on the sandbox-
+classifier outage, see OVERVIEW "Environment".)
+
+### 2) #3 PERF — fixed sleeps → state-based waits  [NEXT]
+**Why:** ~53 `time.sleep` calls in the selenium hot path + `render_delay`
+(default 1.5s, CLI `--render-delay`) — the biggest wall-clock lever. Each
+card pays seconds of blind waiting that usually finished rendering in
+far less.
+**Goal:** replace blind sleeps with waits on OBSERVABLE STATE; never longer
+than necessary, never shorter than the render needs.
+**Existing building block to build on:** `_wait_for_canvas_stabilization`
+(canvas_mixin.py) — polls the rendered canvas hash until it stops changing;
+already used pre-capture (automator.py:1390). That "stable-for-N-reads"
+property is exactly the safety net a render-completion wait needs.
+**Approach (selenium path first — user's focus):**
+- Inventory: grep `time.sleep` + `render_delay` across automator.py and
+  mixins/; classify each: (a) after a DOM write that re-renders the canvas
+  (text edits, P/T box, art, symbol) → replace with canvas-stable wait with
+  a max timeout; (b) waiting for an element/field to populate (0.2-0.5s
+  after click/scroll) → replace with WebDriverWait on the specific state
+  (element visible / value non-empty / expected value); (c) retry backoff
+  (1s between attempts) → keep, it's deliberate pacing.
+- `render_delay` stays as the CAP (max wait), not the floor:
+  `poll until state stable (or change detected), timeout=render_delay`.
+- Do NOT touch: pre-flight, Scryfall 429 sleep (Retry-After), validation
+  `api_delay` — those are rate/network pacing, not render waits.
+**Risks:** a state-wait can be satisfied by a STALE frame if the app hasn't
+started re-rendering yet → mitigate by requiring the hash to be stable for
+N consecutive reads AFTER the write (the existing stabilizer already does
+this), or by waiting for the hash to CHANGE-then-STABILIZE where the app is
+known to repaint synchronously.
+**Verify:** A/B the same deck (`decks/long.txt` + `@custom.conf --save-cc-file`
+or an equivalent real run) pre/post: per-card wall time and total; output
+PNGs must be byte-identical or visually identical (PIL compare); logs must
+show the waits resolving (timeouts are a FAILURE, print them).
+**Deliverable:** one commit (or a small set) + AGENT notes; record the
+measured speedup.
+
+### (history) T8 — H4: Scryfall timeouts / 429 / duplicate fallback  [DONE 2026-09-18 → AGENT_DONE.md]
 **Problem:** `scryfall_query_with_fallback` (automator_utils.py:325-434):
 no `timeout=` on the four `requests.get` calls (367/394/410/426); no
 429/Retry-After handling; "Fallback 1" (375-400) strips `not:covered`, which
@@ -44,14 +84,23 @@ Try 1 (stale log line).
   by parse_card_file, per the user ruling that comment-out is a feature).
 - **H7** `apply_set_filters` no-op placeholder (automator_utils.py:223-243),
   imported but never called (ccAutomator.py:12) — dead code.
-- **H8** live-path `_apply_text_mods` tag-duplication on re-run with changed
-  values (mixins/text_mixin.py:54-141) vs JSON path replacing correctly;
-  `_process_all_text_modifications` docstring/return/gate inconsistencies.
+- ~~**H8** live-path `_apply_text_mods` tag-duplication on re-run with
+  changed values (mixins/text_mixin.py) vs JSON path replacing correctly;
+  `_process_all_text_modifications` docstring/return/gate inconsistencies~~
+  — **DONE 2026-09-20 → AGENT_DONE.md** (commit 41c31f5; 34/34 unit tests;
+  shared `apply_text_tags` helper in automator_utils.py; live + JSON +
+  land-generator paths all delegate to it; gate/return/pt_* body fixed).
 - **H9** scryfall_cache.py:90-95 catches all requests errors as IOError →
   false "another instance updated the cache" + returns True; hardcoded
   `/data/ccAutomator/` paths; whole 500MB JSON loaded into memory.
-- **H10** `_update_tag` integer-only regex misses decimal tags
-  (cc_file_editor.py:238-253, land_generator.py:336-342) → old tag survives.
+- ~~**H10** `_update_tag` integer-only regex misses decimal tags
+  (cc_file_editor.py:238-253, land_generator.py:336-342) → old tag survives~~
+  — **Resolved as a side effect of the H8 fix (2026-09-20):** the shared
+  `apply_text_tags` helper (which both `_update_tag` copies now delegate to)
+  uses a decimal-aware anchored pattern `\{fontsize-?\d+(?:\.\d+)?\}`.
+  **Flagged for the user:** this was not in the H8 scope the user approved —
+  keep it (recommended: same helper, one code path) or call it out for a
+  separate review.
 - **H11** json mode: colorless non-land → artifact frame
   (seventh_generator.py:238-239); `sys.modules['gradio_client'] = MagicMock()`
   hack (:6-7); `upscale_art = True` hardcoded.

@@ -10,7 +10,50 @@ code-review → fix campaign on this repo. Read this file first, then:
 **Conventions:** when you start an item, move it to DOING; when finished (or
 abandoned with reason), move it to DONE and record the outcome. Keep all four
 files current — they are the handoff if a context window overflows. Do not
-delete items from DONE.
+delete items from DONE. One commit per fix, then a notes commit recording the
+hash (user instruction, 2026-09-18). Commit trailer:
+`Co-Authored-By: Claude Code <noreply@anthropic.com>`.
+
+---
+
+## Current status (2026-09-20) — read this first
+
+Ordered plan (user-specified, 2026-09-20):
+
+1. **Startup decklist validation** — **DONE** (commit ff132e4; see DONE).
+2. **H8** live-path text-mod tag duplication on re-run — **DONE 2026-09-20**
+   (commit 41c31f5, tests 34/34; see DONE).
+3. **Perf — fixed sleeps → state-based waits** — **NEXT** (user: "immediately
+   proceed" after H8). Scope + approach: `AGENT_TODO.md` "Now" section.
+4. **H9 residual** — scryfall_cache false-success + hardcoded paths — later.
+
+Everything else in the baseline review below is unchanged in status (see
+`AGENT_TODO.md` "Later review" for the current per-item state).
+
+## Environment / how to run (this box)
+
+- **Interpreter:** `.venv/bin/python` (has gradio_client + selenium). System
+  `python3` does NOT — always use the venv.
+- **No `/data/ccAutomator/` here** — the Scryfall cache (`scryfall_cache.py`)
+  fails fast and code falls back to the Scryfall API; network to Scryfall
+  WORKS. Token detection uses the `# Tokens` category + `is:token` queries
+  (automator.py:456).
+- **App/browser:** the CardConjurer app has been reachable at
+  `http://mtgproxy:4242/` (custom.conf target) with chromium + chromedriver;
+  other times there is no browser and WebDriver init crashes — that is
+  ENVIRONMENTAL, not a regression.
+- **Sandbox safety classifier** (model `qwen3.8:27b`) is intermittently
+  unavailable for 30+ min at a time ("temporarily unavailable (timed out)").
+  While it is down, ALL action tools fail (Bash, Monitor, Agent, CronCreate);
+  Read/Write/Edit still work. Retry periodically; the user can also run
+  `! <command>` in the prompt, which bypasses it.
+- **Test assets:** `test_apply_text_tags.py` (repo root, pure functions —
+  H8 helper; run with `.venv/bin/python`). Decklists for live runs:
+  `decks/long.txt`, `custom.conf` (@-config), project dumps
+  `long.cardconjurer` / `dual-land.cardconjurer`.
+- **User rulings:** only `selenium` mode matters now; `#`-comment-out of
+  decklist cards is a FEATURE (never flag it); production uses image-server
+  mode (`--upload-path`); capture must be full-res `cardCanvas` 2010×2814.
 
 ---
 

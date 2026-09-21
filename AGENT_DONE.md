@@ -316,3 +316,63 @@ failed over to API as designed):**
   no validation output (grep-verified) → proceeds to pre-flight.
 - `python -m py_compile` clean on both touched files.
 Commit: ff132e4.
+
+## H8 — live-path text-mod tag duplication on re-run  [2026-09-20]
+**Problem (per AGENT_TODO H8):** the live Selenium path
+(`_apply_text_mods`, mixins/text_mixin.py) guarded tag application with
+`if prefix in current_text: return` — a re-run with CHANGED values either
+skipped the field (stale tag survived) or prepended a full second tag set
+(silent wrong output); the guard also false-positived on substrings
+(`{fontsize1}` "found" inside `{fontsize10}`). `_apply_flavor_font_mod`
+stacked a new `{fontsize}` right after `{flavor}` on every run. The JSON
+path (`cc_file_editor._update_tag`) and the land-generator's copy of the
+same closure did replace-in-place, but with an integer-only regex (H10).
+Related: `_process_all_text_modifications` (render_project_file path — the
+re-run-over-saved-cards case) had a docstring claiming a `True` return the
+function never had (no return statement), its "has mods" gate listed `pt_*`
+args the body never applied, and was missing `pt_left` from that gate.
+**Fix (single source of truth):**
+- `automator_utils.py`: new pure `apply_text_tags(text, fontsize=None,
+  shadow=None, kerning=None, left=None, up=None, down=None, bold=False)` —
+  per tag kind: existing tag (anchored, decimal/negative-aware pattern
+  `\{kind-?\d+(?:\.\d+)?\}`, so `{fontsize64pt}` and `{fontsize10}` are
+  never mis-matched) is UPDATED in place; missing tag prepended; duplicated
+  stale tags converge to one at the first's position (repairs text already
+  corrupted by the old bug); `{bold}` wrap idempotent and existing bold
+  never stripped; unchanged input → equal string returned so callers skip
+  the DOM write. Docstring documents all of it.
+- `mixins/text_mixin.py`: `_apply_text_mods` core replaced with the helper
+  + `new_text == current_text` no-op check (no redundant write/re-render);
+  `_apply_flavor_font_mod` applies the flavor fontsize to the part after
+  `{flavor}` via the helper (no more stacking); `_process_all_text_modifications`
+  now: honest docstring, `return False` early / `return any_text_mod_made`
+  at end, gate includes `pt_left`, and the body actually applies the P/T
+  text mods (mirrors the live per-card path, automator.py:767).
+- `cc_file_editor.py`: `_update_tag` delegates to the helper (one-line).
+- `land_generator.py`: its nested `_update_tag` copy delegates too; the
+  same flavor-stacking bug in its rules block fixed to the same REPLACE
+  semantics; now-dead `import re` removed; `apply_text_tags` imported.
+  All three tag-applying paths (live Selenium, JSON edit, land generator)
+  are now the same code.
+**Verify (2026-09-20):**
+- `python -m py_compile` clean on automator_utils.py, mixins/text_mixin.py,
+  cc_file_editor.py, land_generator.py, ccAutomator.py.
+- Unit tests (`test_apply_text_tags.py`, repo root; `apply_text_tags` +
+  `CcFileEditor._update_tag` delegation + a full `apply_edits`
+  run1/run2-same/run3-changed scenario): prepend; REPLACE-in-place (the H8
+  changed-values scenario, single and multi-tag); duplicate convergence
+  (front/mid/triple); decimal + negative values; `{fontsize64pt}` untouched;
+  `{fontsize1}` vs `{fontsize10}` no false-positive; bold idempotent + never
+  stripped; unchanged → equal (no-op guard); flavor first-run / re-run /
+  changed-run; all six delegation kwarg names.
+  **34/34 passed** (`.venv/bin/python test_apply_text_tags.py`, 2026-09-20;
+  one test expectation initially assumed the wrong prepend accumulation
+  order — the CODE was correct, the expectation fixed to match the old
+  prepend semantics).
+- Live re-run verification (same card, changed `--title-font-size`, saved
+  `.cardconjurer` re-rendered) still pending — needs the app/browser.
+**Scope note (flagged for user):** the helper's decimal-aware regex also
+resolves deferred **H10** (integer-only `_update_tag` regex) as a side
+effect of converging on one shared helper — recommended to keep (one code
+path); noted in AGENT_TODO.
+Commit: 41c31f5.
