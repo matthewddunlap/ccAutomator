@@ -34,11 +34,18 @@ class TextMixin:
 
             # Only proceed if the {flavor} tag exists
             if '{flavor}' in current_text:
-                font_tag = f"{{fontsize{self.flavor_font}}}"
-                # Replace the first occurrence of {flavor} with itself plus the new tag
-                new_text = current_text.replace('{flavor}', f'{{flavor}}{font_tag}', 1)
+                # Apply the flavor fontsize with REPLACE semantics to the part
+                # after {flavor}: a re-run overwrites the previously injected
+                # {fontsize} instead of stacking a second one after {flavor}
+                # (the old str.replace did that on every run).
+                from automator_utils import apply_text_tags
+                pre, flavor_part = current_text.split('{flavor}', 1)
+                new_text = f"{pre}{{flavor}}{apply_text_tags(flavor_part, fontsize=self.flavor_font)}"
 
-                self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+                if new_text == current_text:
+                    print("      {flavor} already has the requested font size. Skipping.")
+                else:
+                    self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
                 self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
                 # self.driver.execute_script("textEdited()")
@@ -54,7 +61,17 @@ class TextMixin:
     def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None, down=None):
         """
         Generic method to apply modifications to a specific text field (e.g., Title, Type).
+
+        Tags are applied with REPLACE semantics (shared apply_text_tags helper):
+        an existing {fontsize}/{shadow}/... tag of the same kind is updated in
+        place, a missing one is prepended, and duplicated stale tags converge
+        to one.  So a re-run with CHANGED values overwrites the old tags
+        instead of skipping (stale value survives) or prepending a second tag
+        set (silent wrong output), and a re-run with the SAME values is a
+        no-op that leaves the field untouched.
         """
+        from automator_utils import apply_text_tags
+
         # If no modifications are specified for this field, do nothing.
         if all(arg is None for arg in [font_size, shadow, kerning, left, up, down]) and not bold:
             return
@@ -90,27 +107,26 @@ class TextMixin:
                 current_text = text_input.get_attribute('value')
                 # print(f"      [Debug] Current text: '{current_text}'")
 
-                # Build the prefix tags
-                tags = []
-                if font_size is not None: tags.append(f"{{fontsize{font_size}}}")
-                if shadow is not None: tags.append(f"{{shadow{shadow}}}")
-                if kerning is not None: tags.append(f"{{kerning{kerning}}}")
-                if left is not None: tags.append(f"{{left{left}}}")
-                if up is not None: tags.append(f"{{up{up}}}")
-                if down is not None: tags.append(f"{{down{down}}}")
-                if bold: tags.append("{bold}")
-                
-                prefix = "".join(tags)
-                suffix = "{/bold}" if bold else ""
-
                 if current_text and current_text.strip():
-                    # Check if already applied to avoid double application on retry
-                    if prefix in current_text:
-                         print(f"      '{field_name}' already has modifications. Skipping.")
-                         return
+                    # Apply with REPLACE semantics (see apply_text_tags): an
+                    # existing tag of the same kind is updated in place, a
+                    # missing one is prepended, duplicated stale tags converge
+                    # to one.  The old guard `if prefix in current_text:
+                    # return` either skipped a re-run with CHANGED values
+                    # (stale tag survived) or prepended a full second tag set
+                    # (silent wrong output); it also false-positived on
+                    # substrings ({fontsize1} inside {fontsize10}).
+                    new_text = apply_text_tags(
+                        current_text,
+                        fontsize=font_size, shadow=shadow, kerning=kerning,
+                        left=left, up=up, down=down, bold=bold)
 
-                    new_text = f"{prefix}{current_text}{suffix}"
-                    
+                    if new_text == current_text:
+                        # Already exactly as requested (e.g. same values
+                        # re-applied) -- no DOM write, no re-render.
+                        print(f"      '{field_name}' already has the requested modifications. Skipping.")
+                        return
+
                     # print(f"      [Debug] Executing JS to update text...")
                     self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
                     self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
@@ -761,7 +777,10 @@ class TextMixin:
     def _process_all_text_modifications(self):
         """
         Orchestrator for all text modifications to prevent race conditions.
-        Returns True if a modified was successfully made.
+        Applies the Title, Type, and Power/Toughness text mods (the live
+        per-card path's set of fields).
+        Returns True if any modification was made, False otherwise
+        (previously the docstring claimed a return that was never there).
         """
         print(f"   [Debug] Entering _process_all_text_modifications. auto_fit_type={getattr(self, 'auto_fit_type', 'MISSING')}, auto_fit_title={getattr(self, 'auto_fit_title', 'MISSING')}")
 
@@ -769,7 +788,9 @@ class TextMixin:
         has_mods_to_apply = any([
             self.title_font_size, self.title_shadow, self.title_kerning, self.title_left, self.title_up,
             self.type_font_size, self.type_shadow, self.type_kerning, self.type_left,
-            self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up,
+            # pt_left was missing from this gate while the body (below) applies
+            # it -- a lone --pt-left run would have exited before doing anything.
+            self.pt_font_size, self.pt_shadow, self.pt_kerning, self.pt_bold, self.pt_up, self.pt_left,
             self.flavor_font, self.rules_down, getattr(self, 'auto_fit_type', False),
             getattr(self, 'auto_fit_title', False)
         ])
@@ -852,3 +873,15 @@ class TextMixin:
                 print(f"      Error during Type Auto-Fit: {e}", file=sys.stderr)
 
         if self._apply_text_mods("Type", final_type_fs, self.type_shadow, final_type_kerning, self.type_left): any_text_mod_made = True
+
+        # --- P/T text tags ---
+        # The "has mods" gate above has always included the pt_* args, but the
+        # body never applied them -- a --pt-* run here did nothing.  Apply them
+        # now, exactly like the live per-card path (automator.py P/T block).
+        # Safe on re-runs: apply_text_tags replaces in place, so re-applying
+        # the same values is a no-op instead of a duplicate tag set.
+        if self._apply_text_mods("Power/Toughness", self.pt_font_size, self.pt_shadow,
+                                 self.pt_kerning, bold=self.pt_bold, up=self.pt_up, left=self.pt_left):
+            any_text_mod_made = True
+
+        return any_text_mod_made

@@ -5,7 +5,7 @@ import re
 import sys
 import math
 
-from automator_utils import autofit_title, autofit_type
+from automator_utils import autofit_title, autofit_type, apply_text_tags
 
 # Basic land types
 BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
@@ -239,15 +239,9 @@ class CcFileEditor:
         """
         Updates or inserts a tag in the text.
         Example: tag_name='kerning', value=2 -> updates {kerningX} to {kerning2} or prepends {kerning2}.
+
+        Delegates to the shared apply_text_tags helper so this JSON path and
+        the live Selenium path apply tags identically (replace in place,
+        converge duplicates, decimal-aware values).
         """
-        # Pattern to match {tagnameNUMBER} or {tagname-NUMBER}
-        # We assume tags are like {kerning5}, {fontsize30}, {down-10}
-        pattern = fr'\{{{tag_name}-?\d+\}}'
-        new_tag = f"{{{tag_name}{value}}}"
-        
-        if re.search(pattern, text):
-            # Replace existing tag
-            return re.sub(pattern, new_tag, text, count=1)
-        else:
-            # Prepend tag
-            return f"{new_tag}{text}"
+        return apply_text_tags(text, **{tag_name: value})

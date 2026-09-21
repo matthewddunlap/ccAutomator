@@ -2,9 +2,9 @@
 import json
 import os
 import sys
-import re
 from scryfall_utils import ScryfallAPI
 from mixins.image_mixin import ImageMixin
+from automator_utils import apply_text_tags
 
 # Land type configuration
 LAND_CONFIG = {
@@ -332,14 +332,12 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
             # --- Apply Text Modifications ---
             text_dict = new_card['data'].get('text', {})
             
-            # Helper to update tags
+            # Helper to update tags — delegates to the shared apply_text_tags
+            # so this generator path applies tags identically to the live
+            # Selenium and JSON-edit paths (replace in place, converge
+            # duplicates, decimal-aware values).
             def _update_tag(text, tag_name, value):
-                pattern = fr'\{{{tag_name}-?\d+\}}'
-                new_tag = f"{{{tag_name}{value}}}"
-                if re.search(pattern, text):
-                    return re.sub(pattern, new_tag, text, count=1)
-                else:
-                    return f"{new_tag}{text}"
+                return apply_text_tags(text, **{tag_name: value})
 
             # Title
             if 'title' in text_dict:
@@ -385,9 +383,11 @@ def generate_fullart_lands(land_types, template_path, output_path, image_server_
                 new_text = original_text
                 if rules_down is not None: new_text = _update_tag(new_text, 'down', rules_down)
                 if flavor_font is not None and '{flavor}' in new_text:
-                    parts = new_text.split('{flavor}', 1)
-                    if len(parts) == 2:
-                        new_text = f"{parts[0]}{{flavor}}{{fontsize{flavor_font}}}{parts[1]}"
+                    pre, flavor_part = new_text.split('{flavor}', 1)
+                    # REPLACE semantics on the part after {flavor}: a re-run
+                    # overwrites the existing {fontsize} instead of stacking
+                    # another one right after {flavor}.
+                    new_text = f"{pre}{{flavor}}{apply_text_tags(flavor_part, fontsize=flavor_font)}"
                 t_obj['text'] = new_text
 
             

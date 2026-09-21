@@ -516,6 +516,59 @@ def validate_decklist(cards, label="decklist", api_delay=0.5):
         print(f"   {label}: all cards resolved.")
     return failures
 
+
+def apply_text_tags(text, fontsize=None, shadow=None, kerning=None,
+                    left=None, up=None, down=None, bold=False):
+    """
+    Apply CardConjurer formatting tags to a text field's content with
+    REPLACE semantics, the way a re-run must behave:
+
+      * a tag of a kind already present is UPDATED in place (never stacked):
+          "Text"                                    + fontsize=7 -> "{fontsize7}Text"
+          "{fontsize7}{shadow2}Text"                + fontsize=9 -> "{fontsize9}{shadow2}Text"
+      * a missing tag is prepended;
+      * duplicated stale tags of a kind (left by the old prepend-on-re-run
+        bug) converge to a single tag at the first tag's position;
+      * {bold} wrapping is idempotent (never double-wrapped; an existing
+        {bold}/{/bold} is left alone when bold=False -- the card's own bold
+        is not ours to strip);
+      * values may be integral or decimal (7, 3.5, -2);
+      * if the content is unchanged an equal string is returned
+        (== check), so callers can skip the write.
+
+    This is the single source of truth for tag application: the live
+    Selenium path (TextMixin._apply_text_mods) and the JSON-file path
+    (CcFileEditor._update_tag, land_generator) all go through it, so the two
+    cannot diverge.  Pure function: no I/O, no globals.
+    """
+    def _set(tag_name, value):
+        nonlocal text
+        if value is None:
+            return
+        new_tag = f"{{{tag_name}{value}}}"
+        pattern = r'\{' + tag_name + r'-?\d+(?:\.\d+)?\}'
+        matches = list(re.finditer(pattern, text))
+        if not matches:
+            text = new_tag + text
+            return
+        # Remove EVERY stale tag of this kind, then re-insert the new one at
+        # the first one's position (the prefix before it is unchanged by the
+        # removal).  Convergence fixes text already corrupted by duplicated
+        # tags.
+        first = matches[0]
+        clean = re.sub(pattern, '', text)
+        text = clean[:first.start()] + new_tag + clean[first.start():]
+
+    _set("fontsize", fontsize)
+    _set("shadow", shadow)
+    _set("kerning", kerning)
+    _set("left", left)
+    _set("up", up)
+    _set("down", down)
+    if bold and '{bold}' not in text:
+        text = f"{{bold}}{text}{{/bold}}"
+    return text
+
 # ==============================================================================
 # Title Auto-Fit (width model measured from the LIVE renderer)
 # ==============================================================================
