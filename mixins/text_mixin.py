@@ -51,7 +51,7 @@ class TextMixin:
                 # self.driver.execute_script("textEdited()")
                 print(f"      Found {{flavor}} tag. Injected font size tag.")
                 
-                time.sleep(self.render_delay)
+                self._wait_for_render()
             else:
                 print("      No {flavor} tag found. Skipping.")
 
@@ -135,7 +135,7 @@ class TextMixin:
                     print(f"      '{field_name}' changed from '{current_text}' to '{new_text}'.")
 
                 # Wait for the change to render on a canvas
-                time.sleep(self.render_delay)
+                self._wait_for_render()
                 return # Success, exit loop
 
             except Exception as e:
@@ -194,7 +194,7 @@ class TextMixin:
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
             
             print("      Flavor text updated.")
-            time.sleep(self.render_delay)
+            self._wait_for_render()
 
         except Exception as e:
             print(f"      An error occurred while setting Flavor Text: {e}", file=sys.stderr)
@@ -222,7 +222,7 @@ class TextMixin:
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
             # self.driver.execute_script("textEdited()")
             
-            time.sleep(self.render_delay)
+            self._wait_for_render()
         except Exception as e:
             print(f"      An error occurred while setting Rules Text: {e}", file=sys.stderr)
 
@@ -324,13 +324,13 @@ class TextMixin:
             print("      Closed 'Edit Bounds' dialog.")
 
             # 6. Wait for the changes to render.
-            time.sleep(self.render_delay)
+            self._wait_for_render()
 
         except (TimeoutException, NoSuchElementException) as e:
             # A failed close (e.g. the button wasn't there) is NOT fatal; the
             # finally below still guarantees the overlay is dismissed.
             print(f"      An error occurred while modifying rules text bounds: {e}", file=sys.stderr)
-            time.sleep(self.render_delay)
+            self._wait_for_render()
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_rules_text_bounds_mods: {e}", file=sys.stderr)
         finally:
@@ -380,7 +380,7 @@ class TextMixin:
         setv("textbox-editor-width", width)
         setv("textbox-editor-x", x)
         self._close_textbox_editor()
-        time.sleep(self.render_delay)
+        self._wait_for_render()
 
     def _close_textbox_editor(self):
         """Force-close the '#textbox-editor' 'Edit Bounds' overlay (idempotent).
@@ -398,7 +398,7 @@ class TextMixin:
                 var el = document.querySelector('#textbox-editor');
                 if (el) el.classList.remove('opened');
             """)
-            time.sleep(self.render_delay)
+            self._wait_for_render()
         except Exception:
             pass
 
@@ -742,7 +742,7 @@ class TextMixin:
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
             
             print("      Mana Cost cleared.")
-            time.sleep(self.render_delay)
+            self._wait_for_render()
 
         except Exception as e:
             print(f"      An error occurred while clearing Mana Cost: {e}", file=sys.stderr)

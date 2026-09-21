@@ -886,10 +886,10 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 self.apply_white_border()
                 mods_applied = True
     
-            # If no modifications were made that include their own delays,
-            # we must add the default render delay here.
+            # If no modifications were made that include their own render
+            # wait, settle the canvas here (state-based; render_delay = cap).
             if not mods_applied:
-                time.sleep(self.render_delay)
+                self._wait_for_render()
     
             # Save to browser storage if enabled (for .cardconjurer export)
             if self.save_cc_file:
@@ -1230,7 +1230,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             file_input.send_keys(abs_path)
             
             print("   Uploaded project file.")
-            time.sleep(2) # Wait for processing
+            self._wait_for_render(timeout=2)  # Wait for import to settle (render_delay-style cap)
             
         except Exception as e:
             print(f"   Error loading project file: {e}", file=sys.stderr)
@@ -1257,7 +1257,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
             if not found:
                 raise ValueError(f"Card '{card_name_to_load}' not found in saved cards.")
                 
-            time.sleep(1.5) # Wait for load
+            self._wait_for_render(timeout=1.5)  # Wait for the card load to settle
             
         except Exception as e:
             print(f"   Error loading saved card '{card_name_to_load}': {e}", file=sys.stderr)
@@ -1305,7 +1305,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 print(f"   Warning: Failed to parse project file for metadata: {e}", file=sys.stderr)
             # ---------------------------------------------------
 
-            time.sleep(2) # Wait for processing
+            self._wait_for_render(timeout=2)  # Wait for import to settle (render_delay-style cap)
             
             # Enable Autofit globally before processing cards
             self.enable_autofit()
@@ -1387,7 +1387,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 
                 # Select the option to load the card
                 select.select_by_visible_text(saved_card_name)
-                time.sleep(1.5) # Wait for load
+                self._wait_for_render(timeout=1.5)  # Wait for the card load to settle
                 
                 # Apply Text Modifications (Auto-Fit, etc.)
                 self._process_all_text_modifications()

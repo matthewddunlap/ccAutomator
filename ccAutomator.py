@@ -157,7 +157,7 @@ def main():
         '--render-delay',
         type=float,
         default=1.5,
-        help="Seconds to wait after selecting a print before capturing. (default: 1.5)"
+        help="Max seconds to wait for the card canvas to settle after a change (state-based: returns as soon as the render is stable, capped at this value). (default: 1.5)"
     )
     parser.add_argument(
         '--prime-file',

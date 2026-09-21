@@ -100,17 +100,94 @@ class CanvasMixin:
             
         return None, None
 
-    def _wait_for_canvas_stabilization(self, initial_hash, wait_for_change=True):
+    def _get_canvas_probe_hash(self):
+        """
+        Cheap content probe for high-frequency polling (see ``_wait_for_render``).
+
+        ``_get_canvas_hash`` calls ``toDataURL('image/png')`` on the full
+        2010x2814 card canvas and then runs a JS hash loop over the whole
+        multi-megabyte base64 string.  At ~10 polls/second that allocates
+        and GCs tens of MB and measurably slows the very browser we are
+        waiting on (observed in live A/B: single reads ballooning to 6-8s,
+        so the wait "cap" was never actually a cap).  This variant
+        downsamples the canvas onto a small cached offscreen canvas (64px
+        wide) and hashes that instead -- a few KB of data, cheap enough to
+        poll at 10Hz without pressure.  Any real repaint (art, frame, text,
+        symbol) shifts the probe, so it is a valid "did the render change"
+        signal for polling; the full-res hash is still the final gate
+        before capture.
+        Returns a hash string, or None if the canvas isn't available.
+        """
+        if hasattr(self, '_cached_canvas_selector'):
+            selector_part = f"const canvas = document.querySelector('{self._cached_canvas_selector}');"
+        else:
+            selector_part = """
+                const selectors = ['#mainCanvas', '#card-canvas', '#canvas', 'canvas'];
+                let canvas = null;
+                for (let selector of selectors) {
+                    canvas = document.querySelector(selector);
+                    if (canvas && canvas.width > 0 && canvas.height > 0) break;
+                    canvas = null;
+                }
+            """
+
+        js_script = f"""
+            {selector_part}
+            if (canvas && canvas.width > 0 && canvas.height > 0) {{
+                try {{
+                    // Cache the offscreen probe canvas on window; a page
+                    // reload wipes it and the next call recreates it.
+                    var p = (typeof window.__ccProbe === 'object') ? window.__ccProbe : null;
+                    if (!p || !p.ctx) {{
+                        p = {{ cv: document.createElement('canvas'), ctx: null }};
+                        p.cv.width = 64;
+                        p.cv.height = 90;
+                        p.ctx = p.cv.getContext('2d');
+                        window.__ccProbe = p;
+                    }}
+                    p.ctx.drawImage(canvas, 0, 0, p.cv.width, p.cv.height);
+                    var dataUrl = p.cv.toDataURL('image/png');
+                    var hash = 0, i, chr;
+                    for (i = 0; i < dataUrl.length; i++) {{
+                        chr  = dataUrl.charCodeAt(i);
+                        hash = ((hash << 5) - hash) + chr;
+                        hash |= 0; // 32bit
+                    }}
+                    return hash.toString();
+                }} catch (e) {{ return null; }}
+            }}
+            return null;
+        """
+        return self.driver.execute_script(js_script)
+
+    def _wait_for_canvas_stabilization(self, initial_hash, wait_for_change=True, timeout=None, probe=False):
+        """
+        Poll until the canvas hash is stable (STABILITY_CHECKS consecutive
+        equal reads), returning the final hash, or None on timeout.
+
+        probe=True polls the cheap downsampled ``_get_canvas_probe_hash``
+        (for high-frequency waits like ``_wait_for_render``); probe=False
+        (default) keeps the full-res ``_get_canvas_hash`` used by the
+        one-off gates (frame apply, art apply, priming, pre-capture).
+        """
+        def read_hash():
+            if probe:
+                return self._get_canvas_probe_hash()
+            current_hash, _ = self._get_canvas_hash()
+            return current_hash
+
+        if timeout is None:
+            timeout = self.STABILIZE_TIMEOUT
         start_time = time.time()
         last_hash, stable_count = None, 0
-        
-        # If we don't have an initial hash but are asked to wait for change, 
+
+        # If we don't have an initial hash but are asked to wait for change,
         # we must get one.
         if initial_hash is None and wait_for_change:
-            initial_hash, _ = self._get_canvas_hash()
-                
-        while time.time() - start_time < self.STABILIZE_TIMEOUT:
-            current_hash, _ = self._get_canvas_hash()
+            initial_hash = read_hash()
+
+        while time.time() - start_time < timeout:
+            current_hash = read_hash()
             
             if not current_hash:
                 if getattr(self, 'debug', False):
@@ -142,6 +219,36 @@ class CanvasMixin:
         else:
             print("Warning: Timeout waiting for canvas to stabilize (steady state).", file=sys.stderr)
         return None
+
+    def _wait_for_render(self, timeout=None):
+        """
+        State-based wait for the card canvas to settle after a DOM change —
+        the drop-in replacement for the old blind ``time.sleep(render_delay)``.
+
+        ``render_delay`` is now a CAP, not a floor: poll the cheap
+        downsampled canvas probe (``_get_canvas_probe_hash``) and return as
+        soon as it is stable (3 consecutive equal reads, ≈0.3s), waiting out
+        the cap only if the render is still in flight.  The probe -- not the
+        full-res hash -- is what makes the cap honest: a full-canvas read
+        allocates a multi-MB string and can take seconds, which would blow
+        the cap on the very first poll.
+        timeout=None → cap = self.render_delay; cap<=0 (or render_delay=0) →
+        no wait at all.  Never raises: on cap expiry it warns and continues,
+        the same risk profile as the old fixed sleep (which also "failed"
+        whenever the render took longer than the delay).
+
+        Note: the probe hash is a different basis than ``current_canvas_hash``
+        (full-res), so it is deliberately NOT written back here -- the one-off
+        gates that compare against ``current_canvas_hash`` keep full-res
+        semantics.
+        """
+        cap = timeout if timeout is not None else self.render_delay
+        if not cap or cap <= 0:
+            return
+        if self._wait_for_canvas_stabilization(
+                self.current_canvas_hash, wait_for_change=False,
+                timeout=cap, probe=True) is None:
+            print(f"   Warning: canvas had not settled after {cap:.1f}s; proceeding.", file=sys.stderr)
 
     def set_frame(self, frame_value, wait=True):
         try:
@@ -205,9 +312,9 @@ class CanvasMixin:
             self.driver.execute_script("arguments[0].click();", white_border_thumb)
             self.driver.execute_script("arguments[0].click();", white_border_thumb)
 
-            # --- THE FIX: Use a fixed delay, not stabilization ---
-            print(f"   Waiting {self.render_delay}s for border to render...")
-            time.sleep(self.render_delay)
+            # State-based wait: return as soon as the canvas has settled
+            # (old code used a blind render_delay sleep here).
+            self._wait_for_render()
             print("   White border applied.")
 
         except Exception as e:
@@ -393,8 +500,8 @@ class CanvasMixin:
                     # 3+ Colors (Gold)
                     print(f"   [Multi {'Land' if is_colored_land else 'Artifact'}] 3+ Colors: Using Gold Land Frame as mask source")
                     self.apply_mask("lThumb.png", target_masks)
-            
-            time.sleep(self.render_delay)
+
+            self._wait_for_render()
             
         except Exception as e:
             print(f"   Error setting frame color: {e}", file=sys.stderr)

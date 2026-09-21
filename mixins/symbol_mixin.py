@@ -132,8 +132,9 @@ class SymbolMixin:
                   f"/ source={source or '(unchanged)'} fetched.")
 
             # Wait for the symbol image to load and the cardCanvas to
-            # settle with the new symbol drawn.
-            time.sleep(self.render_delay)
+            # settle with the new symbol drawn (state-based; render_delay
+            # is the cap, not the floor).
+            self._wait_for_render()
 
             # Verify the asset actually loaded.  fetchSetSymbol() is async,
             # so a 404'd / stale symbol used to render silently without its
