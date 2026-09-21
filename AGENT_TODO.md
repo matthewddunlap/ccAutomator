@@ -12,7 +12,17 @@ Tests 34/34 (`test_apply_text_tags.py`); fix + test committed 41c31f5;
 notes committed with this file. (Was briefly blocked on the sandbox-
 classifier outage, see OVERVIEW "Environment".)
 
-### 2) #3 PERF — fixed sleeps → state-based waits  [NEXT]
+### 2) #3 PERF — fixed sleeps → state-based waits  [DONE 2026-09-21 → AGENT_DONE.md, commits 989c7a9 + 9d03303]
+A/B #3 (final, priming fix on both sides): **new 4m58.4s vs baseline
+5m05.7s (−7.3s)**, EXIT 0 both, 3/3 cards uploaded, **all 3 output PNGs
+byte-identical** (7.4–7.8 MB). Bonus: stability-only priming-wait fix
+(989c7a9) is a 20–40s/run production win on its own (pre-existing
+defect: `wait_for_change=True` burned the full 20s timeout when the same
+card was already showing). Tests: test_wait_for_render.py 8/8 +
+test_apply_text_tags.py 34/34, py_compile clean. Full history:
+AGENT_DOING.md "#3 PERF". (Was: A/B #1 +14s regression from heavy
+full-canvas toDataURL polling → fixed with a cheap downsampled probe;
+A/B #2 +16s from the priming 20s burn → fixed in 989c7a9.)
 **Why:** ~53 `time.sleep` calls in the selenium hot path + `render_delay`
 (default 1.5s, CLI `--render-delay`) — the biggest wall-clock lever. Each
 card pays seconds of blind waiting that usually finished rendering in

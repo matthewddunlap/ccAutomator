@@ -376,3 +376,47 @@ resolves deferred **H10** (integer-only `_update_tag` regex) as a side
 effect of converging on one shared helper — recommended to keep (one code
 path); noted in AGENT_TODO.
 Commit: 41c31f5.
+
+## #3 PERF — fixed sleeps → state-based waits  [2026-09-21]
+**Outcome: NET WIN, shipped.** A/B #3 (final): **new 4m58.4s vs baseline
+5m05.7s (−7.3s)**, EXIT 0 both, 3/3 cards uploaded, all 3 output PNGs
+**byte-identical** (7.4–7.8 MB full-res, compared via
+`compare_pngs.py ab_base ab_new` — byte-then-PIL).
+**Change (2 commits on user-agent):**
+- **989c7a9** — priming canvas wait: stability-only, not change-detection
+  (automator.py, both priming sites: CC-mode ~421 and
+  `_prime_via_scryfall` ~1190). Pre-existing defect: `wait_for_change=True`
+  burned the full 20s STABILIZE_TIMEOUT when the same card was already
+  showing (app persists last card in browser storage) or the change was
+  missed between reads — 20–40s/run wasted in BOTH old and new code.
+  Priming only needs "renderer warm with ANY print" →
+  `self.current_canvas_hash =
+  self._wait_for_canvas_stabilization(None, wait_for_change=False)`.
+- **9d03303** — the perf change (6 files + new test, +228/−31):
+  `canvas_mixin.py` gets `_wait_for_render(timeout=None)` +
+  `_get_canvas_probe_hash()` (downsampled 64×90 offscreen probe cached on
+  `window.__ccProbe` — the full-canvas `toDataURL`+hash-loop read cost
+  0.3–8s each and made A/B #1 a +14s regression), and
+  `_wait_for_canvas_stabilization(..., timeout=None, probe=False)`;
+  `render_delay` is now a CAP, not a floor (poll until stable, warn-and-
+  continue on cap expiry, never raises); `_wait_for_render` deliberately
+  does not write the probe hash back to `current_canvas_hash` (different
+  basis than the full-res gates). All 9 text_mixin `time.sleep(render_delay)`
+  sites, the automator.py catch-all, 2× `sleep(2)` (project flows,
+  cap 2s) and 2× `sleep(1.5)` (load flows, cap 1.5s), and the
+  symbol_mixin fetch wait now call it. `--render-delay` help text updated.
+  Left unchanged on purpose: image_mixin.py:109 art-apply
+  `wait_for_change=True` (waits for a real change; settles 0.7–1.1s),
+  rate/network pacing sleeps (Scryfall 429, `api_delay`, retry backoff).
+- `test_wait_for_render.py` (repo root, 8 checks, stub driver): stable
+  canvas returns fast (<1.0s), uses cheap probe not full-res, does not
+  clobber `current_canvas_hash`, render_delay=0 → zero driver calls,
+  changing canvas honors caps, stabilizer default stays full-res,
+  signature has timeout+probe params. **8/8 pass.**
+**Verify:** A/B #1 (+14s regression → heavy full-canvas reads), A/B #2
+(+16s → priming 20s burn, diagnosed from log silence + "change detected:
+False" counts), A/B #3 (WIN above). Baselines run-to-run variance ~±12s
+(4m51.1 / 5m03.5 / 5m05.7s). Tests: `test_wait_for_render.py` 8/8,
+`test_apply_text_tags.py` 34/34; `py_compile` clean on all touched files.
+Logs: `$CLAUDE_JOB_DIR/tmp/ab3_base.log`, `ab3_new.log` (job ac1fc71f).
+Commits: 989c7a9 (priming fix), 9d03303 (perf).
