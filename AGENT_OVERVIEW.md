@@ -16,16 +16,31 @@ hash (user instruction, 2026-09-18). Commit trailer:
 
 ---
 
-## Current status (2026-09-20) — read this first
+## Current status (2026-09-22) — read this first
 
-Ordered plan (user-specified, 2026-09-20):
+Ordered plan (user-specified, 2026-09-20) + user follow-ups:
 
 1. **Startup decklist validation** — **DONE** (commit ff132e4; see DONE).
 2. **H8** live-path text-mod tag duplication on re-run — **DONE 2026-09-20**
    (commit 41c31f5, tests 34/34; see DONE).
-3. **Perf — fixed sleeps → state-based waits** — **NEXT** (user: "immediately
-   proceed" after H8). Scope + approach: `AGENT_TODO.md` "Now" section.
-4. **H9 residual** — scryfall_cache false-success + hardcoded paths — later.
+3. **Perf — fixed sleeps → state-based waits** — **DONE 2026-09-21**
+   (commits 989c7a9 + 9d03303; A/B #3 −7.3s, byte-identical PNGs; see DONE).
+4. **H9 residual** — scryfall_cache false-success + hardcoded paths —
+   **DONE 2026-09-21** (commit da1b06d, 17/17 tests, byte-identical PNGs;
+   see DONE).
+5. **#5 — runtime-configurable data dir + "where the 5 minutes goes"**
+   (user: "Whatver /data is being used for should be a runtime configurable
+   path") — **VERIFIED 2026-09-22, commit pending the user's call** on the
+   search cache-first part. (a) `--data-dir` + cache-first art fetch:
+   done, live-verified. (b) Answer: ~85% of the run is the CardConjurer
+   app's own main-thread work (both sides); the cache removes ~1-5s of
+   fast API calls here (production win = fewer calls / less 429 exposure).
+   (c) Search cache-first: prior session had implemented it contradicting
+   its own notes; this session fixed a dead-path bug in it (`game` vs
+   `games` JSON field) + 8-test regression suite + live-verified
+   byte-identical output under `--set-selection earliest` (`not:covered`
+   gap = real output-risk under latest/random/all). Details: AGENT_DONE.md
+   "#5"; commit plan: AGENT_DOING.md NEXT block.
 
 Everything else in the baseline review below is unchanged in status (see
 `AGENT_TODO.md` "Later review" for the current per-item state).

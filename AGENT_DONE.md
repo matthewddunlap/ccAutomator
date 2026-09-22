@@ -477,3 +477,103 @@ and `compare_pngs.py ab_new h9_new` → **all 3 cards BYTE-IDENTICAL**
 (7.4–7.8 MB) to the A/B #3 verified set. Log:
 `$CLAUDE_JOB_DIR/tmp/h9_new.log` (job ac1fc71f).
 Commit: da1b06d.
+
+## #5 DATA-DIR + where the 5 minutes goes  [2026-09-22]
+**User request (verbatim):** "Whatver /data is being used for should be a
+runtime configurable path. And the state based waits saving just 7 seconds
+seems ridiculously low."
+
+**(a) Runtime-configurable data dir — DONE (live-verified):**
+- `scryfall_cache.py`: `configure_data_dir(path)` — repoints
+  DATA_DIR/DB_FILE/JSON_FILE/LOCK_FILE, sets `_data_dir_explicit`
+  (explicit choice = opt-in to bootstrapping that location even when it
+  doesn't exist yet), resets the singleton's connection so a previously
+  opened DB for another location is never served. `_cache_dir_ready()`
+  keys off the flag (env var OR configure()) instead of re-reading the
+  env var.
+- `ccAutomator.py`: `--data-dir` flag (works from @conf files), wired
+  right after `args = parser.parse_args()` (all cache imports are lazy —
+  earliest safe point) + prints the resolved dir.
+- `mixins/image_mixin.py`: `_get_scryfall_art_crop_url` is CACHE-FIRST
+  (`ScryfallCache().get_card(name, set)` first; no-op → None on machines
+  without a cache), API fallback unchanged, extraction shared via local
+  `extract()`. Verified on the hot path (main flow passes no
+  scryfall_data to `_prepare_art_asset` → all 3 cards log "Using local
+  Scryfall cache ...").
+- `test_scryfall_cache.py`: +`test_configure_data_dir_repoints_and_resets_
+  singleton` (repoint, singleton reset, explicit-dir opt-in bootstrap
+  allowed, honest None fallback, no empty DB left) → **18/18**.
+
+**(b) Where the 5 minutes goes — ANSWERED (timestamped A/B, 2026-09-22):**
+- Method: per-line timestamped logs, same 3-card deck
+  (`decks/long.txt @custom.conf --debug --overwrite --save-cc-file`),
+  sequential on the same app instance: **API side 306.8s (EXIT 0)** vs
+  **cache side 289.6s (EXIT 0)** — delta inside the ±12-14s run-noise band
+  measured in earlier A/Bs. `compare_pngs.py`: **all 3 PNGs
+  byte-identical** in both `ts_api` vs `ts_cache2` AND `ts_cache2` vs
+  `h9_new` (the previously verified set) — end-to-end output equivalence.
+  Logs: job ac1fc71f tmp `ts_ts_api.log`, `ts_ts_cache2.log`.
+- **Breakdown (both sides, same shape):** canvas waits/re-renders
+  113-127s (~40%), startup/setup/priming/UI-search 94-103s (~30%),
+  mods/autofit/symbols 18-29s (6-10%), art/capture/save ~9s (3%), other
+  ~16s (5%). The single biggest steps (7-19s each: [Debug] Wait reads,
+  "Bypassing further filters", "Ensuring Autofit is enabled", Rules
+  Bounds dialogs) are the CardConjurer app's OWN main-thread work
+  (re-render, autofit, search index) delaying our execute_script.
+- **Why the state-wait change saved only ~7s:** the app does 8-9s of work
+  per render pass in BOTH designs (the old code's next selenium op queued
+  behind the same work); the blind sleep only added the ~1.5s residual
+  after the app finished, which the state wait removed. The 5 minutes is
+  app CPU work, not our waits or our network.
+- **Cache's honest effect:** ~1-5s of Scryfall API calls removed per run
+  on this box (search ~0.17s + art meta ~0.12s per card, fast network);
+  production value = call COUNT (2/card → ~0) = less 429 exposure on big
+  decks. Art BYTES still come from Scryfall's CDN in both modes (cache
+  stores metadata, not images).
+
+**(c) Search cache-first (`_resolve_prints_cache_first`) — verified,
+commit is the user's call (per plan: "present to the user with
+numbers"):**
+- Implemented by the prior session in the working tree (while its own
+  notes said "deliberately NOT cache-ified" — reconciled here).
+- **DEAD-PATH BUG found in this session's verification (fixed):** the
+  resolver read `c.get("game")`, but current Scryfall JSON stores a
+  `games` LIST (e.g. `["paper","mtgo"]`) — every print was dropped, so
+  the resolver silently ALWAYS fell back to the API (first cache A/B run
+  showed no "Resolved N local cache print(s)" line). Fix: read `games`,
+  with legacy `game`-string support (split on `+ ,`/whitespace).
+  Regression suite: new `test_cache_first_resolve.py` **8/8** (games
+  regression, legacy string, no-field drop, token layout, art_series,
+  include/exclude/set-target, custom `--scryfall-filter` → API path,
+  dev-box no-cache → None with zero network, oldest-first order).
+- **`not:covered` investigated (the one filter NOT reproducible
+  locally):** it is a search-engine-only concept — bisection shows it
+  excludes box contents, judge gifts (e.g. Phyrexian Dreadnought g10),
+  premium decks, some promos, while other promos survive; NO field in the
+  bulk JSON marks it. Consequence: local candidates can include prints
+  the API excludes. Empirically (live Scryfall search, 2026-09-22)
+  `unique:art`'s representative is the EARLIEST release, so with
+  `--set-selection earliest` (current config) local and API pick the SAME
+  print (verified: ONS/MIR/USG, byte-identical PNGs). With
+  `latest`/`random`/`all` the local pool can contain the covered prints
+  (e.g. Dreadnought g10, Karn pal99/v10) → a DIFFERENT print may be
+  picked. Documented in the resolver docstring.
+- **Verify (2026-09-22):** cache run log shows the path LIVE: "Resolved
+  4/2/3 local cache print(s)" + "Cross-referencing 4/2/3 ..." +
+  "Using local Scryfall cache" per card; selection lands on the same
+  ONS/MIR/USG prints; EXIT 0; PNGs byte-identical (see (b)).
+- **Tests (2026-09-22):** `test_cache_first_resolve.py` 8/8 (new),
+  `test_scryfall_cache.py` 18/18, `test_apply_text_tags.py` 34/34,
+  `test_wait_for_render.py` 8/8; py_compile clean on all touched files.
+
+**Commits (branch user-agent, 2026-09-22):**
+- **6a19ea8** "Scryfall cache dir runtime-configurable + cache-first
+  per-card art" (a): scryfall_cache.py configure_data_dir, ccAutomator.py
+  --data-dir, mixins/image_mixin.py, test_scryfall_cache.py (18/18).
+- **76b1635** "Cache-first print resolution for the search path" (c):
+  scryfall_cache.py get_prints, automator.py _resolve_prints_cache_first
+  (+ the games-field dead-path fix), test_cache_first_resolve.py (8/8).
+- Notes commit: this one.
+**User call (2026-09-22): KEEP BOTH PARTS** (presented with the numbers
+above; earliest-selection equivalence + latest/random/all not:covered
+risk accepted and documented).

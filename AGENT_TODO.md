@@ -7,6 +7,23 @@ move to `AGENT_DOING.md` when started, and to `AGENT_DONE.md` when finished
 
 ## Now (ordered — user-specified sequence, 2026-09-20)
 
+### 0) #5 — runtime-configurable data dir + find where the 5 minutes goes  [DONE 2026-09-22 → AGENT_DONE.md, commits 6a19ea8 + 76b1635]
+User: "Whatver /data is being used for should be a runtime configurable
+path. And the state based waits saving just 7 seconds seems ridiculously
+low." (a) `--data-dir` + `configure_data_dir()` + cache-first per-card
+art fetch — DONE, live-verified (commit 6a19ea8); (b) timestamped A/B
+ANSWERED: ~85% of both sides is the CardConjurer app's own main-thread
+work (canvas re-renders ~40%, startup/priming/UI-search ~30%); the cache
+removes only ~1-5s of fast API calls here (production win = fewer calls /
+less 429 exposure); (c) search cache-first — prior session had implemented
+it contradicting its own notes; this session found+fixed a dead-path bug
+in it (`game` vs current `games` JSON field), added an 8-test regression
+suite, and live-verified byte-identical output under `--set-selection
+earliest` (the `not:covered` gap is non-reproducible locally — real
+output-risk only under latest/random/all). Presented to the user with
+numbers; **user called KEEP** (commit 76b1635). Details + per-stage
+breakdown: AGENT_DONE.md "#5".
+
 ### 1) H8 — live-path text-mod tag duplication on re-run  [DONE 2026-09-20 → AGENT_DONE.md, commit 41c31f5]
 Tests 34/34 (`test_apply_text_tags.py`); fix + test committed 41c31f5;
 notes committed with this file. (Was briefly blocked on the sandbox-

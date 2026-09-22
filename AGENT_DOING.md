@@ -1,14 +1,100 @@
 # AGENT DOING — current work item
 
-**NEXT SESSION, START HERE (2026-09-21):**
-**#4 H9 residual — scryfall_cache: DONE** (fix commit **da1b06d**; 17/17
-unit tests, live run EXIT 0 with 3/3 cards, all 3 output PNGs
-byte-identical to the verified A/B #3 set). Next: **H7** — delete the dead
-no-op `apply_set_filters` (automator_utils.py:223-243, imported but never
-called). Keep the AGENT_ files current; one commit per fix + a notes commit
-recording the hash (trailer: `Co-Authored-By: Claude Code
-<noreply@anthropic.com>`).
-(#3 perf DONE — 989c7a9 + 9d03303; H8 DONE — 41c31f5.)
+**NEXT SESSION, START HERE (2026-09-22):**
+**#5 COMPLETE** — user called KEEP BOTH PARTS (2026-09-22, presented with
+the A/B numbers). Commits on branch user-agent: **6a19ea8** (data-dir +
+cache-first art) + **76b1635** (search cache-first + games-field fix +
+8-test suite); notes commit records the hashes. All four suites green
+(18/18, 34/34, 8/8, 8/8); live A/B EXIT 0 both sides; PNGs byte-identical
+(API side vs cache side, and cache side vs the verified h9_new set).
+Full record: AGENT_DONE.md "## #5". **Next candidate (deferred item,
+not yet started): H7** — delete the dead no-op `apply_set_filters`
+(automator_utils.py:223-243, imported but never called).
+(Prior: #4 H9 DONE — da1b06d; #3 perf DONE — 989c7a9 + 9d03303;
+H8 DONE — 41c31f5.)
+
+ENV NOTES (this box): `CLAUDE_JOB_DIR` is unset in-session — the job dir
+with all A/B logs + `compare_pngs.py` + `seed_cache.py` + the seeded test
+cache is `/home/i3/.claude/jobs/ac1fc71f/tmp/` (cache:
+`/home/i3/cc_test_cache/`, 5 cards incl. the 3 deck cards + 2 prime cards;
+rebuild with `seed_cache.py <dir>` if missing). App
+`http://mtgproxy:4242/` + Scryfall API reachable; venv
+`.venv/bin/python`. Four test suites at repo root.
+
+## #5 DATA-DIR + where the 5 minutes goes  [DONE 2026-09-22 — commits 6a19ea8 + 76b1635]
+
+**Full outcome + verification: AGENT_DONE.md "## #5 DATA-DIR + where the
+5 minutes goes". Short state:**
+- (a) `--data-dir` + `configure_data_dir()` + cache-first per-card art
+  fetch: DONE, live-verified.
+- (b) "where the 5 minutes goes": ANSWERED — timestamped A/B; the
+  CardConjurer app's own main-thread work is ~85% of both sides (canvas
+  re-renders ~40%, startup/priming/UI-search ~30%, mods/autofit ~10%);
+  the cache removes only ~1-5s of fast Scryfall API calls here (real
+  production win = fewer calls / less 429 exposure on big decks);
+  art BYTES still come from Scryfall's CDN in both modes.
+- (c) search cache-first (`_resolve_prints_cache_first`): implemented in
+  the working tree by the prior session (contradicting its own notes);
+  this session found + fixed a DEAD-PATH bug in it (`game` vs the current
+  `games` JSON field — it silently always fell back to the API), added a
+  regression suite (8 tests), and live-verified it end-to-end
+  (byte-identical PNGs vs the API side and vs the verified h9_new set,
+  with `--set-selection earliest`). The `not:covered` gap is
+  non-reproducible locally (search-engine-only; e.g. drops the g10 judge
+  promo) → equivalent under earliest, real output-risk under
+  latest/random/all. **User called KEEP (2026-09-22) — committed
+  76b1635.**
+
+**(a) Runtime-configurable data dir — DONE (verified 2026-09-22):**
+- `scryfall_cache.py`: new `configure_data_dir(path)` — repoints
+  DATA_DIR/DB_FILE/JSON_FILE/LOCK_FILE, sets `_data_dir_explicit = True`,
+  resets the singleton (no stale conn for a previous location).
+  `_cache_dir_ready()` now keys off `_data_dir_explicit` (= env var set OR
+  configure() called) instead of re-reading the env var.
+- `ccAutomator.py`: new `--data-dir` flag (works from @conf files too);
+  right after `args = parser.parse_args()`: `scryfall_cache.
+  configure_data_dir(args.data_dir)` (all cache imports are lazy, so this
+  is the earliest safe point) + prints the resolved dir.
+- `test_scryfall_cache.py`: `test_configure_data_dir_repoints_and_resets_
+  singleton` (repoint, singleton reset, explicit-dir opt-in bootstrap
+  allowed, honest None fallback, no empty DB left).
+- **Cache-first per-card art fetch:** `mixins/image_mixin.py:
+  _get_scryfall_art_crop_url` tries `ScryfallCache().get_card(name,
+  set_code)` first (no-op → None on machines without a cache), API fetch
+  unchanged as fallback; extraction shared via local `extract()`. Confirmed
+  on the hot path: the main flow (automator.py:754) calls
+  `_prepare_art_asset` WITHOUT scryfall_data, so all 3 cards log
+  "Using local Scryfall cache ..." in the cache run. (Note: that same
+  call has the card's scryfall_data in hand — passing it would skip even
+  the cache/API meta lookup; left as-is, out of scope.) Validation
+  (automator_utils.py) was already cache-first.
+
+**(b) Why the state-wait A/B saved only ~7s — CONFIRMED (log analysis +
+timestamped A/B 2026-09-22):**
+- The [Debug] Wait reads of 8-9s each (10+ of them, after Title/Type/
+  P/T/flavor-font writes and priming) are the APP's own main-thread
+  re-render/auto-fit work delaying our execute_script — ~113-127s of each
+  run (the single biggest bucket, ~40%). That app work is paid by BOTH
+  designs (the old code's next selenium op queued behind the same work) →
+  cancels out of the A/B delta. This is why the sleep→state-wait change
+  only moved ~7s of a ~300s run: the blind sleep was only the ~1.5s
+  residual AFTER the app finished, which the state wait removed.
+- Timestamped A/B (2026-09-22, `ts_ts_api.log` 306.8s / `ts_ts_cache2.log`
+  289.6s; per-line timestamps, gaps between lines = un-logged work):
+  canvas waits ~40% (113-127s), startup/setup/priming ~30% (94-103s:
+  driver+page load, frame/bounds dialogs, 2 priming card loads), per-card
+  mods/autofit/symbols ~6-10%, per-card UI print-lookup ~9-10%, art+
+  capture+save ~3%, "other" ~5%. NO single network step exceeds ~0.5s on
+  this box (search ~0.17s, art meta ~0.12s each) — the ~120-150s
+  "un-logged" time is accounted for: it IS the app's main-thread work,
+  visible as 8-19s gaps before [Debug] Wait / Bypassing-filters /
+  Ensuring-Autofit / Rules-Bounds lines.
+- **Cache's honest effect:** removes ~1-5s of Scryfall API calls per run
+  here (print-lookup bucket: 32.1s → 27.3s, within the ±12-14s run-noise
+  band); production value is call COUNT (2 per card → ~0) = less 429
+  rate-limit exposure on big decks, not wall time on this box. Art BYTES
+  still download from Scryfall's CDN in both modes (the cache stores
+  metadata, not images).
 
 ## #4 H9 — scryfall_cache false-success + hardcoded paths  [DONE 2026-09-21, commit da1b06d]
 
