@@ -326,6 +326,95 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
         return matched_prints
 
+    def _resolve_prints_cache_first(self, card_name, is_token, set_code,
+                                    include_sets, exclude_sets):
+        """Resolve a card's candidate prints from the LOCAL Scryfall cache
+        instead of the search API, when the effective query is made up only of
+        plain card-field filters (so it can be applied to cached data).
+
+        Returns the filtered, release-ordered list of full card dicts, or
+        None to mean "use the Scryfall API path" (no cache / empty result, a
+        custom --scryfall-filter, or a token search that needs the API-side
+        token-set mapping).
+
+        WHY THE API IS STILL THE FALLBACK -- documented deviations:
+        * The local path applies the plain column filters (name, token,
+          -layout:art-series, game:paper, set include/exclude).  It does NOT
+          apply Scryfall's `unique:art` representative-collapsing or
+          `not:covered`, which are computed by Scryfall's engine and have no
+          column in the cached bulk data.  Empirically (Scryfall search API,
+          2026-09) `unique:art`'s representative is the EARLIEST release, so
+          for the common single-art case --set-selection earliest/latest over
+          the local set lands on the SAME print as the API.  For a card with
+          multiple distinct artworks, 'latest' over the local set could pick
+          a different reprint than the API's per-art representative -- a known,
+          acceptable difference (the art is still that card's, fetched from
+          cache or Scryfall).
+        * Selection among the local candidates is governed by
+          --set-selection / --no-match-selection (earliest/latest/random by
+          release date), exactly as the API path governs its own results.
+        * If the chosen print's art is not available locally, the art fetch
+          goes out to Scryfall (see _get_scryfall_art_crop_url).
+        """
+        # A custom --scryfall-filter is an arbitrary Scryfall query we cannot
+        # apply to local data -- keep those on the API.
+        if self.scryfall_filter:
+            return None
+        # Token searches use the API-side token-set auto-mapping
+        # (get_token_sets_for_parents); we don't replicate that locally.
+        if is_token and (include_sets or exclude_sets):
+            return None
+
+        from scryfall_cache import ScryfallCache
+        cards = ScryfallCache().get_prints(card_name)
+        if not cards:
+            return None  # cache miss / no usable cache -> API path
+
+        include = {s.lower() for s in (include_sets or set())}
+        exclude = {s.lower() for s in (exclude_sets or set())}
+        target_set = set_code.lower() if set_code else None
+
+        def paper_available(c):
+            # game:paper.  Current Scryfall schema: a `games` LIST (e.g.
+            # ["paper", "mtgo"]).  Older bulk data had a `game` STRING
+            # (e.g. "paper+arena") -- split it so legacy rows still match.
+            games = c.get("games")
+            if games is None:
+                legacy = c.get("game")
+                if isinstance(legacy, str):
+                    games = [g for g in re.split(r"[+,\s]+", legacy) if g]
+                else:
+                    games = list(legacy or [])
+            return "paper" in games
+
+        def keep(c):
+            layout = (c.get("layout") or "").lower()
+            sc = (c.get("set") or "").lower()
+            if is_token:
+                if layout != "token":
+                    return False
+            else:
+                # not:token, -layout:art-series, game:paper
+                if layout == "token" or layout == "art_series":
+                    return False
+                if not paper_available(c):
+                    return False
+            if target_set and sc != target_set:
+                return False
+            if include and sc not in include:
+                return False
+            if exclude and sc in exclude:
+                return False
+            return True
+
+        filtered = [c for c in cards if keep(c)]
+        if not filtered:
+            return None  # nothing usable locally -> API (its fallback widening applies)
+
+        print(f"   Resolved {len(filtered)} local cache print(s) for '{card_name}' "
+              f"(selection by --set-selection/--no-match-selection).")
+        return filtered
+
     def _format_mana_cost(self, mana_cost):
         # Convert {2}{R} to {2}{R} (it's usually already correct from Scryfall)
         # But we might need to handle specific symbols if CC differs.
@@ -542,8 +631,17 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
     
             full_query = " ".join(query_parts)
             print(f"   Scryfall query (with filters): {full_query}")
-            scryfall_results = self.scryfall_api.search_cards(full_query, unique="art", order_by="released", direction="asc")
-    
+            # Cache-first: resolve the candidate prints from the local Scryfall
+            # cache when the query is plain-field-only; otherwise (no cache,
+            # custom --scryfall-filter, token-set mapping, or empty result) fall
+            # through to the Scryfall API exactly as before.  See
+            # _resolve_prints_cache_first for the documented deviations.
+            scryfall_results = self._resolve_prints_cache_first(
+                card_name, is_token, set_code,
+                current_include_sets, current_exclude_sets)
+            if scryfall_results is None:
+                scryfall_results = self.scryfall_api.search_cards(full_query, unique="art", order_by="released", direction="asc")
+
             selection_strategy = self.set_selection_strategy # Default to set_selection_strategy
      
             # 2. Fallback Scryfall Queries: triggered when (a) the initial query yielded no

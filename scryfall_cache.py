@@ -347,6 +347,29 @@ class ScryfallCache:
             # If the database is locked or table doesn't exist yet, return None to allow API fallback
             return None
 
+    def get_prints(self, name):
+        """Return EVERY print of `name` as a list of full card dicts, oldest
+        first (by `released_at`).  Unlike get_card (one row), this hands the
+        caller all sets so it can apply its own set-selection policy locally
+        instead of round-tripping to the Scryfall search API.
+
+        Same no-side-effect contract as get_card: never raises, returns [] on
+        a cache miss or when no usable cache exists -- callers fall back to
+        the API.  (On a machine without a data dir the dev-box guard keeps
+        this a fast empty return, not a ~500MB download.)
+        """
+        try:
+            conn = self._get_conn()
+            curr = conn.cursor()
+            curr.execute("SELECT data FROM cards WHERE name = ?", (name.lower(),))
+            cards = [json.loads(row[0]) for row in curr.fetchall()]
+            # released_at is a stored field ("YYYY-MM-DD"); missing ones (very
+            # old prints) sort first, matching an 'earliest' preference.
+            cards.sort(key=lambda c: c.get("released_at") or "")
+            return cards
+        except Exception:
+            return []
+
 if __name__ == "__main__":
     cache = ScryfallCache()
     card = cache.get_card("Tundra", "3ED")
