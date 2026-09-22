@@ -315,15 +315,13 @@ class ImageMixin:
 
     def _get_scryfall_art_crop_url(self, card_name: str, set_code: str, collector_number: str) -> tuple[str, str]:
         """
-        Fetches the art_crop URL for a given card from the Scryfall API.
+        Gets the art_crop URL for a given card: local Scryfall cache first
+        (instant when --data-dir / CC_AUTOMATOR_DATA_DIR is warmed), then the
+        Scryfall API.  The cache lookup is a no-op on a machine without a
+        cache (get_card returns None -> API fallback), so behavior is
+        unchanged when no data dir is configured.
         """
-        search_url = f"https://api.scryfall.com/cards/{set_code}/{collector_number}"
-        print(f"   Fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}) from: {search_url}")
-        try:
-            response = requests.get(search_url, headers={"User-Agent": "ccAutomator/1.0 (custom card frame automation tool)"}, timeout=10)
-            response.raise_for_status()
-            card_data = response.json()
-            
+        def extract(card_data) -> tuple[str, str]:
             art_crop_url = ""
             if 'image_uris' in card_data and 'art_crop' in card_data['image_uris']:
                 art_crop_url = card_data['image_uris']['art_crop']
@@ -332,16 +330,34 @@ class ImageMixin:
                     if 'image_uris' in face and 'art_crop' in face['image_uris']:
                         art_crop_url = face['image_uris']['art_crop']
                         break
-            
-            type_line = card_data.get('type_line', '')
-            if art_crop_url:
-                print(f"   Found art_crop URL: {art_crop_url}")
-                return art_crop_url, type_line
-            else:
-                print(f"   Warning: No art_crop URL found for '{card_name}' ({set_code}/{collector_number}).", file=sys.stderr)
+            return art_crop_url, card_data.get('type_line', '')
+
+        card_data = None
+        try:
+            from scryfall_cache import ScryfallCache
+            card_data = ScryfallCache().get_card(card_name, set_code)
+            if card_data is not None:
+                print(f"   Using local Scryfall cache for '{card_name}' ({set_code}/{collector_number}).")
+        except Exception:
+            card_data = None
+
+        if card_data is None:
+            search_url = f"https://api.scryfall.com/cards/{set_code}/{collector_number}"
+            print(f"   Fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}) from: {search_url}")
+            try:
+                response = requests.get(search_url, headers={"User-Agent": "ccAutomator/1.0 (custom card frame automation tool)"}, timeout=10)
+                response.raise_for_status()
+                card_data = response.json()
+            except requests.exceptions.RequestException as e:
+                print(f"   Error fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}): {e}", file=sys.stderr)
                 return None, None
-        except requests.exceptions.RequestException as e:
-            print(f"   Error fetching Scryfall data for '{card_name}' ({set_code}/{collector_number}): {e}", file=sys.stderr)
+
+        art_crop_url, type_line = extract(card_data)
+        if art_crop_url:
+            print(f"   Found art_crop URL: {art_crop_url}")
+            return art_crop_url, type_line
+        else:
+            print(f"   Warning: No art_crop URL found for '{card_name}' ({set_code}/{collector_number}).", file=sys.stderr)
             return None, None
 
     def _prepare_art_asset(self, card_name: str, set_code: str, collector_number: str, scryfall_data: dict = None) -> tuple[Optional[str], Optional[str], Optional[int], Optional[int]]:

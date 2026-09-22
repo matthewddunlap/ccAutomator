@@ -8,13 +8,37 @@ import fcntl
 from pathlib import Path
 import requests
 
-# Data location is env-overridable so a dev/test machine without /data can use
-# a local cache; the production default is unchanged.
+# Data location is runtime-configurable: --data-dir (ccAutomator.py) or the
+# CC_AUTOMATOR_DATA_DIR env var; the production default is unchanged.
 DATA_DIR = os.environ.get("CC_AUTOMATOR_DATA_DIR", "/data/ccAutomator")
 DB_FILE = os.path.join(DATA_DIR, "scryfall_cache.db")
 JSON_FILE = os.path.join(DATA_DIR, "scryfall_default_cache.json")
 LOCK_FILE = os.path.join(DATA_DIR, "scryfall_cache.lock")
 BULK_DATA_INFO_URL = "https://api.scryfall.com/bulk-data"
+
+# Set when the user EXPLICITLY chose the data dir (--data-dir or the env
+# var) -- as opposed to inheriting the /data default.  Explicit choice is
+# an opt-in to bootstrapping that location (creating it, downloading the
+# bulk data into it) even on a machine where it does not exist yet.
+_data_dir_explicit = os.environ.get("CC_AUTOMATOR_DATA_DIR") is not None
+
+
+def configure_data_dir(path):
+    """Point the cache at `path` (called from ccAutomator's --data-dir).
+
+    Must be called before the first cache lookup (all lookups import this
+    module lazily, so this is safe from main()).  Resets the singleton's
+    connection so a previously opened DB for another location is never
+    served from the wrong directory.
+    """
+    global DATA_DIR, DB_FILE, JSON_FILE, LOCK_FILE, _data_dir_explicit
+    DATA_DIR = os.path.abspath(path)
+    DB_FILE = os.path.join(DATA_DIR, "scryfall_cache.db")
+    JSON_FILE = os.path.join(DATA_DIR, "scryfall_default_cache.json")
+    LOCK_FILE = os.path.join(DATA_DIR, "scryfall_cache.lock")
+    _data_dir_explicit = True
+    ScryfallCache._instance = None
+    ScryfallCache._conn = None
 
 # After a failed update, don't re-attempt the bulk download for every card
 # lookup (each attempt would pay the connect timeout again).  60s is long
@@ -114,15 +138,16 @@ def _cache_dir_ready():
     """Should this machine use/try to build the cache in its data dir?
 
     True when the data directory already exists (the production layout), or
-    when the user explicitly chose a location via CC_AUTOMATOR_DATA_DIR
-    (opt-in bootstrap).  False for the DEFAULT location on a machine where
-    it does not exist (a dev box): creating /data and downloading ~500MB is
-    a production decision, not a dev-machine side effect -- the caller
-    simply falls back to the Scryfall API.
+    when the user explicitly chose a location (--data-dir or
+    CC_AUTOMATOR_DATA_DIR: opt-in bootstrap).  False for the DEFAULT
+    location on a machine where it does not exist (a dev box): creating
+    /data and downloading ~500MB is a production decision, not a
+    dev-machine side effect -- the caller simply falls back to the
+    Scryfall API.
     """
     if Path(os.path.dirname(DB_FILE)).exists():
         return True
-    return os.environ.get("CC_AUTOMATOR_DATA_DIR") is not None
+    return _data_dir_explicit
 
 
 def update_scryfall_cache(force=False):

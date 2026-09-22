@@ -82,6 +82,12 @@ def main():
         help="The URL for the Card Conjurer web app. Required for 'selenium' and 'cc-file' modes."
     )
     parser.add_argument(
+        '--data-dir',
+        help="Directory for the local Scryfall cache DB (default: $CC_AUTOMATOR_DATA_DIR "
+             "or /data/ccAutomator). If the directory does not exist it is created and "
+             "the ~500MB bulk data is downloaded once on first use."
+    )
+    parser.add_argument(
         'input_file',
         nargs='?',
         help="The input file containing card names (for 'selenium' mode) or the .cardconjurer file (for 'cc-file' or 'edit' mode)."
@@ -514,6 +520,13 @@ def main():
     parser.add_argument('--template', type=str, help="Path to the template .cardconjurer file for land generation.")
 
     args = parser.parse_args()
+
+    # --- Cache location (must be set before the first lazy scryfall_cache
+    # lookup; every lookup imports the module inside the function body) ---
+    if args.data_dir:
+        import scryfall_cache
+        scryfall_cache.configure_data_dir(args.data_dir)
+        print(f"Using Scryfall cache directory: {scryfall_cache.DATA_DIR}")
 
     # --- Land Generation Mode ---
     if args.generate_lands:

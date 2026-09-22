@@ -29,9 +29,11 @@ import scryfall_cache as sc
 
 def _reset_module_state(tmpdir):
     """Point the module's file globals at tmpdir and clear shared state."""
+    sc.DATA_DIR = tmpdir
     sc.DB_FILE = os.path.join(tmpdir, "scryfall_cache.db")
     sc.JSON_FILE = os.path.join(tmpdir, "scryfall_default_cache.json")
     sc.LOCK_FILE = os.path.join(tmpdir, "scryfall_cache.lock")
+    sc._data_dir_explicit = False
     sc._update_failed_at = None
     sc.ScryfallCache._instance = None
     sc.ScryfallCache._conn = None
@@ -391,6 +393,40 @@ def test_get_card_falls_back_to_none_without_leaving_empty_db():
             requests.get = orig_get
         assert not os.path.exists(sc.DB_FILE), \
             "a failed update must not leave an empty 0-byte DB 'fresh' for a week"
+
+
+def test_configure_data_dir_repoints_and_resets_singleton():
+    """--data-dir wiring: configure() repoints the file globals, opts in to
+    bootstrapping the explicit dir, and drops any stale singleton connection
+    (a DB opened for a previous location must not be served from the new one)."""
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+        # Singleton bound to d1's DB first...
+        _reset_module_state(d1)
+        _make_db(sc.DB_FILE, [("island", "c15", json.dumps({"name": "Island"}))])
+        cache = sc.ScryfallCache()
+        assert cache.get_card("Island", "C15") is not None
+        # ...then --data-dir d2 must not answer from d1's rows.
+        sc.configure_data_dir(d2)
+        assert sc.DATA_DIR == os.path.abspath(d2)
+        assert sc.DB_FILE == os.path.join(os.path.abspath(d2), "scryfall_cache.db")
+        assert sc._data_dir_explicit is True
+        assert sc.ScryfallCache._instance is None and sc.ScryfallCache._conn is None
+        assert sc._db_is_usable(sc.DB_FILE) is False, "d2 has no DB yet"
+        # An explicit (even not-yet-existing) dir is an opt-in: the dev-box
+        # guard must NOT block a bootstrap attempt.
+        missing = os.path.join(d2, "subdir")
+        sc.configure_data_dir(missing)
+        assert sc._cache_dir_ready() is True, \
+            "an explicit --data-dir must be allowed to bootstrap its directory"
+        # And lookups stay honest: no DB there -> get_card -> None (offline),
+        # with NO empty DB installed in the fresh location.
+        orig_get = requests.get
+        requests.get = _raise_connection_error
+        try:
+            assert sc.ScryfallCache().get_card("Island", "C15") is None
+        finally:
+            requests.get = orig_get
+        assert not os.path.exists(os.path.join(missing, "scryfall_cache.db"))
 
 
 # ---------------------------------------------------------------------------
