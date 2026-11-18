@@ -35,11 +35,15 @@ LAND_COLOR_MAP = {
 }
 
 class SeventhGenerator(ImageMixin, CollectorMixin):
-    def __init__(self, image_server_url="http://mtgproxy:4242", download_dir="downloads", 
-                 upload_secret=None, art_path="/local_art/art/", upscaler_model=DEFAULT_UPSCALER_MODEL):
+    def __init__(self, image_server_url="http://mtgproxy:4242", download_dir="downloads",
+                 upload_secret=None, art_path="/local_art/art/", upscaler_model=DEFAULT_UPSCALER_MODEL,
+                 inject_reminder_text=False, reminder_map_path=None):
         self.image_server_url = image_server_url
         self.download_dir = download_dir
         self.upload_secret = upload_secret
+        self.inject_reminder_text = inject_reminder_text
+        self.reminder_map_path = reminder_map_path
+        self._reminder_map_cache = None
         self.driver = None # Not needed for generation
         self.upscale_art = True # Corrected name
         self.ilaria_url = None # Initialize ilaria_url
@@ -474,6 +478,19 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             print(f"   [Dual Land] Symbols (fontsize {fit['symbol']}pt) + "
                   f"{len(body_lines)} body line(s) at {fit['text']}pt: {symbols}")
         else:
+            # Inject reminder text for keyword abilities this print doesn't
+            # already carry (no-op unless inject_reminder_text is set).  Done
+            # BEFORE _format_text so the injected sentences also get smart
+            # quotes and the {i}...{/i} italic wrapping.
+            if self.inject_reminder_text and oracle_text:
+                from automator_utils import get_cached_reminder_map, inject_ability_reminders
+                reminder_map = get_cached_reminder_map(self, self.reminder_map_path)
+                if reminder_map:
+                    oracle_text, injected = inject_ability_reminders(
+                        oracle_text, reminder_map,
+                        segment_formatter=lambda s: f" ({s})")
+                    if injected:
+                        print(f"   [Reminders] Injected: {', '.join(injected)}")
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 
         if flavor_text and not is_big_symbol_land:

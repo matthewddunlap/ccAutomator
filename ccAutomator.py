@@ -386,6 +386,21 @@ def main():
     )
 
     parser.add_argument(
+        '--inject-reminder-text',
+        action='store_true',
+        help="Inject reminder text for keyword abilities that the Scryfall data "
+             "does not already print (mapped in reminder_map.json).  Useful for "
+             "teaching decks.  Default: off."
+    )
+
+    parser.add_argument(
+        '--reminder-map',
+        default=None,
+        help="Path to the ability -> reminder-text JSON map used by "
+             "--inject-reminder-text (default: reminder_map.json next to ccAutomator.py)."
+    )
+
+    parser.add_argument(
         '--set-symbol-source',
         choices=['cardconjurer', 'hexproof'],
         default='cardconjurer',
@@ -698,7 +713,9 @@ def main():
             download_dir=args.download_dir if hasattr(args, 'download_dir') else 'downloads',
             upload_secret=args.upload_secret,
             art_path=args.art_path,
-            upscaler_model=args.upscaler_model if args.upscaler_model else DEFAULT_UPSCALER_MODEL
+            upscaler_model=args.upscaler_model if args.upscaler_model else DEFAULT_UPSCALER_MODEL,
+            inject_reminder_text=args.inject_reminder_text,
+            reminder_map_path=args.reminder_map
         )
         generator.upscale_art = args.upscale_art if args.upscale_art else False
         generator.ilaria_url = args.ilaria_url if args.ilaria_url else None
@@ -940,6 +957,8 @@ def main():
                 pt_left=args.pt_left,
                 pt_up=args.pt_up,
                 hide_reminder_text=args.hide_reminder_text,
+                inject_reminder_text=args.inject_reminder_text,
+                reminder_map_path=args.reminder_map,
                 set_symbol_source=args.set_symbol_source,
                 title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
@@ -1030,6 +1049,8 @@ def main():
                 rules_bounds_y=args.rules_bounds_y,
                 rules_bounds_height=args.rules_bounds_height,
                 hide_reminder_text=args.hide_reminder_text,
+                inject_reminder_text=args.inject_reminder_text,
+                reminder_map_path=args.reminder_map,
                 set_symbol_source=args.set_symbol_source,
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
@@ -1108,6 +1129,8 @@ def main():
             pt_bounds_height=args.pt_bounds_height,
             auto_fit_pt=args.auto_fit_pt,
             hide_reminder_text=args.hide_reminder_text,
+            inject_reminder_text=args.inject_reminder_text,
+            reminder_map_path=args.reminder_map,
             set_symbol_source=args.set_symbol_source,
             image_server=args.image_server,
             image_server_path=args.image_server_path,

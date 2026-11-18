@@ -719,6 +719,60 @@ class TextMixin:
         except Exception as e:
             print(f"      An unexpected error occurred in _apply_hide_reminder_text: {e}", file=sys.stderr)
 
+    def apply_reminder_injection(self):
+        """
+        Inject canonical reminder text for keyword abilities the card's Scryfall
+        data does not already print reminders for (no-op unless
+        --inject-reminder-text is set).
+
+        Reads the Rules Text box, runs the pure inject_ability_reminders() over
+        it, and writes the result back.  Injected segments use the app's own
+        '{i}(...) {/i}' italic form, so they render like printed reminders AND
+        are removed cleanly by the 'Hide reminder text' checkbox if that is on.
+        The function is idempotent, so cards whose reminders are already present
+        (or were injected in a prior run) are left byte-identical.
+        """
+        if not self.inject_reminder_text:
+            return
+
+        from automator_utils import get_cached_reminder_map, inject_ability_reminders
+
+        reminder_map = get_cached_reminder_map(self, getattr(self, 'reminder_map_path', None))
+        if not reminder_map:
+            return
+
+        print("   Checking for missing reminder text...")
+        try:
+            self.text_tab.click()
+
+            field_button_selector = "//h4[text()='Rules Text']"
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+
+            time.sleep(0.5)  # Wait for the field to fully load
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, "text-editor")))
+            current = text_input.get_attribute('value') or ""
+            if not current.strip():
+                print("      Rules Text is empty; nothing to inject.")
+                return
+
+            updated, injected = inject_ability_reminders(current, reminder_map)
+            if not injected:
+                print("      No missing reminders found.")
+                return
+
+            print(f"      Injected reminder(s) for: {', '.join(injected)}")
+            self.driver.execute_script("arguments[0].value = arguments[1];", text_input, updated)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            self._wait_for_render()
+
+        except (TimeoutException, NoSuchElementException) as e:
+            print(f"      An error occurred while applying reminder injection: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"      An unexpected error occurred in apply_reminder_injection: {e}", file=sys.stderr)
+
     def clear_mana_cost(self):
         """
         Clears the Mana Cost field.

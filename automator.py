@@ -67,6 +67,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                   pt_bounds_x=None, pt_bounds_y=None, pt_bounds_width=None, pt_bounds_height=None,
                   auto_fit_pt=False,
                  hide_reminder_text=False,
+                 inject_reminder_text=False, reminder_map_path=None,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
@@ -189,6 +190,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self._pt_base = None
         self._pt_current = None
         self.hide_reminder_text = hide_reminder_text
+        self.inject_reminder_text = inject_reminder_text
+        self.reminder_map_path = reminder_map_path
+        self._reminder_map_cache = None
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -964,6 +968,9 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                       f"{len(body_lines)} body line(s) at {fit['text']}pt: {symbols}")
             else:
                 self._apply_text_mods("Rules Text", down=self.rules_down)
+                # Inject reminder text for keyword abilities that this print
+                # doesn't already carry (no-op unless --inject-reminder-text).
+                self.apply_reminder_injection()
 
 
             if category and 'token' in category.lower():

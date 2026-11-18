@@ -1,0 +1,16 @@
+{
+  "_comment": "Ability -> canonical reminder text, used by --inject-reminder-text. Keys are matched case-insensitively in the card rules text; the value is appended (in Card Conjurer italic form) after the granting line when no printed reminder for that ability is present. A value may contain {cost}, which is replaced by the cost following the ability on the card (e.g. Ward {2}). Wording seeded from the most common official printed reminders in the Scryfall cache; edit freely.",
+  "flying": "This creature can't be blocked except by creatures with flying or reach.",
+  "vigilance": "Attacking doesn't cause this creature to tap.",
+  "haste": "This creature can attack and {T} as soon as it comes under your control.",
+  "first strike": "This creature deals combat damage before creatures without first strike.",
+  "double strike": "This creature deals both first-strike and regular combat damage.",
+  "trample": "This creature can deal excess combat damage to the player or planeswalker it's attacking.",
+  "deathtouch": "Any amount of damage this deals to a creature is enough to destroy it.",
+  "lifelink": "Damage dealt by this creature also causes you to gain that much life.",
+  "reach": "This creature can block creatures with flying.",
+  "hexproof": "This creature can't be the target of spells or abilities your opponents control.",
+  "menace": "This creature can't be blocked except by two or more creatures.",
+  "ward": "Whenever this creature becomes the target of a spell or ability an opponent controls, counter it unless that player pays {cost}.",
+  "infect": "This creature deals damage to creatures in the form of -1/-1 counters and to players in the form of poison counters."
+}

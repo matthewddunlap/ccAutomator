@@ -1,3 +1,4 @@
+import difflib
 import math
 import re
 import unicodedata
@@ -1275,6 +1276,175 @@ def build_dual_land_rules_text(symbols, body_lines, formatter=None):
     base = f"{{fontsize{txt}pt}}"
     body = base + ("\n" + base).join(fmt(line) for line in body_lines)
     return f"{{fontsize{sz}pt}}{{center}}{symbols}{{fontsize{gap}pt}}\n{body}"
+
+def load_reminder_map(path=None):
+    """
+    Load the ability -> reminder-text map used by --inject-reminder-text.
+
+    Defaults to reminder_map.json next to this file.  Keys beginning with '_'
+    are treated as comments and skipped.  Returns {} when the file is missing
+    or malformed -- with an empty map the injector is a no-op.
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reminder_map.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"   [ReminderMap] Could not load '{path}': {e}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print(f"   [ReminderMap] '{path}' must be a JSON object of ability -> text; got {type(data).__name__}.",
+              file=sys.stderr)
+        return {}
+    return {k: v for k, v in data.items()
+            if isinstance(k, str) and not k.startswith('_')
+            and isinstance(v, str) and v.strip()}
+
+def get_cached_reminder_map(holder, path=None):
+    """
+    Load the reminder map into `holder._reminder_map_cache` (once) and return
+    it.  Lets long-running generators/automators pay the file-read cost a
+    single time instead of per card.
+    """
+    if getattr(holder, '_reminder_map_cache', None) is None:
+        holder._reminder_map_cache = load_reminder_map(path)
+    return holder._reminder_map_cache
+
+def inject_ability_reminders(text, reminder_map, segment_formatter=None):
+    """
+    Inject canonical reminder text for keyword abilities that a card's rules
+    text mentions but does not already print a reminder for.
+
+    Scryfall's oracle_text only carries reminder text when WotC printed it on
+    that particular card face, so the same ability may or may not have one
+    depending on the print (e.g. Sengir Vampire has a Flying reminder, Serra
+    Angel does not).  This function finds each mapped ability that appears in
+    the text without a reminder and appends one, formatted by
+    `segment_formatter` -- by default the Card Conjurer italic form
+    ' {i}(...) {/i}', which both renders italic like printed reminders and is
+    removed cleanly by the 'Hide reminder text' checkbox.
+
+    Detection rules:
+      - Parenthetical segments -- plain "(...)" or the app's tagged
+        "{i}(...) {/i}" -- are attributed to the nearest ability keyword
+        occurring before them; that keyword is then considered to have a
+        printed reminder.
+      - Keyword matches INSIDE a segment (e.g. the word "flying" inside a
+        Reach reminder) never count as granting the ability.
+      - Text from the first {flavor} (or ///) marker onward is left untouched,
+        so keywords in flavor text are ignored.
+      - A map value containing "{cost}" (e.g. Ward) is filled in from the cost
+        that follows the ability on the card; if no cost can be read, that
+        ability is skipped rather than injected with a wrong cost.
+
+    The function is idempotent: running it over its own output changes nothing
+    (injected segments are attributed back to their keyword on a second pass).
+
+    Args:
+        text:              rules text (Card Conjurer text-box value, which may
+                           carry {i}...{/i} tags, or raw oracle text)
+        reminder_map:      dict of ability name -> reminder sentence
+        segment_formatter: optional callable sentence -> segment string to
+                           append (default: ' {i}(sentence){/i}'; pass a plain
+                           ' (sentence)' formatter when the text will later be
+                           wrapped by the app/generator itself)
+
+    Returns:
+        (new_text, injected) -- injected is the list of ability names added
+    """
+    if not text or not reminder_map:
+        return text, []
+    if segment_formatter is None:
+        segment_formatter = lambda s: f" {{i}}({s}){{/i}}"
+
+    # Split off the flavor tail, if any (everything from {flavor} or /// on).
+    head, tail = text, ''
+    m = re.search(r'\{flavor\}|///', text)
+    if m:
+        head, tail = text[:m.start()], text[m.start():]
+
+    # Parenthetical segments (non-nested; may span lines).
+    seg_spans = [(m2.start(), m2.end()) for m2 in re.finditer(r'\((?:[^()]*)\)', head)]
+
+    def in_segment(pos):
+        return any(s <= pos < e for s, e in seg_spans)
+
+    # Ability keyword occurrences outside segments, longest names first so
+    # multi-word abilities are found before any of their sub-parts could be.
+    occurrences = []  # (position, ability_name)
+    for ability in sorted(reminder_map, key=len, reverse=True):
+        for m3 in re.finditer(r'(?<![\w])' + re.escape(ability) + r'(?![\w])', head, re.I):
+            if not in_segment(m3.start()):
+                occurrences.append((m3.start(), ability))
+    occurrences.sort(key=lambda t: t[0])
+
+    # Attribute each segment to the keyword it is the reminder for.  Position
+    # alone is ambiguous when several keywords precede one segment
+    # ('Flying, vigilance (…)' -- which keyword does the (…)?), so score each
+    # candidate by how well the segment's text matches its canonical reminder,
+    # and take the best.  With no convincing match, fall back to the nearest
+    # preceding keyword (WotC's usual convention).  This is what keeps re-runs
+    # idempotent: our own injected segments re-attribute to their keyword.
+    def similarity(a, b):
+        a = a.lower(); b = b.lower()
+        if not a or not b:
+            return 0.0
+        return difflib.SequenceMatcher(None, a, b).ratio()
+
+    reminded = set()
+    for s, e in seg_spans:
+        seg_text = head[s + 1:e - 1]
+        cands = [i for i, (p, _) in enumerate(occurrences) if i not in reminded and p < s]
+        if not cands:
+            continue
+        best = max(cands, key=lambda i: similarity(seg_text, reminder_map[occurrences[i][1]]))
+        if similarity(seg_text, reminder_map[occurrences[best][1]]) < 0.4:
+            best = cands[-1]
+        reminded.add(best)
+
+    # Line starts, for mapping an occurrence back to its line.
+    lines = head.split('\n')
+    line_start = []
+    pos = 0
+    for ln in lines:
+        line_start.append(pos)
+        pos += len(ln) + 1
+
+    def line_index(p):
+        idx = 0
+        for i, ls in enumerate(line_start):
+            if ls <= p:
+                idx = i
+            else:
+                break
+        return idx
+
+    additions = {}
+    injected = []
+    for i, (p, ability) in enumerate(occurrences):
+        if i in reminded:
+            continue
+        sentence = reminder_map[ability]
+        if '{cost}' in sentence:
+            # The cost follows the keyword, e.g. 'Ward {2}' or 'Ward 3 life'.
+            cost_m = re.search(r'Ward\s+((?:\{[^{}]+\})+|\d+\s+(?:life|poison counters))',
+                              head[p:p + 40], re.I)
+            if not cost_m:
+                continue  # can't determine the cost; leave the card as-is
+            sentence = sentence.replace('{cost}', cost_m.group(1))
+        additions.setdefault(line_index(p), []).append(sentence)
+        injected.append(ability)
+
+    if not additions:
+        return text, []
+
+    out_lines = []
+    for i, ln in enumerate(lines):
+        if i in additions:
+            ln = ln + ''.join(segment_formatter(s) for s in additions[i])
+        out_lines.append(ln)
+    return '\n'.join(out_lines) + tail, injected
 
 def autofit_art_position(art_width, art_height, card_data):
     """
