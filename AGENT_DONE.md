@@ -577,3 +577,75 @@ numbers"):**
 **User call (2026-09-22): KEEP BOTH PARTS** (presented with the numbers
 above; earliest-selection equivalence + latest/random/all not:covered
 risk accepted and documented).
+
+## Accented names (sanitized decklists) + auto missing-card decklist  [2026-11-18]
+
+**Problem (user report 2026-11-18):** decklists with accent-stripped names
+('Ghazban Ogre', 'Ifh-Biff Efreet' — the user's hand-written
+`decks/missing.dek`) errored even though Scryfall resolves them.  Two
+expected behaviors were missing: (1) the Scryfall↔Card-Conjurer matching
+must work across the accent boundary, (2) a run should AUTO-GENERATE a
+re-runnable decklist of the errored cards (the user had to hand-copy them
+from the summary).
+
+**Root cause (verified against the live app + Scryfall, 2026-11-18):**
+- The app's own import search is fine: it queries Scryfall with unquoted
+  `name=Ghazban_Ogre` (js/creator-23.js `fetchScryfallData`), which is
+  accent-insensitive, so the dropdown DOES carry `Ghazbán Ogre (5ED #298)`
+  (+ `Ghazbán Ogress (5ED #299)`).
+- **Killer:** `PrintMixin._normalize_card_name` folded case/whitespace
+  only → `_option_name_matches` rejected EVERY accented option
+  (`ghazbánogre != ghazbanogre`) → `_get_and_filter_prints` returned [].
+- `_match_scryfall_to_cc_prints` pass 2 did `"ghazbán ogre" in "ghazban
+  ogre (5ed #298)"` → False — the scryfall→CC name match failed across the
+  accent boundary even with a populated CC pool.
+- `ScryfallCache.get_card/get_prints` were exact-name SQL lookups; a
+  sanitized name always missed the local cache → wasted API calls in
+  pre-flight, validation, print resolution, and art metadata.
+- The failure list did not exist — errors were only printed in the summary.
+
+**Fix (5 files + new suite, commit d73bf36):**
+- `automator_utils.py`: new `normalize_card_name()` — NFKD + drop-
+  combining-marks + case/whitespace fold; undecomposable chars (ł) are
+  KEPT so different names cannot compare equal.  `parse_card_file` now
+  keeps the copy count (`'count'`, 1 when no number prefix).  New
+  `write_missing_list(input, lines)` → `'<input>.missing'` (the existing
+  repo convention: `decksold/*.dek.missing`, `NeoclassicalCube_01.txt.missing`).
+- `mixins/print_mixin.py`: `_normalize_card_name` delegates to the helper.
+- `automator.py`: `_match_scryfall_to_cc_prints` pass 2 compares both
+  sides in `normalize_card_name` form (pass 1 set+CN unchanged).
+- `scryfall_cache.py`: `_norm_name` + `_fetch_rows` — exact-name indexed
+  lookup first (unchanged fast path), accent-folded fallback ONLY on a
+  miss, via a SQLite `cc_norm()` Python function registered on the
+  connection.  No schema change, no DB rebuild; the fallback honors the
+  `set_code` scope (get_card) and returns ALL prints (get_prints,
+  `limit_one=False`); clean `None`/[] on unknown cards preserved.
+- `ccAutomator.py`: error lines keep the decklist's copy count
+  (`3 Urza's Tower`, not `1 ...`); after the error summary a failed run
+  writes `'<input>.missing'` (selenium + json modes) and points at it;
+  clean runs write nothing.  Exit-code semantics unchanged (errors exit 1).
+
+**Tests (new `test_accent_matching.py`, 15/15):** normalize (fold,
+undecomposable kept, None-safe); `_option_name_matches` (accent both
+directions, Ogress/DarkRituals boundaries, legacy semantics preserved);
+`_match_scryfall_to_cc_prints` (pass-1 direct, pass-2 accent-crossing both
+directions, Ogress rejected); cache fallback (sanitized get_card/get_prints,
+set scope, boundary, clean miss, exact path unchanged); parse_card_file
+counts; write_missing_list (location/format/re-parse/overwrite).
+All five suites green: 15/15, 18/18, 8/8, 34/34, 8/8; py_compile clean.
+
+**Live verification (real app http://mtgproxy:4242/ + production cache,
+2026-11-18):**
+- **Run A — `decks/missing.dek` (the 2 cards that used to error): EXIT 0,
+  Success: 2 / Skipped: 0 / Error: 0** (1m12s). Both resolved via the LOCAL
+  cache ("Resolved 6/1 local cache print(s)", "Using local Scryfall cache"
+  for art) — zero Scryfall API calls; captured `ghazban-ogre_arn_49.png` +
+  `ifh-biff-efreet_arn_50.png`; NO `.missing` file (clean run).
+- **Run B — bogus deck (2× fake card + 1 real, `--skip-validation`): EXIT 1,
+  Success: 1 / Error: 1**, and `bogus.txt.missing` was auto-written with
+  exactly `2 Zqxqxqw Bogus Card` (copy count preserved; standard decklist,
+  parses back cleanly and is re-runnable).
+
+**Commits (branch user-agent-ts140, 2026-11-18):**
+- **d73bf36** the fix + `test_accent_matching.py` (6 files, +447/−40).
+- Notes commit: this one.

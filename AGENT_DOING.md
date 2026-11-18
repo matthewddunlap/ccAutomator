@@ -1,16 +1,22 @@
 # AGENT DOING — current work item
 
-**NEXT SESSION, START HERE (2026-09-22):**
-**#5 COMPLETE** — user called KEEP BOTH PARTS (2026-09-22, presented with
-the A/B numbers). Commits on branch user-agent: **6a19ea8** (data-dir +
-cache-first art) + **76b1635** (search cache-first + games-field fix +
-8-test suite); notes commit records the hashes. All four suites green
-(18/18, 34/34, 8/8, 8/8); live A/B EXIT 0 both sides; PNGs byte-identical
-(API side vs cache side, and cache side vs the verified h9_new set).
-Full record: AGENT_DONE.md "## #5". **Next candidate (deferred item,
-not yet started): H7** — delete the dead no-op `apply_set_filters`
-(automator_utils.py:223-243, imported but never called).
-(Prior: #4 H9 DONE — da1b06d; #3 perf DONE — 989c7a9 + 9d03303;
+**NEXT SESSION, START HERE (2026-11-18):**
+**ACCENTED NAMES + AUTO MISSING-LIST DONE (2026-11-18)** — sanitized
+decklist names ('Ghazban Ogre', 'Ifh-Biff Efreet') now match the accented
+Scryfall/CC spellings ('Ghazbán Ogre', 'Ifh-Bíff Efreet'): shared
+`normalize_card_name()` helper (NFKD accent fold) in
+`PrintMixin._option_name_matches` + `_match_scryfall_to_cc_prints` pass 2,
+accent-folded cache fallback (SQLite `cc_norm()`, no schema change), and a
+new auto-written `'<input>.missing'` re-runnable decklist of errored cards
+(copy counts preserved; clean runs write nothing). Fix commit **d73bf36**
+(branch user-agent-ts140). All FIVE suites green (new 15/15, 18/18, 8/8,
+34/34, 8/8). Live: `decks/missing.dek` 2/2 captured EXIT 0 with ZERO
+Scryfall API calls (all local cache); bogus deck EXIT 1 + `bogus.txt.missing`
+auto-written with the exact failed line. Full record: AGENT_DONE.md
+"## Accented names (sanitized decklists) + auto missing-card decklist".
+(Deferred, not started: H7 — delete the dead no-op `apply_set_filters`.)
+(Prior: #5 COMPLETE 2026-09-22 — KEEP BOTH PARTS, commits 6a19ea8 +
+76b1635; #4 H9 DONE — da1b06d; #3 perf DONE — 989c7a9 + 9d03303;
 H8 DONE — 41c31f5.)
 
 ENV NOTES (this box): `CLAUDE_JOB_DIR` is unset in-session — the job dir
@@ -19,7 +25,7 @@ cache is `/home/i3/.claude/jobs/ac1fc71f/tmp/` (cache:
 `/home/i3/cc_test_cache/`, 5 cards incl. the 3 deck cards + 2 prime cards;
 rebuild with `seed_cache.py <dir>` if missing). App
 `http://mtgproxy:4242/` + Scryfall API reachable; venv
-`.venv/bin/python`. Four test suites at repo root.
+`.venv/bin/python`. Five test suites at repo root.
 
 ## #5 DATA-DIR + where the 5 minutes goes  [DONE 2026-09-22 — commits 6a19ea8 + 76b1635]
 
