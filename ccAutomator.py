@@ -14,7 +14,8 @@ from automator_utils import (
     save_cardconjurer_file,
     BASIC_LAND_NAMES,
     DEFAULT_UPSCALER_MODEL,
-    parse_set_list
+    parse_set_list,
+    write_missing_list
 )
 import land_generator
 
@@ -712,6 +713,7 @@ def main():
         generated_cards = list(full_art_lands) # Start with full art lands
         total_cards = len(all_cards) + len(full_art_lands)
         failed_cards = []
+        failed_lines = []  # decklist-format lines for the .missing file
         
         for section, section_cards in cards_by_section.items():
             print(f"\nProcessing section: {section} ({len(section_cards)} cards)")
@@ -758,10 +760,12 @@ def main():
                         print(f"  ✓ {card_name}")
                     else:
                         failed_cards.append(card_name)
+                        failed_lines.append(f"{card.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
                         print(f"  ✗ {card_name} (generation failed)")
-                        
+
                 except Exception as e:
                     failed_cards.append(card_name)
+                    failed_lines.append(f"{card.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
                     print(f"  ✗ {card_name}: {e}")
         
         # Save output file
@@ -777,6 +781,13 @@ def main():
         print(f"Generated {len(generated_cards)}/{total_cards} cards")
         if failed_cards:
             print(f"Failed cards ({len(failed_cards)}): {', '.join(failed_cards)}")
+            # Auto-generate a re-runnable decklist of the failed cards next
+            # to the input file (same convention as selenium mode).
+            try:
+                missing_path = write_missing_list(args.input_file, failed_lines)
+                print(f"Missing cards written to {missing_path}")
+            except OSError as e:
+                print(f"Warning: could not write the missing-cards list: {e}", file=sys.stderr)
         print(f"Output: {output_path}")
         print(f"{'='*60}")
         sys.exit(0)
@@ -1199,11 +1210,13 @@ def main():
                         else:
                             # Neither captured nor skipped -> No match found or other silent failure
                             error_count += 1
-                            error_list.append(f"1 {card_name}{'|' + set_code if set_code else ''}")
+                            # Keep the decklist's copy count so the generated
+                            # .missing file re-runs the same number of cards.
+                            error_list.append(f"{card_data.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
                     except Exception as e:
                         print(f"   Error processing '{card_name}': {e}", file=sys.stderr)
                         error_count += 1
-                        error_list.append(f"1 {card_name}{'|' + set_code if set_code else ''}")
+                        error_list.append(f"{card_data.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
 
             # --- Full-Art Basic Land Generation (Single Session) ---
             # Moved to end of workflow to prevent template masks from affecting main cards
@@ -1388,6 +1401,17 @@ def main():
                 print("\n--- Summary of Errors ---")
                 for err in error_list:
                     print(err)
+                # Auto-generate a re-runnable decklist of the failed cards
+                # next to the input file ('<input>.missing', standard
+                # decklist format), so the user does not have to hand-copy
+                # them from this summary.
+                try:
+                    missing_path = write_missing_list(args.input_file, error_list)
+                    print(f"\n--- Missing cards written to {missing_path} ---")
+                    print("Fix the names above, then re-run with that file as input: "
+                          f"{Path(missing_path).name} is a standard decklist.")
+                except OSError as e:
+                    print(f"Warning: could not write the missing-cards list: {e}", file=sys.stderr)
 
             if args.save_cc_file and args.card_builder == 'selenium':
                 # In JSON mode, we already generated the file, but maybe the user wants the *final* state

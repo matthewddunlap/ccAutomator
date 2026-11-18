@@ -10,15 +10,22 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 class PrintMixin:
     @staticmethod
     def _normalize_card_name(name: str) -> str:
-        """Strip all whitespace and lowercase so 'DarkRitual' == 'Dark Ritual'."""
-        return re.sub(r'\s+', '', name).lower()
+        """Canonical form for matching: case-, whitespace- AND accent-
+        insensitive, so 'DarkRitual' == 'Dark Ritual' and 'Ghazban Ogre'
+        (sanitized decklist input) == 'Ghazbán Ogre' (as Scryfall/Card
+        Conjurer spell it).  Single source of truth: automator_utils."""
+        from automator_utils import normalize_card_name
+        return normalize_card_name(name)
 
     @classmethod
     def _option_name_matches(cls, option_text: str, card_name: str) -> bool:
         """Returns True when the name portion of a Card Conjurer dropdown option
-        (text before the first " (SET #n)" suffix) matches `card_name` case- and
-        whitespace-insensitively. So 'DarkRitual' matches 'Dark Ritual (SLZ #38)',
-        but 'DarkRitual' does NOT match 'DarkRituals (XXX #1)'.
+        (text before the first " (SET #n)" suffix) matches `card_name` case-,
+        whitespace- and accent-insensitively. So 'DarkRitual' matches
+        'Dark Ritual (SLZ #38)', sanitized 'Ghazban Ogre' matches
+        'Ghazbán Ogre (5ED #298)', but 'DarkRitual' does NOT match
+        'DarkRituals (XXX #1)' and 'Ghazban Ogre' does NOT match
+        'Ghazbán Ogress (5ED #299)'.
         """
         m = re.match(r'^(.*?)\s*\(', option_text)
         if not m:

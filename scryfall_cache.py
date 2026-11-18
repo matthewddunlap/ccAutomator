@@ -304,6 +304,19 @@ def update_scryfall_cache(force=False):
                 pass
 
 
+def _norm_name(name):
+    """Accent/case-folded card name, used ONLY by the normalized fallback
+    lookup below.  Kept local (no automator_utils import) so this leaf module
+    stays dependency-light; the folding must stay consistent with
+    automator_utils.normalize_card_name (NFKD + drop-combining-marks).
+    Spaces are preserved: both sides are Scryfall's exact stored name and the
+    looked-up name, so spacing differences never occur here.
+    """
+    import unicodedata
+    folded = unicodedata.normalize('NFKD', str(name))
+    return ''.join(ch for ch in folded if not unicodedata.combining(ch)).lower()
+
+
 class ScryfallCache:
     _instance = None
     _conn = None
@@ -326,22 +339,44 @@ class ScryfallCache:
                         f"Scryfall cache unavailable at {DB_FILE} and the "
                         "update failed; using the Scryfall API instead")
             self._conn = sqlite3.connect(DB_FILE)
+            # Registers cc_norm() for the accent-fallback lookups in
+            # get_card/get_prints (SQLite SQL cannot fold accents on its own).
+            self._conn.create_function("cc_norm", 1, _norm_name, deterministic=True)
         return self._conn
+
+    @staticmethod
+    def _fetch_rows(curr, name, set_code=None, limit_one=True):
+        """Exact-name lookup first (indexed fast path, unchanged behavior),
+        then -- and only if that missed -- an accent/case-folded comparison:
+        the cache stores Scryfall's canonical spelling (often accented,
+        e.g. 'Ghazbán Ogre') while a sanitized decklist carries 'Ghazban
+        Ogre'.  The fallback rescues exactly that case; it is a plain
+        (unindexed) comparison, so it must stay the slow path only.
+        limit_one=False (get_prints) returns EVERY matching row."""
+        lower = str(name).lower()
+        limit = " LIMIT 1" if limit_one else ""
+        if set_code:
+            curr.execute(f"SELECT data FROM cards WHERE name = ? AND set_code = ?{limit}",
+                         (lower, set_code.lower()))
+        else:
+            curr.execute(f"SELECT data FROM cards WHERE name = ?{limit}", (lower,))
+        rows = curr.fetchall()
+        if rows:
+            return rows
+        if set_code:
+            curr.execute(f"SELECT data FROM cards WHERE cc_norm(name) = cc_norm(?) AND set_code = ?{limit}",
+                         (name, set_code.lower()))
+        else:
+            curr.execute(f"SELECT data FROM cards WHERE cc_norm(name) = cc_norm(?){limit}", (name,))
+        return curr.fetchall()
 
     def get_card(self, name, set_code=None):
         try:
             conn = self._get_conn()
             curr = conn.cursor()
-
-            if set_code:
-                curr.execute("SELECT data FROM cards WHERE name = ? AND set_code = ? LIMIT 1",
-                           (name.lower(), set_code.lower()))
-            else:
-                curr.execute("SELECT data FROM cards WHERE name = ? LIMIT 1", (name.lower(),))
-
-            row = curr.fetchone()
-            if row:
-                return json.loads(row[0])
+            rows = self._fetch_rows(curr, name, set_code)
+            if rows:
+                return json.loads(rows[0][0])
             return None
         except Exception:
             # If the database is locked or table doesn't exist yet, return None to allow API fallback
@@ -361,8 +396,8 @@ class ScryfallCache:
         try:
             conn = self._get_conn()
             curr = conn.cursor()
-            curr.execute("SELECT data FROM cards WHERE name = ?", (name.lower(),))
-            cards = [json.loads(row[0]) for row in curr.fetchall()]
+            rows = self._fetch_rows(curr, name, limit_one=False)
+            cards = [json.loads(row[0]) for row in rows]
             # released_at is a stored field ("YYYY-MM-DD"); missing ones (very
             # old prints) sort first, matching an 'earliest' preference.
             cards.sort(key=lambda c: c.get("released_at") or "")

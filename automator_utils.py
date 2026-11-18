@@ -89,6 +89,32 @@ def check_server_file_details(url: str) -> tuple[bool, Optional[datetime]]:
         print(f"Warning: Network error while checking {url}: {e}. Assuming it does not exist.")
         return False, None
 
+def normalize_card_name(name: str) -> str:
+    """Canonical form for COMPARING card names: lowercase, all whitespace
+    removed, accents folded away, so equivalent spellings compare equal:
+
+        'DarkRitual'      == 'Dark Ritual'
+        'Ghazban Ogre'    == 'Ghazbán Ogre'
+        'Ifh-Biff Efreet' == 'Ifh-Bíff Efreet'
+
+    Accent folding is NFKD decomposition + drop-combining-marks, the same
+    scheme generate_safe_filename's ascii-encode step relies on; characters
+    that do not decompose (ł, ß, ...) are kept, so two names still equal only
+    if they truly are (the ascii-encode approach would silently drop them and
+    could equate different names).
+
+    Pure function: no I/O, no globals.  Use for name EQUALITY/CONTAINS checks
+    across the Scryfall/Card-Conjurer boundary; do NOT use it to rewrite the
+    names themselves (output filenames and saved-card names keep their
+    original spelling via generate_safe_filename).
+    """
+    if name is None:
+        return ""
+    folded = unicodedata.normalize('NFKD', name)
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.sub(r'\s+', '', folded).lower()
+
+
 def generate_safe_filename(value: str) -> str:
     if not isinstance(value, str): value = str(value)
     value = value.replace("'", "")
@@ -147,18 +173,20 @@ BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
 def parse_card_file(filepath):
     """
     Parses the input file to extract card names and categories (e.g., from # Headers).
-    Returns a list of dictionaries: [{'name': 'Card Name', 'category': 'CategoryName'}, ...]
+    Returns a list of dictionaries:
+        [{'name': 'Card Name', 'category': 'CategoryName', 'set': 'SET'|None,
+          'count': <int copies, 1 when no number prefix>}, ...]
     """
     cards = []
     current_category = 'deck' # Default category
-    
+
     try:
         with open(filepath, 'r') as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                
+
                 # Check for headers (lines starting with #)
                 if line.startswith('#'):
                     # It's a header/category change, not just a comment
@@ -167,14 +195,16 @@ def parse_card_file(filepath):
                     current_category = line.lstrip('#').strip().lower()
                     continue
 
-                # Use regex to ignore leading numbers and capture the rest of the line.
-                match = re.match(r'^\d+\s+(.*)', line)
+                # Use regex to capture the leading count and the rest of the line.
+                match = re.match(r'^(\d+)\s+(.*)', line)
                 if match:
-                    full_name = match.group(1).strip()
+                    count = int(match.group(1))
+                    full_name = match.group(2).strip()
                 else:
                     # Assume the whole line is the card name if no number prefix
+                    count = 1
                     full_name = line
-                
+
                 set_code = None
                 if '|' in full_name:
                     parts = full_name.split('|', 1)
@@ -182,14 +212,36 @@ def parse_card_file(filepath):
                     set_code = parts[1].strip()
                 else:
                     card_name = full_name
-                
-                cards.append({'name': card_name, 'category': current_category, 'set': set_code})
+
+                cards.append({'name': card_name, 'category': current_category,
+                              'set': set_code, 'count': count})
                     
     except FileNotFoundError:
         import sys
         print(f"Error: Input file not found at '{filepath}'", file=sys.stderr)
         sys.exit(1)
     return cards
+
+
+def write_missing_list(input_file, lines):
+    """
+    Writes the run's failed cards as a re-runnable decklist next to the input
+    file: '<input_file>.missing' (the same convention as the existing
+    *.dek.missing / *.txt.missing files in this repo).
+
+    `lines` are standard decklist lines ('<count> <Name>|SET' / '<count>
+    <Name>'), one failed card per line, in the order the run reported them.
+    The file is a plain decklist, so after the names are fixed it can be fed
+    straight back in as input_file to re-run ONLY the cards that errored.
+    Overwrites any previous .missing file for the same input.
+
+    Returns the absolute path written.
+    """
+    out_path = os.path.abspath(str(input_file) + '.missing')
+    with open(out_path, 'w', encoding='utf-8') as f:
+        for line in lines:
+            f.write(line.rstrip('\n') + '\n')
+    return out_path
 
 
 def split_basic_lands(cards):

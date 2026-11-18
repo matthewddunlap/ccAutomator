@@ -313,16 +313,22 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 continue
 
             # Pass 2: Fuzzy Match (Name Only) - Use as a fallback for ANY print of the same name
-            for cc_print in all_cc_prints:
-                cc_text = cc_print.get('text', '').lower()
-                # Scryfall name is usually the first part of the CC text: "Card Name (SET #123)"
-                if sr.get('name', '').lower() in cc_text:
-                    new_print = cc_print.copy()
-                    new_print['scryfall_data'] = sr
-                    matched_prints.append(new_print)
-                    # if self.debug:
-                    #     print(f"      DEBUG: Using '{cc_print['text']}' as template for '{sr.get('name')}' ({sr.get('set')} #{sr.get('collector_number')})")
-                    break
+            from automator_utils import normalize_card_name
+            sr_name = normalize_card_name(sr.get('name', ''))
+            if sr_name:
+                for cc_print in all_cc_prints:
+                    # Compare in normalize_card_name form (case/whitespace/accent
+                    # folded) so a sanitized decklist name ('Ghazban Ogre') still
+                    # matches an accented CC print ('Ghazbán Ogre (5ED #298)') and
+                    # vice versa.  The Scryfall name is usually the first part of
+                    # the CC text: "Card Name (SET #123)".
+                    if sr_name in normalize_card_name(cc_print.get('text', '')):
+                        new_print = cc_print.copy()
+                        new_print['scryfall_data'] = sr
+                        matched_prints.append(new_print)
+                        # if self.debug:
+                        #     print(f"      DEBUG: Using '{cc_print['text']}' as template for '{sr.get('name')}' ({sr.get('set')} #{sr.get('collector_number')})")
+                        break
 
         return matched_prints
 
