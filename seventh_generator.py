@@ -478,19 +478,20 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
             print(f"   [Dual Land] Symbols (fontsize {fit['symbol']}pt) + "
                   f"{len(body_lines)} body line(s) at {fit['text']}pt: {symbols}")
         else:
-            # Inject reminder text for keyword abilities this print doesn't
-            # already carry (no-op unless inject_reminder_text is set).  Done
-            # BEFORE _format_text so the injected sentences also get smart
+            # Normalize reminder text (no-op unless inject_reminder_text is
+            # set): replace printed reminders of mapped keyword abilities with
+            # the canonical map sentences, adding any that are missing.  Done
+            # BEFORE _format_text so the canonical sentences also get smart
             # quotes and the {i}...{/i} italic wrapping.
             if self.inject_reminder_text and oracle_text:
                 from automator_utils import get_cached_reminder_map, inject_ability_reminders
                 reminder_map = get_cached_reminder_map(self, self.reminder_map_path)
                 if reminder_map:
-                    oracle_text, injected = inject_ability_reminders(
+                    oracle_text, abilities = inject_ability_reminders(
                         oracle_text, reminder_map,
                         segment_formatter=lambda s: f" ({s})")
-                    if injected:
-                        print(f"   [Reminders] Injected: {', '.join(injected)}")
+                    if abilities:
+                        print(f"   [Reminders] Canonical reminder(s) applied for: {', '.join(abilities)}")
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))
 
         if flavor_text and not is_big_symbol_land:

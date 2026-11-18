@@ -1311,35 +1311,66 @@ def get_cached_reminder_map(holder, path=None):
         holder._reminder_map_cache = load_reminder_map(path)
     return holder._reminder_map_cache
 
+REMINDER_SIM_THRESHOLD = 0.4  # min. similarity for a segment to count as a keyword's printed reminder
+
+def _reminder_similarity(a, b):
+    a = a.lower(); b = b.lower()
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+def _reminder_occurrences(head, reminder_map, seg_spans):
+    """
+    Positions of mapped-keyword occurrences in `head` that are OUTSIDE the
+    parenthetical segments in `seg_spans` (a keyword mentioned inside a
+    reminder never counts as granting the ability).
+    """
+    def in_segment(pos):
+        return any(s <= pos < e for s, e in seg_spans)
+
+    occurrences = []
+    # Longest names first so multi-word abilities are found before any
+    # sub-part of theirs could match.
+    for ability in sorted(reminder_map, key=len, reverse=True):
+        for m in re.finditer(r'(?<![\w])' + re.escape(ability) + r'(?![\w])', head, re.I):
+            if not in_segment(m.start()):
+                occurrences.append((m.start(), ability))
+    occurrences.sort(key=lambda t: t[0])
+    return occurrences
+
 def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     """
-    Inject canonical reminder text for keyword abilities that a card's rules
-    text mentions but does not already print a reminder for.
+    Normalize reminder text: for every mapped keyword ability mentioned in
+    the card's rules text, ensure the card carries the canonical reminder
+    sentence from `reminder_map` -- and only that.
 
     Scryfall's oracle_text only carries reminder text when WotC printed it on
-    that particular card face, so the same ability may or may not have one
-    depending on the print (e.g. Sengir Vampire has a Flying reminder, Serra
-    Angel does not).  This function finds each mapped ability that appears in
-    the text without a reminder and appends one, formatted by
-    `segment_formatter` -- by default the Card Conjurer italic form
-    ' {i}(...) {/i}', which both renders italic like printed reminders and is
-    removed cleanly by the 'Hide reminder text' checkbox.
+    that particular card face, so the same ability may be missing on one print
+    and worded differently on another (Serra Angel has no Flying reminder;
+    Sengir Vampire's Flying wording is a non-canonical variant).  This
+    function therefore:
 
-    Detection rules:
-      - Parenthetical segments -- plain "(...)" or the app's tagged
-        "{i}(...) {/i}" -- are attributed to the nearest ability keyword
-        occurring before them; that keyword is then considered to have a
-        printed reminder.
-      - Keyword matches INSIDE a segment (e.g. the word "flying" inside a
-        Reach reminder) never count as granting the ability.
-      - Text from the first {flavor} (or ///) marker onward is left untouched,
-        so keywords in flavor text are ignored.
-      - A map value containing "{cost}" (e.g. Ward) is filled in from the cost
-        that follows the ability on the card; if no cost can be read, that
-        ability is skipped rather than injected with a wrong cost.
+      1. Finds parenthetical segments that are a mapped keyword's *printed
+         reminder* -- attributed by content similarity to the keyword's
+         canonical sentence (>= REMINDER_SIM_THRESHOLD) -- and removes them,
+         tags and preceding space included.  Parentheticals with no convincing
+         match (plain non-reminder notes) are never touched, and keyword
+         matches INSIDE any segment never count as granting the ability.
+      2. Appends the canonical sentence after each line that mentions the
+         ability (one per line, in the order the abilities appear), formatted
+         by `segment_formatter` -- by default the Card Conjurer italic form
+         ' {i}(...) {/i}', which renders italic like printed reminders and is
+         removed by the 'Hide reminder text' checkbox if that is also set.
 
-    The function is idempotent: running it over its own output changes nothing
-    (injected segments are attributed back to their keyword on a second pass).
+    The result is uniform wording across a deck, no double reminders by
+    construction (the printed one is deleted before the canonical is added),
+    and the function is idempotent: a second pass strips the canonical
+    segment and re-appends the identical one.
+
+    Text from the first {flavor} (or ///) marker onward is never touched.
+    A map value containing "{cost}" (e.g. Ward) is filled in from the cost
+    that follows the ability on the card; if no cost can be read, that
+    ability is skipped rather than appended with a wrong cost.
 
     Args:
         text:              rules text (Card Conjurer text-box value, which may
@@ -1351,7 +1382,8 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
                            wrapped by the app/generator itself)
 
     Returns:
-        (new_text, injected) -- injected is the list of ability names added
+        (new_text, abilities) -- abilities is the list of abilities that
+        received a canonical reminder, in order of first appearance
     """
     if not text or not reminder_map:
         return text, []
@@ -1364,46 +1396,47 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     if m:
         head, tail = text[:m.start()], text[m.start():]
 
-    # Parenthetical segments (non-nested; may span lines).
-    seg_spans = [(m2.start(), m2.end()) for m2 in re.finditer(r'\((?:[^()]*)\)', head)]
+    def segments(h):
+        return [(mm.start(), mm.end()) for mm in re.finditer(r'\((?:[^()]*)\)', h)]
 
-    def in_segment(pos):
-        return any(s <= pos < e for s, e in seg_spans)
+    seg_spans = segments(head)
+    occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
 
-    # Ability keyword occurrences outside segments, longest names first so
-    # multi-word abilities are found before any of their sub-parts could be.
-    occurrences = []  # (position, ability_name)
-    for ability in sorted(reminder_map, key=len, reverse=True):
-        for m3 in re.finditer(r'(?<![\w])' + re.escape(ability) + r'(?![\w])', head, re.I):
-            if not in_segment(m3.start()):
-                occurrences.append((m3.start(), ability))
-    occurrences.sort(key=lambda t: t[0])
-
-    # Attribute each segment to the keyword it is the reminder for.  Position
-    # alone is ambiguous when several keywords precede one segment
-    # ('Flying, vigilance (…)' -- which keyword does the (…)?), so score each
-    # candidate by how well the segment's text matches its canonical reminder,
-    # and take the best.  With no convincing match, fall back to the nearest
-    # preceding keyword (WotC's usual convention).  This is what keeps re-runs
-    # idempotent: our own injected segments re-attribute to their keyword.
-    def similarity(a, b):
-        a = a.lower(); b = b.lower()
-        if not a or not b:
-            return 0.0
-        return difflib.SequenceMatcher(None, a, b).ratio()
-
-    reminded = set()
+    # --- 1. Remove printed reminders of mapped keywords (strong match only) ---
+    strip_ranges = []
     for s, e in seg_spans:
         seg_text = head[s + 1:e - 1]
-        cands = [i for i, (p, _) in enumerate(occurrences) if i not in reminded and p < s]
+        cands = [i for i, (p, _) in enumerate(occurrences) if p < s]
         if not cands:
             continue
-        best = max(cands, key=lambda i: similarity(seg_text, reminder_map[occurrences[i][1]]))
-        if similarity(seg_text, reminder_map[occurrences[best][1]]) < 0.4:
-            best = cands[-1]
-        reminded.add(best)
+        best = max(cands, key=lambda i: _reminder_similarity(seg_text, reminder_map[occurrences[i][1]]))
+        if _reminder_similarity(seg_text, reminder_map[occurrences[best][1]]) < REMINDER_SIM_THRESHOLD:
+            continue  # not convincingly a reminder of a mapped keyword; keep it
+        # Extend over the app's italic tags ('{i}' = 3 chars, '{/i}' = 4) and
+        # one preceding space.
+        start = s - 3 if head[max(0, s - 3):s] == '{i}' else s
+        if start > 0 and head[start - 1] == ' ':
+            start -= 1
+        end = e + 4 if head[e:e + 4] == '{/i}' else e
+        strip_ranges.append((start, end))
 
-    # Line starts, for mapping an occurrence back to its line.
+    if strip_ranges:
+        strip_ranges.sort()
+        merged = []
+        for s, e in strip_ranges:
+            if merged and s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        for s, e in reversed(merged):  # from the end so indices stay valid
+            head = head[:s] + head[e:]
+        # A removed segment may leave an empty line (or a trailing newline);
+        # card text carries no meaningful blank lines, so collapse them.
+        head = re.sub(r'\n{2,}', '\n', head).rstrip('\n')
+        seg_spans = segments(head)
+        occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
+
+    # --- 2. Append the canonical reminder after each line mentioning an ability ---
     lines = head.split('\n')
     line_start = []
     pos = 0
@@ -1420,31 +1453,34 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
                 break
         return idx
 
-    additions = {}
-    injected = []
-    for i, (p, ability) in enumerate(occurrences):
-        if i in reminded:
+    per_line = {}   # line index -> [sentences, in order of appearance]
+    abilities = []  # return value, in order of first appearance
+    seen = set()    # (line, ability) so a repeated keyword on a line adds one reminder
+    for p, ability in occurrences:
+        key = (line_index(p), ability)
+        if key in seen:
             continue
+        seen.add(key)
         sentence = reminder_map[ability]
         if '{cost}' in sentence:
             # The cost follows the keyword, e.g. 'Ward {2}' or 'Ward 3 life'.
             cost_m = re.search(r'Ward\s+((?:\{[^{}]+\})+|\d+\s+(?:life|poison counters))',
                               head[p:p + 40], re.I)
             if not cost_m:
-                continue  # can't determine the cost; leave the card as-is
+                continue  # can't determine the cost; leave this ability as-is
             sentence = sentence.replace('{cost}', cost_m.group(1))
-        additions.setdefault(line_index(p), []).append(sentence)
-        injected.append(ability)
+        per_line.setdefault(key[0], []).append(sentence)
+        abilities.append(ability)
 
-    if not additions:
+    if not per_line:
         return text, []
 
     out_lines = []
     for i, ln in enumerate(lines):
-        if i in additions:
-            ln = ln + ''.join(segment_formatter(s) for s in additions[i])
+        if i in per_line:
+            ln = ln + ''.join(segment_formatter(s) for s in per_line[i])
         out_lines.append(ln)
-    return '\n'.join(out_lines) + tail, injected
+    return '\n'.join(out_lines) + tail, abilities
 
 def autofit_art_position(art_width, art_height, card_data):
     """

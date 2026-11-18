@@ -388,9 +388,11 @@ def main():
     parser.add_argument(
         '--inject-reminder-text',
         action='store_true',
-        help="Inject reminder text for keyword abilities that the Scryfall data "
-             "does not already print (mapped in reminder_map.json).  Useful for "
-             "teaching decks.  Default: off."
+        help="Normalize reminder text: every mapped keyword ability gets the "
+             "canonical sentence from reminder_map.json, replacing any "
+             "printed variant and adding any that are missing.  Uniform "
+             "wording, no double reminders.  Useful for teaching decks.  "
+             "Default: off."
     )
 
     parser.add_argument(

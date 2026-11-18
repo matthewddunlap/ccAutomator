@@ -721,16 +721,17 @@ class TextMixin:
 
     def apply_reminder_injection(self):
         """
-        Inject canonical reminder text for keyword abilities the card's Scryfall
-        data does not already print reminders for (no-op unless
-        --inject-reminder-text is set).
+        Normalize reminder text (no-op unless --inject-reminder-text is set):
+        replace any printed reminder of a mapped keyword ability with the
+        canonical sentence from reminder_map.json, and add one wherever the
+        ability appears without a reminder (no-op otherwise).
 
         Reads the Rules Text box, runs the pure inject_ability_reminders() over
-        it, and writes the result back.  Injected segments use the app's own
+        it, and writes the result back.  Canonical segments use the app's own
         '{i}(...) {/i}' italic form, so they render like printed reminders AND
         are removed cleanly by the 'Hide reminder text' checkbox if that is on.
-        The function is idempotent, so cards whose reminders are already present
-        (or were injected in a prior run) are left byte-identical.
+        The function is idempotent: a re-run strips the canonical segment and
+        re-appends the identical one, so the box stays byte-identical.
         """
         if not self.inject_reminder_text:
             return
@@ -757,12 +758,12 @@ class TextMixin:
                 print("      Rules Text is empty; nothing to inject.")
                 return
 
-            updated, injected = inject_ability_reminders(current, reminder_map)
-            if not injected:
-                print("      No missing reminders found.")
+            updated, abilities = inject_ability_reminders(current, reminder_map)
+            if not abilities:
+                print("      No mapped keyword abilities found; text unchanged.")
                 return
 
-            print(f"      Injected reminder(s) for: {', '.join(injected)}")
+            print(f"      Canonical reminder(s) applied for: {', '.join(abilities)}")
             self.driver.execute_script("arguments[0].value = arguments[1];", text_input, updated)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
             self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
