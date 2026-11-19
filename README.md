@@ -14,7 +14,7 @@ python3 ccAutomator.py --prime-file prime.txt --url http://mtgproxy:4242/ \
   --white-border --autofit-art --image-server http://mtgproxy:4242 \
   --upload-path /local_art/card_images/ccAutomator/ \
   --title-left 40 --title-kerning 4 --title-shadow 5 \
-  --type-left 40 --type-kerning 3 --pt-kerning 5 --pt-font 10 --pt-shadow 7 \
+  --type-left 40 --type-kerning 3 --pt-kerning 5 --pt-font-size 10 --pt-shadow 7 \
   --flavor-font -25 --pt-up 15 --rules-down 15 single.txt
 ```
 
@@ -24,6 +24,30 @@ With a config file and art upscaling:
 python3 ccAutomator.py @my.conf single.txt
 #   (see my.conf for the full annotated option set)
 ```
+
+## Reminder text (teaching decks)
+
+Scryfall's oracle text only carries reminder text when WotC printed it on
+that particular card face, so the same keyword may be reminded on one print
+and unreminded on another (Serra Angel has no Flying reminder; Sengir
+Vampire does).
+
+- `--inject-reminder-text` (default: off) normalizes this: every card
+  carrying a listed keyword ability gets the canonical sentence from
+  `reminder_map.json` -- printed variants are **replaced**, missing ones
+  **added**.  Uniform wording across the deck, no double reminders.
+- `reminder_map.json` (next to `ccAutomator.py`) is user-editable: 13
+  keyword abilities today (flying, vigilance, haste, first strike,
+  double strike, trample, deathtouch, lifelink, reach, hexproof, menace,
+  ward, infect).  Ward's `{cost}` placeholder is filled in from the card
+  itself (e.g. `Ward {2}`).
+- `--reminder-map PATH` points at an alternative map.
+- The injected/replacement text uses the app's `{i}(...) {/i}` italic form,
+  so it renders like printed reminders -- and is stripped by
+  `--hide-reminder-text` if that is also set (that checkbox removes *all*
+  tagged reminders at render).
+- Detection/injection logic is pure and covered by
+  `test_reminder_injection.py` (27 checks, run directly or under pytest).
 
 ## Auto-fit calibration
 
