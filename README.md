@@ -78,6 +78,16 @@ codes). Note: the `cardconjurer` set-symbol source has no assets for token
 sets — use `--set-symbol-source hexproof` (which covers them) if you want
 the set symbol on token cards.
 
+Tokens are rendered in their own frame (`--token-frame`, default
+`FullArtNew`, the full-art land frame used by `--full-art-basic-land`)
+instead of the deck's `--frame`: token art is square-to-portrait while the
+standard deck frame's art window is landscape, so the full-art frame's
+portrait window fits the token art far better (and tokens look visually
+distinct from the deck). The deck frame is restored automatically after
+each token. Pass `--token-frame none` to keep tokens in the deck frame.
+Colorless tokens stay in the deck frame (the full-art frame has no
+colorless base asset).
+
 ## Token analysis
 
 The `--tokens` flag in `deck_reminder_report.py` analyzes a decklist for

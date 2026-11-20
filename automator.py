@@ -78,7 +78,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                set_symbol_source='cardconjurer',
                type_gap=None,
                title_gap=None,
-               min_kerning=None):
+               min_kerning=None,
+               token_frame=None, deck_frame=None):
         """
         Initializes the WebDriver and stores the automation strategy.
         """
@@ -219,6 +220,23 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # the latter of which covers every official set and is colorized per
         # the print's Scryfall rarity.  See --set-symbol-source.
         self.set_symbol_source = set_symbol_source or 'cardconjurer'
+        # Token cards render in a DIFFERENT frame than the rest of the deck.
+        # Token art is square-to-portrait (0.71-0.95 aspect) while a normal
+        # card's art_crop is landscape (~1.24-1.37); the standard deck frame's
+        # art window is landscape (Seventh: 1.236) so portrait token art gets
+        # 25-43% top/bottom cropped.  The full-art land frame (FullArtNew) has
+        # a portrait art window (0.773) that fits token art well -- and the
+        # user ruled tokens being visually distinct from the deck is a bonus.
+        # token_frame: frame value to apply around token cards
+        #              (None = keep the deck frame for tokens too).
+        # deck_frame:  the deck's own frame, restored after each token so the
+        #              next normal card renders in the correct frame.
+        self.token_frame = token_frame
+        self.deck_frame = deck_frame
+        # True while a token card is rendering in self.token_frame; the deck
+        # frame is restored at the top of the next print (self-healing: also
+        # recovers the frame if a print crashed mid-way through a token).
+        self._token_frame_active = False
         # Cards whose set symbol failed to load (asset 404 / stale / CORS).
         # Warnings, not errors -- the card is still produced, just without
         # its symbol.  Reported in the run summary (see ccAutomator.py).
@@ -502,13 +520,151 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     return True
         return False
 
+    def _restore_deck_frame(self):
+        """Restore the deck frame after a token card rendered in
+        self.token_frame.  No-op when a token frame is not in use or the
+        deck frame is unset (e.g. no --frame given)."""
+        if not self._token_frame_active or not self.token_frame or not self.deck_frame:
+            return
+        self._token_frame_active = False
+        print(f"   Restoring deck frame '{self.deck_frame}' (token frame '{self.token_frame}' was applied).")
+        try:
+            self.set_frame(self.deck_frame, wait=True)
+        except Exception as e:
+            print(f"   Warning: failed to restore deck frame '{self.deck_frame}': {e}", file=sys.stderr)
+
+    def _warm_frame_fonts(self):
+        """Force-load the current card's text-box web fonts.
+
+        Full-art-style frames use custom web fonts (FullArtNew's title/type
+        use 'belerenb', its P/T 'belerenbsc').  This does NOT wait for the
+        faces to finish downloading -- see _wait_frame_fonts_loaded for the
+        blocking version.  Useful as a "kick the download" before a step that
+        re-triggers a draw.
+        """
+        try:
+            warmed = self.driver.execute_async_script(r"""
+                var done = arguments[arguments.length - 1];
+                var fams = {};
+                Object.values(card.text).forEach(function (t) {
+                    if (t && t.font) fams[t.font] = true;
+                });
+                var families = Object.keys(fams);
+                if (!families.length) { done([]); return; }
+                var loads = families.map(function (f) {
+                    return document.fonts.load('16px ' + f).catch(function () { return []; });
+                });
+                Promise.all(loads)
+                    .then(function () {
+                        done(families.map(function (f) {
+                            var face = Array.from(document.fonts)
+                                .find(function (x) { return x.family === f; });
+                            return f + ':' + (face ? face.status : 'missing');
+                        }));
+                    })
+                    .catch(function () { done([]); });
+            """)
+            if warmed:
+                print(f"   Warmed frame fonts: {warmed}")
+        except Exception as e:
+            print(f"   Warning: frame-font warm-up failed: {e}", file=sys.stderr)
+
+    def _wait_frame_fonts_loaded(self, timeout=10.0):
+        """Block until every text-box web font of the current card reports
+        status 'loaded' (bounded by `timeout`), then force one clean redraw.
+
+        WHY THIS IS NEEDED (full-art / custom-font frames):
+        The app renders word-final f/h/m/n/k as PUA ligature glyphs
+        (\\ue006-\\ue00a, creator JS line 3995) that exist ONLY in the
+        frame's web font (belerenb).  While that face is still downloading
+        (status 'loading'), canvas glyph-fallback renders ASCII from a
+        generic serif (looks OK) but the PUA code points exist in NO system
+        font -> 'tofu' boxes.  A token title like 'Serf' therefore renders
+        'Ser\\u25a1' and the type line 'Token' renders 'Toke\\u25a1'.  The
+        race window is the first draw after a frame (re)build whose font
+        request is still in flight -- a fresh run's first token reliably
+        hits it.
+
+        document.fonts.load() resolves as soon as the request is ACCEPTED,
+        not when the bytes are in -- so this polls FontFace.status until it
+        is actually 'loaded'.  The text layer is NOT re-painted by
+        drawCard(): the app pre-bakes all text boxes into a separate
+        `textCanvas` (drawText(), debounced ~500ms after frame/color
+        changes) and drawCard() only blits it.  If the first bake ran while
+        the face was still loading, the baked-in PUA tofu persists until
+        the layer is re-baked -- so on completion this re-runs the app's
+        OWN async drawText() (which re-renders every text box from
+        card.text and ends in drawCard()) and blocks until that is done,
+        guaranteeing capture sees a layer painted with the real face.
+        """
+        try:
+            start = time.time()
+            state = self.driver.execute_async_script(r"""
+                var done = arguments[arguments.length - 1];
+                var fams = {};
+                Object.values(card.text).forEach(function (t) {
+                    if (t && t.font) fams[t.font] = true;
+                });
+                var families = Object.keys(fams);
+                if (!families.length) { done({loaded: true, state: []}); return; }
+                var started = Date.now();
+                var settled = false;
+                function snap() {
+                    return families.map(function (f) {
+                        var face = Array.from(document.fonts)
+                            .find(function (x) { return x.family === f; });
+                        return { f: f, s: face ? face.status : 'missing' };
+                    });
+                }
+                function finish() {
+                    if (settled) { return; }
+                    settled = true;
+                    clearInterval(iv);
+                    var st = snap();
+                    var all = st.every(function (x) { return x.s === 'loaded'; });
+                    var stateStr = st.map(function (x) { return x.f + ':' + x.s; });
+                    // Re-bake the text layer with the now-loaded faces.
+                    // drawText() is async and ends in drawCard().
+                    drawText().then(function () {
+                        done({loaded: all, state: stateStr});
+                    }).catch(function (e) {
+                        done({loaded: all, error: String(e), state: stateStr});
+                    });
+                }
+                var iv = setInterval(function () {
+                    var st = snap();
+                    var all = st.every(function (x) { return x.s === 'loaded'; });
+                    if (all || (Date.now() - started) > 12000) {
+                        finish();
+                    }
+                }, 100);
+            """)
+            loaded = bool(state and state.get('loaded'))
+            if state:
+                print(f"   Frame font state: {state.get('state')}"
+                      + (f" (drawText error: {state.get('error')})" if state.get('error') else ""))
+            if not loaded:
+                elapsed = time.time() - start
+                print(f"   Warning: frame fonts still not 'loaded' after {elapsed:.1f}s "
+                      f"(12s in-page budget); proceeding -- text may show missing glyphs.",
+                      file=sys.stderr)
+            # Settle the re-baked canvas before capture (state-based).
+            self._wait_for_canvas_stabilization(self.current_canvas_hash, wait_for_change=False)
+        except Exception as e:
+            print(f"   Warning: frame-font wait failed: {e}", file=sys.stderr)
+
     def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
         Orchestrates the entire process for a single card.
         Returns a dict with 'captured' and 'skipped' counts.
         """
         results = {'captured': 0, 'skipped': 0}
-        
+
+        # A token card rendered in the token frame, so this print goes back
+        # to the deck frame first (see _token_frame_active in the token
+        # branch below).
+        self._restore_deck_frame()
+
         # --- Canvas Stabilization (Priming) ---
         if is_priming:
             # For priming, we just want to load *any* print of the card to get the renderer ready.
@@ -985,12 +1141,44 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
 
             if category and 'token' in category.lower():
                 self.clear_mana_cost()
-                
+
+                # --- Token Frame ---
+                # Token art is square-to-portrait (0.71-0.95 aspect); the deck
+                # frame's art window is landscape, so it crops the token art
+                # 25-43%.  A dedicated portrait-frame (token_frame, e.g.
+                # FullArtNew -- the --full-art-basic-land frame) fits it, and
+                # tokens being visually distinct from the deck is a bonus
+                # (user ruling).  Colorless tokens keep the deck frame: the
+                # full-art frame has no colorless base asset (fullart/c.png
+                # 404s).  The frame is applied BEFORE set_frame_color so the
+                # color step recolors THIS frame; _restore_deck_frame() puts
+                # the deck frame back at the top of the next card.
+                if self.token_frame and colors:
+                    print(f"   Applying token frame '{self.token_frame}' (color {''.join(colors)}).")
+                    try:
+                        self.set_frame(self.token_frame, wait=True)
+                        self._token_frame_active = True
+                        # Kick the frame's web-font download now (the first
+                        # draw can race it -- see _wait_frame_fonts_loaded).
+                        self._warm_frame_fonts()
+                    except Exception as e:
+                        print(f"   Warning: failed to apply token frame '{self.token_frame}': {e}; keeping deck frame.", file=sys.stderr)
+                elif self.token_frame and not colors:
+                    print(f"   Colorless token '{card_name}': keeping deck frame (no colorless '{self.token_frame}' base asset).")
+
                 # --- NEW: Fix Frame Color for Tokens ---
                 # Tokens often default to colorless when mana cost is cleared.
                 # We force the frame color based on Scryfall data.
                 self.set_frame_color(colors, type_line=current_type_line, mana_cost=mana_cost)
                 mods_applied = True
+
+                # The color step above rebuilds the frame (re-clicking the
+                # base thumb), which can re-trigger the web-font request
+                # AFTER the warm-up -- and the token's very first capture is
+                # the one that lands in that window.  Block until the faces
+                # are truly 'loaded' and do one clean redraw before capture.
+                if self._token_frame_active:
+                    self._wait_frame_fonts_loaded()
 
             else:
                 # --- NEW: Fix Frame Color for Lands and Colored Artifacts ---

@@ -101,6 +101,14 @@ def main():
         '--prime-frame',
         help="The name of the frame to select ONLY during priming (e.g., 'Seventh'). Useful for cc-file mode where main frame is baked in."
     )
+    parser.add_argument(
+        '--token-frame',
+        default='FullArtNew',
+        help="Frame to render '# Tokens' cards in. Defaults to 'FullArtNew' (the full-art land frame, whose "
+             "portrait art window fits square/portrait token art instead of cropping it). Pass the same value "
+             "as --frame (e.g. 'Seventh') or 'none' to keep tokens in the deck frame. The deck frame is "
+             "restored automatically after each token."
+    )
 
     # --- START OF MODIFIED ARGUMENTS ---
     # Legacy arguments (mutually exclusive with granular arguments)
@@ -962,6 +970,8 @@ def main():
                 inject_reminder_text=args.inject_reminder_text,
                 reminder_map_path=args.reminder_map,
                 set_symbol_source=args.set_symbol_source,
+                token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
+                deck_frame=args.frame,
                 title_up=args.title_up,
                 save_cc_file=True, # Force save for combo mode
                 overwrite=args.overwrite,
@@ -1134,6 +1144,8 @@ def main():
             inject_reminder_text=args.inject_reminder_text,
             reminder_map_path=args.reminder_map,
             set_symbol_source=args.set_symbol_source,
+            token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
+            deck_frame=args.frame,
             image_server=args.image_server,
             image_server_path=args.image_server_path,
             art_path=args.art_path,
