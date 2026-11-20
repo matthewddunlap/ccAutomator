@@ -649,3 +649,42 @@ All five suites green: 15/15, 18/18, 8/8, 34/34, 8/8; py_compile clean.
 **Commits (branch user-agent-ts140, 2026-11-18):**
 - **d73bf36** the fix + `test_accent_matching.py` (6 files, +447/−40).
 - Notes commit: this one.
+
+## Token search fix — `# Tokens` cards now resolve in Card Conjurer  [2026-11-20]
+**Request:** ccAutomator intentionally skips tokens, but when a deck needs
+them (e.g. `decks/teaching/rev2/t1_mono_black_graveyard_shift.dek` with a
+`# Tokens` section) there should be a way to search them.
+**Root cause:** the token plumbing (Scryfall `is:token` query, token-set
+mapping, mana-cost clear, frame color — all present since ab25b18) was
+gated behind `_get_and_filter_prints`, which typed `"<name> token"` into
+the Card Conjurer search box. The app translates that into a Scryfall
+`name=<name>_token` query — a partial name-contains match, and no card is
+literally named "Serf token", so the search 404'd. `_get_and_filter_prints`
+timed out all 3 retries, the CC print pool came back EMPTY, and the
+cross-reference could never match — every `# Tokens` card was silently
+skipped (they even land in the `.missing` file).
+**Change (mixins/print_mixin.py, ~2 lines):** for token searches, type the
+PLAIN NAME into the search box. `name=Serf` is a contains-match that finds
+the token (verified live: the plain search returns the token print +
+false-positives like "Venser, Fervent Forger" which contains "serf"), and
+`_option_name_matches` narrows to exact names; `_match_scryfall_to_cc_prints`
+then picks the token via Scryfall set/collector-number. The `is_token`
+parameter still governs the token-only Scryfall query + set-filter bypass
+in automator.py. Non-token searches are untouched.
+**Verify (live, real app http://mtgproxy:4242/ + chromium + production
+Scryfall cache, 2026-11-20):**
+- Before: `_get_and_filter_prints('Serf', is_token=True)` → 3× timeout,
+  0 prints (and 0 for 'Zombie'). After: Serf → 1 CC print (TEMA #5),
+  Zombie → 89 exact 'Zombie' prints (tokens + normal; Scryfall's
+  is:token query decides), Dark Ritual non-token path unchanged (58).
+- End-to-end selenium run (`# Tokens` deck: 1 Dark Ritual, 2 Serf, 1
+  Zombie): **Success 2 tokens + 1 spell, Error 0** (was Error 2 for the
+  two tokens before the fix). Tokens captured full-res
+  `serf_tema_5.png` / `zombie_tugl_91.png` with art, cleared mana cost,
+  black frame from Scryfall colors, 0/1 P/T.
+- Set symbol: token sets (t*) have no assets in Card Conjurer's built-in
+  set (warning + counted, card still produced) — hexproof source covers
+  them (verified 200 for tema/tugl); production `custom.conf` uses hexproof.
+  Documented in README.
+- `py_compile` clean.
+Commit: bdfdccb (fix + README).
