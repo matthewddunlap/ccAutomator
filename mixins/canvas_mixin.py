@@ -1,10 +1,13 @@
 import time
 import hashlib
+import json
 import sys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
+from .image_mixin import UploadError
 
 class CanvasMixin:
     STABILIZE_TIMEOUT = 20
@@ -280,10 +283,62 @@ class CanvasMixin:
             print(f"Error setting frame: {e}", file=sys.stderr)
             raise
 
+    # The app's own "White Border" frame entry (captured from availableFrames):
+    # full-card white.png masked to the outer card boundary by border.svg, so it
+    # is independent of the underlying frame family.  Frames whose picker does
+    # not expose a whiteThumb (e.g. FullArtNew, the default token frame) get
+    # this injected via _apply_white_border_injection instead.
+    _WHITE_BORDER_FRAME = {
+        "name": "White Border",
+        "src": "/img/frames/white.png",
+        "noDefaultMask": True,
+        "masks": [{"src": "/img/frames/seventh/regular/border.svg", "name": "Border"}],
+    }
+
+    def _apply_white_border_injection(self):
+        """Add the White Border frame to card.frames directly, for frames
+        whose picker has no whiteThumb (FullArtNew, used for tokens via
+        --token-frame).
+
+        Mirrors what the picker double-click does: the app's drawFrames()
+        skips any frame entry without a pre-loaded .image object, so the
+        frame and its mask image are built the way addFrame() does, and
+        drawFrames() runs once both are loaded.  Idempotent (a card already
+        carrying the frame is reported, not duplicated).  Raises
+        UploadError on a load failure so the caller counts the card,
+        matching the thumbnail path.
+        """
+        print("   No white-border thumbnail in this frame's picker; injecting the White Border frame via JS.")
+        result = self.driver.execute_async_script(r"""
+            var done = arguments[arguments.length - 1];
+            if (card.frames.some(function (x) { return x.name === 'White Border'; })) { done('already'); return; }
+            var f = arguments[0];
+            f.masks.forEach(function (item) {
+                item.image = new Image();
+                item.image.crossOrigin = 'anonymous';
+                item.image.src = fixUri(item.src);
+                item.image.onload = drawFrames;
+                item.image.onerror = function () { done('mask load failed: ' + item.src); };
+            });
+            f.image = new Image();
+            f.image.crossOrigin = 'anonymous';
+            f.image.src = fixUri(f.src);
+            f.image.onload = function () {
+                card.frames.unshift(f);
+                drawFrames();
+                done('injected');
+            };
+            f.image.onerror = function () { done('frame load failed: ' + f.src); };
+        """, json.loads(json.dumps(self._WHITE_BORDER_FRAME)))
+        if result not in ('injected', 'already'):
+            raise UploadError(f"White border injection failed: {result}")
+
     def apply_white_border(self):
         """
         Applies the white border by finding the correct thumbnail and double-clicking
-        it using a more robust JavaScript-based approach.
+        it using a more robust JavaScript-based approach.  Frames whose picker
+        has no whiteThumb (FullArtNew, the default token frame) fall back to
+        injecting the White Border frame directly (_apply_white_border_injection).
         """
         print("Applying white border...")
         try:
@@ -297,9 +352,21 @@ class CanvasMixin:
             print("Searching for the white border thumbnail...")
             
             # 3. Wait for the element to be clickable, not just present. This is a stronger check.
-            white_border_thumb = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, white_border_selector))
-            )
+            #    Short timeout: its ABSENCE is the expected state on frames like
+            #    FullArtNew (no white-border picker option) -- that signals the
+            #    JS-injection fallback rather than a failure.
+            try:
+                # Shorter timeout than self.wait: the thumbnail's absence is
+                # expected on frames without a white-border picker option.
+                short_wait = WebDriverWait(self.driver, 3)
+                white_border_thumb = short_wait.until(
+                    EC.element_to_be_clickable((By.XPATH, white_border_selector))
+                )
+            except TimeoutException:
+                self._apply_white_border_injection()
+                self._wait_for_render()
+                print("   White border applied (injected).")
+                return
 
             # 4. Use JavaScript to scroll the element into view. This prevents issues where the element is off-screen.
             print("Scrolling thumbnail into view...")
