@@ -57,6 +57,27 @@ Vampire does).
 - Detection/injection logic is pure and covered by
   `test_reminder_injection.py` (31 checks, run directly or under pytest).
 
+## Tokens in decklists
+
+Lines after a `# Tokens` header in the input decklist are searched as token
+cards:
+
+```
+1 Dark Ritual
+
+# Tokens
+2 Serf
+1 Zombie
+```
+
+Token cards are searched with an `is:token` Scryfall query, matched to the
+token prints Card Conjurer offers, then rendered with the mana cost cleared
+and the frame color taken from the token's color. Set include/exclude
+filters are bypassed for tokens (token sets use their own `t`-prefixed
+codes). Note: the `cardconjurer` set-symbol source has no assets for token
+sets — use `--set-symbol-source hexproof` (which covers them) if you want
+the set symbol on token cards.
+
 ## Token analysis
 
 The `--tokens` flag in `deck_reminder_report.py` analyzes a decklist for

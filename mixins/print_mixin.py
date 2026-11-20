@@ -48,9 +48,14 @@ class PrintMixin:
         # Construct search query for the UI
         # We use a simple query to increase reliability. Complex syntax can cause timeouts.
         # Set filtering is handled in Python below.
+        #
+        # Tokens are searched by PLAIN NAME.  The app translates the search box
+        # into a Scryfall `name=<value>` query, and `name=` is a partial
+        # (contains) match -- so `name=Serf` finds the token Serf (the "Serf
+        # token" variant 404s: no card is literally named that), and the exact
+        # name match in _option_name_matches below narrows the contains-results
+        # down to the token prints.
         search_query = card_name
-        if is_token:
-            search_query = f"{card_name} token"
 
         for attempt in range(max_retries):
             try:
