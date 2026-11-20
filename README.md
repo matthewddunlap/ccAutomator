@@ -57,6 +57,33 @@ Vampire does).
 - Detection/injection logic is pure and covered by
   `test_reminder_injection.py` (31 checks, run directly or under pytest).
 
+## Token analysis
+
+The `--tokens` flag in `deck_reminder_report.py` analyzes a decklist for
+token requirements:
+
+```bash
+python3 deck_reminder_report.py --tokens decks/mydeck.txt
+```
+
+This scans each card in the decklist, looks up its Scryfall data, and lists
+all tokens that need to be produced. The output shows:
+
+```
+Tokens needed:
+  Bear:
+    Grizzly Fate (x1)
+  Beast:
+    Fresh Meat (x1)
+  Copy:
+    Cadric, Soul Kindler (x1)
+    Dark Depths (x1)
+```
+
+Tokens are identified from Scryfall's `all_parts` field for cards that have
+`component: token`. Cards that produce tokens are typically spells, abilities,
+or lands that create tokens as part of their effect.
+
 ## Auto-fit calibration
 
 - Title, type, and P/T widths are estimated from per-glyph tables calibrated

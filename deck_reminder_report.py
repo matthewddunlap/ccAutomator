@@ -16,10 +16,12 @@ Examples:
     python3 deck_reminder_report.py decks/mydeck.txt --mapped-only
     python3 deck_reminder_report.py decks/mydeck.txt --no-api
     python3 deck_reminder_report.py decks/mydeck.txt --map my_map.json
+    python3 deck_reminder_report.py decks/mydeck.txt --tokens
 """
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -110,6 +112,109 @@ def card_abilities(card_data, reminder_map):
     return [k for k in reminder_map if k in abilities]
 
 
+def find_token_for_card(card_data, con, use_api):
+    """
+    Given a card's Scryfall data, find the corresponding token cards it produces.
+    Returns a dict of {token_type: [token_names]} or None if no tokens found.
+
+    Token types are determined from the card's type_line (e.g., 'Token Creature', 'Token').
+    """
+    if not card_data:
+        return None
+
+    # Check if this card has related tokens in all_parts
+    all_parts = card_data.get('all_parts', [])
+    token_names = []
+
+    for part in all_parts:
+        if part.get('component') == 'token':
+            token_names.append(part.get('name'))
+
+    # If no tokens in all_parts, search the cache for tokens with this name as a subtype
+    if not token_names:
+        card_name = card_data.get('name', '')
+        # Extract subtypes from type_line (e.g., "Legendary Creature - Human Warrior" -> ['Human', 'Warrior'])
+        type_line = card_data.get('type_line', '')
+        subtypes = []
+        if ' - ' in type_line:
+            subtype_str = type_line.split(' - ')[1]
+            subtypes = subtype_str.split()
+
+        if subtypes:
+            # Look for tokens that match any of these subtypes
+            token_types = set()
+            for subtype in subtypes:
+                token_types.add(subtype)
+
+            # Search cache for tokens matching these types
+            for token_type in token_types:
+                token_query = f"%Token%{token_type}%"
+                try:
+                    rows = con.execute(
+                        "SELECT data FROM cards WHERE name LIKE ? AND data LIKE '%Token%' LIMIT 10",
+                        (f'%{token_type}%',)
+                    ).fetchall()
+                    for row in rows:
+                        try:
+                            data = json.loads(row[0])
+                            if data.get('type_line', '').startswith('Token'):
+                                # Extract token subtype from type_line
+                                token_type_line = data.get('type_line', '')
+                                if ' - ' in token_type_line:
+                                    actual_subtype = token_type_line.split(' - ')[1].strip()
+                                    if actual_subtype.lower() == token_type.lower():
+                                        token_names.append(data.get('name'))
+                                else:
+                                    token_names.append(data.get('name'))
+                        except:
+                            pass
+                except:
+                    pass
+
+    if not token_names:
+        return None
+
+    return {'Token': token_names}
+
+
+def analyze_tokens(card_results, con, use_api):
+    """
+    Analyze a decklist's cards to find what tokens they need.
+    Returns a dict of {token_name: [(card_name, count), ...]}
+    """
+    tokens_needed = {}
+
+    for name, count, category, abilities, source in card_results:
+        if source is None:
+            # Card wasn't resolved, skip
+            continue
+
+        card_data, _ = source if isinstance(source, tuple) else (None, None)
+
+        # Re-fetch card data if needed
+        if not card_data:
+            if con is not None:
+                card_data, _ = find_in_cache(con, name)
+            if not card_data:
+                if use_api:
+                    card_data, _ = find_in_api(name)
+                else:
+                    continue
+
+        # Find tokens this card produces
+        tokens = find_token_for_card(card_data, con, use_api)
+        if tokens:
+            for token_type, token_names in tokens.items():
+                for token_name in token_names:
+                    # Group by specific token name
+                    key = token_name
+                    if key not in tokens_needed:
+                        tokens_needed[key] = []
+                    tokens_needed[key].append((name, count))
+
+    return tokens_needed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="List the cards in a decklist that carry the keyword "
@@ -123,6 +228,8 @@ def main():
                         help="do not fall back to the Scryfall API for cards missing from the cache")
     parser.add_argument("--mapped-only", action="store_true",
                         help="only show cards that carry at least one mapped ability")
+    parser.add_argument("--tokens", action="store_true",
+                        help="analyze decklist for token requirements")
     args = parser.parse_args()
 
     reminder_map = load_reminder_map(args.map)
@@ -153,6 +260,9 @@ def main():
                         abilities, source))
     if con is not None:
         con.close()
+
+    # Store the db_path for token analysis
+    db_path_for_tokens = db_path if con is not None else None
 
     # ---- Report -------------------------------------------------------------
     map_path = args.map or os.path.join(HERE, 'reminder_map.json')
@@ -188,6 +298,27 @@ def main():
         for a in reminder_map:
             if a in counts:
                 print(f"  {a:<14} {counts[a]}")
+
+    # ---- Token Analysis (optional) ------------------------------------------
+    if args.tokens:
+        print()
+        print("=== Token Analysis ===")
+        # Reopen cache for token analysis if it was closed
+        token_con = open_cache(db_path_for_tokens) if db_path_for_tokens else None
+        if token_con is None and not args.no_api:
+            print(f"Note: cache not usable; using API for token lookups.", file=sys.stderr)
+        tokens_needed = analyze_tokens(results, token_con, args.no_api)
+        if token_con is not None:
+            token_con.close()
+        if tokens_needed:
+            print("Tokens needed:")
+            for token_name, cards in sorted(tokens_needed.items()):
+                print(f"  {token_name}:")
+                for card_name, card_count in cards:
+                    print(f"    {card_name} (x{card_count})")
+        else:
+            print("No tokens needed.")
+
     if unresolved:
         print(f"Unresolved (not in cache or API): {', '.join(unresolved)}")
 
