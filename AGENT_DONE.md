@@ -736,3 +736,38 @@ brainstorm options; user then ruled: always use the
   Seventh intact (frame restore + PUA 'k' ligature in 'Dark' render).
 - py_compile clean.
 Commits: 55fe679 (feature + font fix + README).
+
+## --white-border crash on token frame (FullArtNew)  [2026-11-20]
+**Request (user):** a run with `@custom.conf --overwrite --image-server
+... token.txt` failed on the first token: "Error processing 'Serf':
+Message: Stacktrace: ..." -- the white-border step.
+**Root cause:** custom.conf enables `--white-border`.  `apply_white_border()`
+(double-clicks the picker's `whiteThumb.png`) times out on FullArtNew
+because that frame's picker has NO white/silver/gold border thumbnails
+(only color / PT / land thumbs) -- so every token card on `--token-frame
+FullArtNew` errored.  (A first attempt at the fix also passed
+`timeout=` to `WebDriverWait.until()`, which is not a kwarg there --
+that made ALL cards error, not just tokens; caught in isolation.)
+**Change (mixins/canvas_mixin.py):** `apply_white_border()` now waits on
+the thumbnail with a short (3s) `WebDriverWait` and treats its ABSENCE as
+the expected state -> `_apply_white_border_injection()`.  The injection
+prepends the app's own "White Border" frame entry (full-card
+`/img/frames/white.png` masked to the outer boundary by
+`seventh/regular/border.svg` -- identical to what land_generator's JSON
+path builds) to `card.frames`, building the `.image` objects the way
+`addFrame()` does.  KEY: `drawFrames()` silently skips any frame entry
+without a pre-loaded `.image`, so a bare `unshift` + `drawCard()` is a
+no-op (verified pixel-identical).  Idempotent; raises `UploadError` on a
+load failure so the card is counted like the thumbnail path.  Frames that
+still have the thumbnail (Seventh) keep the original UI path unchanged.
+**Verify (live app + production cache + image-server upload mode):**
+- Isolated: single Dark Ritual + `--white-border` on Seventh ->
+  "White border applied." Success 1/0 (thumbnail path intact).
+- Full run: 1 Dark Ritual + 2 Serf + 1 Zombie, `--frame Seventh
+  --token-frame FullArtNew --white-border`: **Success 3 / Skipped 0 /
+  Error 0**.  Serf log shows "Applying token frame" -> "White border
+  applied (injected)" -> "Restoring deck frame 'Seventh'"; pixel check
+  token border 0,0,0 -> 255,255,255; token text clean (no first-use font
+  tofu).
+- `py_compile` clean.
+Commit: 7793e99.
