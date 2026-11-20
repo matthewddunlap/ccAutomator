@@ -1324,6 +1324,8 @@ def _reminder_occurrences(head, reminder_map, seg_spans):
     Positions of mapped-keyword occurrences in `head` that are OUTSIDE the
     parenthetical segments in `seg_spans` (a keyword mentioned inside a
     reminder never counts as granting the ability).
+
+    Returns list of (position, original_matched_text, map_key) tuples.
     """
     def in_segment(pos):
         return any(s <= pos < e for s, e in seg_spans)
@@ -1334,11 +1336,12 @@ def _reminder_occurrences(head, reminder_map, seg_spans):
     for ability in sorted(reminder_map, key=len, reverse=True):
         for m in re.finditer(r'(?<![\w])' + re.escape(ability) + r'(?![\w])', head, re.I):
             if not in_segment(m.start()):
-                occurrences.append((m.start(), ability))
+                # Store the original matched text (preserves case) and the map key
+                occurrences.append((m.start(), m.group(0), ability))
     occurrences.sort(key=lambda t: t[0])
     return occurrences
 
-def inject_ability_reminders(text, reminder_map, segment_formatter=None):
+def inject_ability_reminders(text, reminder_map, segment_formatter=None, card_type=None, card_name=None):
     """
     Normalize reminder text: for every mapped keyword ability mentioned in
     the card's rules text, ensure the card carries the canonical reminder
@@ -1356,11 +1359,9 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
          tags and preceding space included.  Parentheticals with no convincing
          match (plain non-reminder notes) are never touched, and keyword
          matches INSIDE any segment never count as granting the ability.
-      2. Appends the canonical sentence after each line that mentions the
-         ability (one per line, in the order the abilities appear), formatted
-         by `segment_formatter` -- by default the Card Conjurer italic form
-         ' {i}(...) {/i}', which renders italic like printed reminders and is
-         removed by the 'Hide reminder text' checkbox if that is also set.
+      2. Appends the canonical sentence after each ability mention. For
+         multiple abilities on the same line, each gets its own line with the
+         reminder directly following the ability name.
 
     The result is uniform wording across a deck, no double reminders by
     construction (the printed one is deleted before the canonical is added),
@@ -1375,11 +1376,20 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     Args:
         text:              rules text (Card Conjurer text-box value, which may
                            carry {i}...{/i} tags, or raw oracle text)
-        reminder_map:      dict of ability name -> reminder sentence
+        reminder_map:      dict of ability name -> reminder sentence. Also
+                           supports special keys like:
+                           - "ability:cardtype" for card-type-specific reminders (e.g., "flying:wall" ->
+                             the reach-style reminder for flying creatures that are walls)
+                           - "ability:card_name" for card-specific reminders (e.g., "trample:overrun" ->
+                             each of those creatures can deal excess combat damage...)
         segment_formatter: optional callable sentence -> segment string to
                            append (default: ' {i}(sentence){/i}'; pass a plain
                            ' (sentence)' formatter when the text will later be
                            wrapped by the app/generator itself)
+        card_type:         optional card type string (e.g., "Wall", "Spider")
+                           used to select card-type-specific reminder variants
+        card_name:         optional card name string (e.g., "Overrun") for
+                           card-specific reminder text overrides
 
     Returns:
         (new_text, abilities) -- abilities is the list of abilities that
@@ -1390,6 +1400,12 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     if segment_formatter is None:
         segment_formatter = lambda s: f" {{i}}({s}){{/i}}"
 
+    # Newline separator for Card Conjurer (forces a line break in the rendered text)
+    lns_separator = '{lns}'
+
+    # Check if this is a re-run (text contains {lns} from a previous run)
+    is_rerun = lns_separator in text
+
     # Split off the flavor tail, if any (everything from {flavor} or /// on).
     head, tail = text, ''
     m = re.search(r'\{flavor\}|///', text)
@@ -1399,44 +1415,73 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     def segments(h):
         return [(mm.start(), mm.end()) for mm in re.finditer(r'\((?:[^()]*)\)', h)]
 
-    seg_spans = segments(head)
-    occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
-
-    # --- 1. Remove printed reminders of mapped keywords (strong match only) ---
-    strip_ranges = []
-    for s, e in seg_spans:
-        seg_text = head[s + 1:e - 1]
-        cands = [i for i, (p, _) in enumerate(occurrences) if p < s]
-        if not cands:
-            continue
-        best = max(cands, key=lambda i: _reminder_similarity(seg_text, reminder_map[occurrences[i][1]]))
-        if _reminder_similarity(seg_text, reminder_map[occurrences[best][1]]) < REMINDER_SIM_THRESHOLD:
-            continue  # not convincingly a reminder of a mapped keyword; keep it
-        # Extend over the app's italic tags ('{i}' = 3 chars, '{/i}' = 4) and
-        # one preceding space.
-        start = s - 3 if head[max(0, s - 3):s] == '{i}' else s
-        if start > 0 and head[start - 1] == ' ':
-            start -= 1
-        end = e + 4 if head[e:e + 4] == '{/i}' else e
-        strip_ranges.append((start, end))
-
-    if strip_ranges:
-        strip_ranges.sort()
-        merged = []
-        for s, e in strip_ranges:
-            if merged and s <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], e)
-            else:
-                merged.append([s, e])
-        for s, e in reversed(merged):  # from the end so indices stay valid
-            head = head[:s] + head[e:]
-        # A removed segment may leave an empty line (or a trailing newline);
-        # card text carries no meaningful blank lines, so collapse them.
-        head = re.sub(r'\n{2,}', '\n', head).rstrip('\n')
+    if is_rerun:
+        # --- Idempotency: Strip any existing {lns} reminders from previous runs ---
+        # Before processing, remove any {lns} + reminder segments that were
+        # added by a previous run. This ensures idempotency.
         seg_spans = segments(head)
         occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
 
-    # --- 2. Append the canonical reminder after each line mentioning an ability ---
+        new_head_lines = []
+        for line in head.split('\n'):
+            # Pattern to match trailing {lns} and any following reminders
+            pattern = re.escape(lns_separator) + r'\s*'
+
+            # Determine which pattern to use based on the formatter
+            test_output = segment_formatter("test reminder")
+            if '{i}' in test_output:
+                # Default formatter: {lns}{i}(reminder){/i}
+                pattern += r'\{i\}\([^)]+\)\{/i\}'
+            else:
+                # Plain formatter: {lns}(reminder)
+                pattern += r'\([^)]+\)'
+
+            # Strip trailing {lns} and reminders (can be multiple)
+            line = re.sub(r'\s*' + pattern + r'(\s*' + pattern + r')*\s*$', '', line)
+            new_head_lines.append(line)
+
+        head = '\n'.join(new_head_lines)
+        seg_spans = segments(head)
+        occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
+    else:
+        # --- Normal run: Remove printed reminders of mapped keywords (strong match only) ---
+        seg_spans = segments(head)
+        occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
+
+        strip_ranges = []
+        for s, e in seg_spans:
+            seg_text = head[s + 1:e - 1]
+            cands = [i for i, (p, _, _) in enumerate(occurrences) if p < s]
+            if not cands:
+                continue
+            best = max(cands, key=lambda i: _reminder_similarity(seg_text, reminder_map[occurrences[i][2]]))
+            if _reminder_similarity(seg_text, reminder_map[occurrences[best][2]]) < REMINDER_SIM_THRESHOLD:
+                continue  # not convincingly a reminder of a mapped keyword; keep it
+            # Extend over the app's italic tags ('{i}' = 3 chars, '{/i}' = 4) and
+            # one preceding space.
+            start = s - 3 if head[max(0, s - 3):s] == '{i}' else s
+            if start > 0 and head[start - 1] == ' ':
+                start -= 1
+            end = e + 4 if head[e:e + 4] == '{/i}' else e
+            strip_ranges.append((start, end))
+
+        if strip_ranges:
+            strip_ranges.sort()
+            merged = []
+            for s, e in strip_ranges:
+                if merged and s <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], e)
+                else:
+                    merged.append([s, e])
+            for s, e in reversed(merged):  # from the end so indices stay valid
+                head = head[:s] + head[e:]
+            # A removed segment may leave an empty line (or a trailing newline);
+            # card text carries no meaningful blank lines, so collapse them.
+            head = re.sub(r'\n{2,}', '\n', head).rstrip('\n')
+            seg_spans = segments(head)
+            occurrences = _reminder_occurrences(head, reminder_map, seg_spans)
+
+    # --- 3. Append the canonical reminder after each line mentioning an ability ---
     lines = head.split('\n')
     line_start = []
     pos = 0
@@ -1453,15 +1498,44 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
                 break
         return idx
 
-    per_line = {}   # line index -> [sentences, in order of appearance]
+    def get_reminder(ability, card_type, card_name=None):
+        """Get the reminder text for an ability, optionally using card-specific or card-type-specific variants.
+
+        Priority order:
+        1. card-specific: "ability:card_name"
+        2. card-type-specific: "ability:card_type"
+        3. generic: "ability"
+        """
+        # First try card-specific key (e.g., "trample:overrun")
+        if card_name:
+            card_specific_key = f"{ability}:{card_name.lower()}"
+            if card_specific_key in reminder_map:
+                return reminder_map[card_specific_key]
+        # Then try card-type-specific key (e.g., "flying:wall")
+        if card_type:
+            type_specific_key = f"{ability}:{card_type.lower()}"
+            if type_specific_key in reminder_map:
+                return reminder_map[type_specific_key]
+        # Fall back to generic ability key
+        if ability in reminder_map:
+            return reminder_map[ability]
+        return None
+
+    # Track abilities globally to only add reminder once per ability
+    seen_abilities = set()
+
+    per_line = {}   # line index -> [(sentences, map_keys), in order of appearance]
     abilities = []  # return value, in order of first appearance
-    seen = set()    # (line, ability) so a repeated keyword on a line adds one reminder
-    for p, ability in occurrences:
-        key = (line_index(p), ability)
-        if key in seen:
+    for p, matched_text, map_key in occurrences:
+        # Only add reminder for first instance of each ability
+        if map_key in seen_abilities:
             continue
-        seen.add(key)
-        sentence = reminder_map[ability]
+        seen_abilities.add(map_key)
+
+        line_idx = line_index(p)
+        sentence = get_reminder(map_key, card_type, card_name)
+        if sentence is None:
+            continue  # no reminder text available for this ability
         if '{cost}' in sentence:
             # The cost follows the keyword, e.g. 'Ward {2}' or 'Ward 3 life'.
             cost_m = re.search(r'Ward\s+((?:\{[^{}]+\})+|\d+\s+(?:life|poison counters))',
@@ -1469,8 +1543,8 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
             if not cost_m:
                 continue  # can't determine the cost; leave this ability as-is
             sentence = sentence.replace('{cost}', cost_m.group(1))
-        per_line.setdefault(key[0], []).append(sentence)
-        abilities.append(ability)
+        per_line.setdefault(line_idx, []).append((sentence, map_key, matched_text))
+        abilities.append(map_key)
 
     if not per_line:
         return text, []
@@ -1478,7 +1552,28 @@ def inject_ability_reminders(text, reminder_map, segment_formatter=None):
     out_lines = []
     for i, ln in enumerate(lines):
         if i in per_line:
-            ln = ln + ''.join(segment_formatter(s) for s in per_line[i])
+            items = per_line[i]  # list of (sentence, map_key, matched_text) tuples
+            if len(items) > 1:
+                # Multiple abilities: put each on its own line with its reminder
+                # Format: "Ability1 (reminder1)\nAbility2 (reminder2)"
+                line_parts = []
+                for sentence, map_key, matched_text in items:
+                    formatted = segment_formatter(sentence)
+                    # Remove leading space if present (from default formatter " {i}(...) {/i}")
+                    if formatted.startswith(' '):
+                        formatted = formatted[1:]
+                    # Build: AbilityName (reminder) - capitalize the matched text
+                    line_parts.append(matched_text.capitalize() + ' ' + formatted)
+                # Join multiple abilities with a newline (regular line break)
+                ln = '\n'.join(line_parts)
+            else:
+                # Single ability: keep on same line as abilities with space separator
+                # The ability is already in 'ln', so we just add the reminder
+                sentence, map_key, matched_text = items[0]
+                formatted = segment_formatter(sentence)
+                if formatted.startswith(' '):
+                    formatted = formatted[1:]
+                ln = ln + ' ' + formatted
         out_lines.append(ln)
     return '\n'.join(out_lines) + tail, abilities
 

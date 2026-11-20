@@ -68,6 +68,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                   auto_fit_pt=False,
                  hide_reminder_text=False,
                  inject_reminder_text=False, reminder_map_path=None,
+                 card_name=None, card_type=None,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
                  upload_path=None, upload_secret=None, scryfall_filter=None, save_cc_file=False,
@@ -192,6 +193,8 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.hide_reminder_text = hide_reminder_text
         self.inject_reminder_text = inject_reminder_text
         self.reminder_map_path = reminder_map_path
+        self.card_name = card_name
+        self.card_type = card_type
         self._reminder_map_cache = None
 
         self.type_font_size = type_font_size
@@ -970,6 +973,13 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 self._apply_text_mods("Rules Text", down=self.rules_down)
                 # Inject reminder text for keyword abilities that this print
                 # doesn't already carry (no-op unless --inject-reminder-text).
+                # Set card_name and card_type for card-specific reminder overrides
+                self.card_name = card_name
+                # Extract card type from type_line (e.g., "Legendary Creature - Wall" -> "Wall")
+                self.card_type = None
+                if ' - ' in current_type_line:
+                    subtypes = current_type_line.split(' - ')[1]
+                    self.card_type = subtypes.strip().split()[0] if subtypes.strip() else None
                 self.apply_reminder_injection()
 
 

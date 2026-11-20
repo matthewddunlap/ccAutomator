@@ -487,9 +487,17 @@ class SeventhGenerator(ImageMixin, CollectorMixin):
                 from automator_utils import get_cached_reminder_map, inject_ability_reminders
                 reminder_map = get_cached_reminder_map(self, self.reminder_map_path)
                 if reminder_map:
+                    # Get card type from the type_line (e.g., "Legendary Creature - Wall" -> "Wall")
+                    card_type = None
+                    if ' - ' in type_line:
+                        subtypes = type_line.split(' - ')[1]
+                        # Take the first subtype as card_type (e.g., "Wall" from "Legendary Creature - Wall")
+                        card_type = subtypes.strip().split()[0] if subtypes.strip() else None
                     oracle_text, abilities = inject_ability_reminders(
                         oracle_text, reminder_map,
-                        segment_formatter=lambda s: f" ({s})")
+                        segment_formatter=lambda s: f" ({s})",
+                        card_name=card_name,
+                        card_type=card_type)
                     if abilities:
                         print(f"   [Reminders] Canonical reminder(s) applied for: {', '.join(abilities)}")
             full_text = self._format_text(oracle_text, is_basic_land=('Land' in type_line))

@@ -72,17 +72,20 @@ def run_all():
     print("== 'Flying, vigilance' with no reminders: both appended, in order ==")
     new, abilities = inject_ability_reminders("Flying, vigilance", MAP)
     ok &= check("both in line order", abilities == ["flying", "vigilance"], f"abilities={abilities}")
-    ok &= check("both segments appended",
-                new == f"Flying, vigilance {{i}}({FLYING}){{/i}} {{i}}({VIGILANCE}){{/i}}", new)
+    # Multiple abilities on same line: each gets its own line with ability name + reminder
+    # Ability names are capitalized based on their input form
+    expected = f'Flying {{i}}({FLYING}){{/i}}\nVigilance {{i}}({VIGILANCE}){{/i}}'
+    ok &= check("each ability on separate line with reminder", new == expected, new)
 
     print("== First strike + double strike: single ds reminder replaced, both canonical ==")
     text = ("First strike, double strike {i}(This creature deals both first-strike and regular "
             "combat damage.){/i}")
     new, abilities = inject_ability_reminders(text, MAP)
     ok &= check("both normalized", abilities == ["first strike", "double strike"], f"abilities={abilities}")
-    ok &= check("one reminder each, old text replaced",
-                new == f"First strike, double strike {{i}}({FIRST_STRIKE}){{/i}} {{i}}({DOUBLE_STRIKE}){{/i}}",
-                new)
+    # Multiple abilities on same line: each gets its own line
+    # Ability names are capitalized based on their input form
+    expected = f'First strike {{i}}({FIRST_STRIKE}){{/i}}\nDouble strike {{i}}({DOUBLE_STRIKE}){{/i}}'
+    ok &= check("one reminder each, old text replaced", new == expected, new)
 
     print("== Non-reminder parenthetical is preserved; keyword still normalized ==")
     text = "Flying (choose one or more of the following)"
@@ -141,14 +144,15 @@ def run_all():
     new, abilities = inject_ability_reminders(text, MAP)
     ok &= check("flying + reach normalized, 'reach' inside segment didn't add more",
                 abilities == ["flying", "reach"], f"abilities={abilities}")
+    # Multiple abilities on same line: each gets its own line
+    expected1 = f"Flying {{i}}({FLYING}){{/i}}\nReach {{i}}({MAP['reach']}){{/i}}\nthat spans two lines and mentions reach.)"
     ok &= check("segment preserved (not a convincing reminder), reminders after line 1",
-                new == "Flying, reach (A reminder" + f" {{i}}({MAP['flying']}){{/i}} {{i}}({MAP['reach']}){{/i}}\n"
-                      "that spans two lines and mentions reach.)", new)
+                new == expected1, new)
     # A segment whose content matches reach's reminder is removed and replaced.
     text = "Flying, reach (This creature can block creatures with flying.)"
     new, abilities = inject_ability_reminders(text, MAP)
     ok &= check("reach variant removed, both canonical",
-                new == f"Flying, reach {{i}}({FLYING}){{/i}} {{i}}({MAP['reach']}){{/i}}", new)
+                new == f"Flying {{i}}({FLYING}){{/i}}\nReach {{i}}({MAP['reach']}){{/i}}", new)
 
     print("== Plain (json-builder) text ==")
     text = "Flying\nVigilance (Attacking doesn't cause it to tap.)"
@@ -164,7 +168,8 @@ def run_all():
                 ("Destroy target creature.", []))
 
     print("== Map loading ==")
-    ok &= check("map has 13 abilities", len(MAP) == 13, f"got {len(MAP)}: {sorted(MAP)}")
+    # Map now has 17 abilities (defender, flying:wall, trample:overrun, regenerate added)
+    ok &= check("map has 18 abilities", len(MAP) == 18, f"got {len(MAP)}: {sorted(MAP)}")
     ok &= check("no underscore/comment keys", all(not k.startswith("_") for k in MAP))
     ok &= check("ward template carries {cost}", "{cost}" in MAP["ward"])
     ok &= check("missing file -> empty map", load_reminder_map("/nonexistent/reminder_map.json") == {})

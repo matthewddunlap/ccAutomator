@@ -36,18 +36,26 @@ Vampire does).
   carrying a listed keyword ability gets the canonical sentence from
   `reminder_map.json` -- printed variants are **replaced**, missing ones
   **added**.  Uniform wording across the deck, no double reminders.
-- `reminder_map.json` (next to `ccAutomator.py`) is user-editable: 13
-  keyword abilities today (flying, vigilance, haste, first strike,
-  double strike, trample, deathtouch, lifelink, reach, hexproof, menace,
-  ward, infect).  Ward's `{cost}` placeholder is filled in from the card
-  itself (e.g. `Ward {2}`).
+- `reminder_map.json` (next to `ccAutomator.py`) is user-editable: keyword
+  abilities today (flying, vigilance, haste, first strike, double strike,
+  trample, deathtouch, lifelink, reach, hexproof, menace, ward, infect,
+  defender, regenerate).
+- Card-specific overrides: Add entries like `"trample:overrun"` in the map
+  to use special reminder text for specific cards. When a card's name
+  matches the suffix (case-insensitive), that reminder is used instead of
+  the generic one. For example, Overrun uses: "Each of those creatures can
+  deal excess combat damage to the player it's attacking."
+- Card-type overrides: Add entries like `"flying:wall"` for cards with a
+  specific subtype. When the card has that subtype (e.g., "Legendary
+  Creature - Wall"), the type-specific reminder is used. For example, Wall
+  of Air's Flying uses: "This creature can block creatures with flying."
 - `--reminder-map PATH` points at an alternative map.
 - The injected/replacement text uses the app's `{i}(...) {/i}` italic form,
   so it renders like printed reminders -- and is stripped by
   `--hide-reminder-text` if that is also set (that checkbox removes *all*
   tagged reminders at render).
 - Detection/injection logic is pure and covered by
-  `test_reminder_injection.py` (27 checks, run directly or under pytest).
+  `test_reminder_injection.py` (31 checks, run directly or under pytest).
 
 ## Auto-fit calibration
 

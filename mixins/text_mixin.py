@@ -758,7 +758,13 @@ class TextMixin:
                 print("      Rules Text is empty; nothing to inject.")
                 return
 
-            updated, abilities = inject_ability_reminders(current, reminder_map)
+            # Get card_name and card_type from the automator class if available
+            card_name = getattr(self, 'card_name', None)
+            card_type = getattr(self, 'card_type', None)
+            updated, abilities = inject_ability_reminders(
+                current, reminder_map,
+                card_name=card_name,
+                card_type=card_type)
             if not abilities:
                 print("      No mapped keyword abilities found; text unchanged.")
                 return

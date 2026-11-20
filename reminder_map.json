@@ -1,16 +1,21 @@
 {
-  "_comment": "Ability -> canonical reminder text, used by --inject-reminder-text. Keys are matched case-insensitively in the card rules text; with the flag on, every card carrying a listed ability gets exactly this sentence (any printed variant of it is replaced, a missing one is added). A value may contain {cost}, which is replaced by the cost following the ability on the card (e.g. Ward {2}). Wording seeded from the most common official printed reminders in the Scryfall cache; edit freely.",
+  "_comment": "Ability -> canonical reminder text, used by --inject-reminder-text. Keys are matched case-insensitively in the card rules text; with the flag on, every card carrying a listed ability gets exactly this sentence (any printed variant of it is replaced, a missing one is added). A value may contain {cost}, which is replaced by the cost following the ability on the card (e.g. Ward {2}). Wording seeded from the most common official printed reminders in the Scryfall cache; edit freely. Also supports card-type-specific variants like \"flying:wall\" which will be used when the card has type \"Wall\", and card-specific variants like \"trample:overrun\" for cards with special reminder text.",
   "flying": "This creature can't be blocked except by creatures with flying or reach.",
+  "flying:wall": "This creature can block creatures with flying.",
   "vigilance": "Attacking doesn't cause this creature to tap.",
-  "haste": "This creature can attack and {T} as soon as it comes under your control.",
+  "haste": "This creature can attack as soon as it comes under your control.",
   "first strike": "This creature deals combat damage before creatures without first strike.",
   "double strike": "This creature deals both first-strike and regular combat damage.",
-  "trample": "This creature can deal excess combat damage to the player or planeswalker it's attacking.",
+  "trample": "This creature can deal excess combat damage to the player it's attacking.",
+  "trample:overrun": "Each of those creatures can deal excess combat damage to the player it's attacking.",
   "deathtouch": "Any amount of damage this deals to a creature is enough to destroy it.",
   "lifelink": "Damage dealt by this creature also causes you to gain that much life.",
   "reach": "This creature can block creatures with flying.",
   "hexproof": "This creature can't be the target of spells or abilities your opponents control.",
   "menace": "This creature can't be blocked except by two or more creatures.",
   "ward": "Whenever this creature becomes the target of a spell or ability an opponent controls, counter it unless that player pays {cost}.",
-  "infect": "This creature deals damage to creatures in the form of -1/-1 counters and to players in the form of poison counters."
+  "infect": "This creature deals damage to creatures in the form of -1/-1 counters and to players in the form of poison counters.",
+  "defender": "This creature can't attack.",
+  "regenerate:uthden troll": "The next time this creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it.",
+  "regenerate": "The next time this creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it."
 }
