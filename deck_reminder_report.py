@@ -12,11 +12,14 @@ though its text is just "Ward {2}"); cards without that field fall back to a
 rules-text scan with the same detection rules as the injector.
 
 Examples:
-    python3 deck_reminder_report.py decks/mydeck.txt
-    python3 deck_reminder_report.py decks/mydeck.txt --mapped-only
-    python3 deck_reminder_report.py decks/mydeck.txt --no-api
-    python3 deck_reminder_report.py decks/mydeck.txt --map my_map.json
-    python3 deck_reminder_report.py decks/mydeck.txt --tokens
+    python3 deck_reminder_report.py decks/mydeck.dek
+    python3 deck_reminder_report.py decks/mydeck.dek --mapped-only
+    python3 deck_reminder_report.py decks/mydeck.dek --no-api
+    python3 deck_reminder_report.py decks/mydeck.dek --map my_map.json
+    python3 deck_reminder_report.py decks/mydeck.dek --tokens
+    python3 deck_reminder_report.py decks/ --tokens --mtgo
+
+Note: When specifying a directory, only .dek files are processed.
 """
 import argparse
 import json
@@ -215,61 +218,69 @@ def analyze_tokens(card_results, con, use_api):
     return tokens_needed
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="List the cards in a decklist that carry the keyword "
-                    "abilities from reminder_map.json.")
-    parser.add_argument("decklist", help="decklist file (one card per line, optional count prefix)")
-    parser.add_argument("--map", default=None,
-                        help="ability -> reminder JSON map (default: reminder_map.json next to this script)")
-    parser.add_argument("--cache", default=None,
-                        help="Scryfall cache DB (default: scryfall_cache.db next to this script)")
-    parser.add_argument("--no-api", action="store_true",
-                        help="do not fall back to the Scryfall API for cards missing from the cache")
-    parser.add_argument("--mapped-only", action="store_true",
-                        help="only show cards that carry at least one mapped ability")
-    parser.add_argument("--tokens", action="store_true",
-                        help="analyze decklist for token requirements")
-    args = parser.parse_args()
+def get_dek_files(input_path):
+    """Get list of .dek files from a file or directory."""
+    if os.path.isfile(input_path):
+        if input_path.endswith('.dek'):
+            return [input_path]
+        return []
+    elif os.path.isdir(input_path):
+        files = []
+        for f in os.listdir(input_path):
+            if f.endswith('.dek'):
+                files.append(os.path.join(input_path, f))
+        return sorted(files)
+    return []
 
-    reminder_map = load_reminder_map(args.map)
-    if not reminder_map:
-        print("Error: reminder map is empty or unreadable -- nothing to match.", file=sys.stderr)
-        sys.exit(1)
 
-    cards = parse_card_file(args.decklist)
-    unique = {}  # name -> entry, first occurrence wins (decklist order kept)
-    for c in cards:
-        unique.setdefault(c['name'], c)
+def generate_mtgo_token_dek(deck_path, tokens_needed, output_dir=None):
+    """
+    Generate MTGO style .dek file with tokens at the end.
+    Format: count token-name, one per line.
+    Returns the output file path.
+    """
+    base_name = os.path.splitext(os.path.basename(deck_path))[0]
 
-    db_path = args.cache or os.path.join(HERE, 'scryfall_cache.db')
-    con = open_cache(db_path)
-    if con is None and not args.no_api:
-        print(f"Note: cache '{os.path.basename(db_path)}' not usable; "
-              "using the Scryfall API for every card.", file=sys.stderr)
+    if output_dir:
+        output_path = os.path.join(output_dir, base_name + '.dek')
+    else:
+        output_path = deck_path
 
-    results = []  # (name, count, category, abilities, source)
-    for name, c in unique.items():
-        data, source = (None, None)
-        if con is not None:
-            data, source = find_in_cache(con, name)
-        if data is None and not args.no_api:
-            data, source = find_in_api(name)
-        abilities = card_abilities(data, reminder_map) if data else []
-        results.append((name, c.get('count', 1), c.get('category', 'deck'),
-                        abilities, source))
-    if con is not None:
-        con.close()
+    # Read original deck content
+    with open(deck_path, 'r') as f:
+        content = f.read()
 
-    # Store the db_path for token analysis
-    db_path_for_tokens = db_path if con is not None else None
+    # Build token lines
+    token_lines = []
+    for token_name in sorted(tokens_needed.keys()):
+        # Count total tokens needed (sum of all counts from cards that produce this token)
+        total_count = sum(count for _, count in tokens_needed[token_name])
+        token_lines.append(f"{total_count} {token_name}")
 
-    # ---- Report -------------------------------------------------------------
+    # Write combined content
+    with open(output_path, 'w') as f:
+        f.write(content)
+        if token_lines:
+            f.write("\n# Tokens needed (MTGO format):\n")
+            for line in token_lines:
+                f.write(line + "\n")
+
+    return output_path
+
+
+def print_report(deck_path, results, unique, args, reminder_map, con, db_path):
+    """Print the report for a single deck."""
     map_path = args.map or os.path.join(HERE, 'reminder_map.json')
-    print(f"Deck:   {os.path.basename(args.decklist)} — {len(unique)} unique card(s)")
+
+    # Determine source indicator
+    if con is not None:
+        src = f"cache {os.path.basename(db_path)}"
+    else:
+        src = "no cache"
+
+    print(f"Deck:   {os.path.basename(deck_path)} — {len(unique)} unique card(s)")
     print(f"Map:    {os.path.basename(map_path)} — {len(reminder_map)} "
           f"abilities ({', '.join(reminder_map)})")
-    src = f"cache {os.path.basename(db_path)}" if con is not None else "no cache"
     print(f"Source: {src}; API fallback {'off' if args.no_api else 'on'}")
     print()
 
@@ -286,7 +297,6 @@ def main():
             print(f"  {label:<{width}}  -{mark}")
 
     mapped = [r for r in results if r[3]]
-    unresolved = [r[0] for r in results if r[4] is None]
     print()
     print(f"Cards with mapped abilities: {len(mapped)}/{len(unique)}")
     if mapped:
@@ -299,28 +309,133 @@ def main():
             if a in counts:
                 print(f"  {a:<14} {counts[a]}")
 
-    # ---- Token Analysis (optional) ------------------------------------------
-    if args.tokens:
-        print()
-        print("=== Token Analysis ===")
-        # Reopen cache for token analysis if it was closed
-        token_con = open_cache(db_path_for_tokens) if db_path_for_tokens else None
-        if token_con is None and not args.no_api:
-            print(f"Note: cache not usable; using API for token lookups.", file=sys.stderr)
-        tokens_needed = analyze_tokens(results, token_con, args.no_api)
-        if token_con is not None:
-            token_con.close()
-        if tokens_needed:
-            print("Tokens needed:")
-            for token_name, cards in sorted(tokens_needed.items()):
-                print(f"  {token_name}:")
-                for card_name, card_count in cards:
-                    print(f"    {card_name} (x{card_count})")
-        else:
-            print("No tokens needed.")
 
-    if unresolved:
-        print(f"Unresolved (not in cache or API): {', '.join(unresolved)}")
+def process_single_deck(deck_path, args, reminder_map, con, db_path):
+    """Process a single deck file and return results."""
+    cards = parse_card_file(deck_path)
+    unique = {}  # name -> entry, first occurrence wins (decklist order kept)
+    for c in cards:
+        unique.setdefault(c['name'], c)
+
+    results = []  # (name, count, category, abilities, source)
+    for name, c in unique.items():
+        data, source = (None, None)
+        if con is not None:
+            data, source = find_in_cache(con, name)
+        if data is None and not args.no_api:
+            data, source = find_in_api(name)
+        abilities = card_abilities(data, reminder_map) if data else []
+        results.append((name, c.get('count', 1), c.get('category', 'deck'),
+                        abilities, source))
+
+    return results, unique
+
+
+def process_decklist(input_path, args, reminder_map, con, db_path):
+    """Process decklist(s) and return results."""
+    dek_files = get_dek_files(input_path)
+
+    if not dek_files:
+        if os.path.isdir(input_path):
+            print(f"No .dek files found in {input_path}", file=sys.stderr)
+        else:
+            print(f"Input must be a .dek file or directory: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    all_results = []
+    all_unique = {}
+
+    for dek_path in dek_files:
+        results, unique = process_single_deck(dek_path, args, reminder_map, con, db_path)
+        all_results.append((dek_path, results, unique))
+        # Merge unique cards for overall report
+        for name, c in unique.items():
+            all_unique.setdefault(name, c)
+
+    return all_results, all_unique, dek_files
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="List the cards in a decklist that carry the keyword "
+                    "abilities from reminder_map.json.")
+    parser.add_argument("decklist", help="decklist file (.dek) or directory (analyzes all .dek files)")
+    parser.add_argument("--map", default=None,
+                        help="ability -> reminder JSON map (default: reminder_map.json next to this script)")
+    parser.add_argument("--cache", default=None,
+                        help="Scryfall cache DB (default: scryfall_cache.db next to this script)")
+    parser.add_argument("--no-api", action="store_true",
+                        help="do not fall back to the Scryfall API for cards missing from the cache")
+    parser.add_argument("--mapped-only", action="store_true",
+                        help="only show cards that carry at least one mapped ability")
+    parser.add_argument("--tokens", action="store_true",
+                        help="analyze decklist for token requirements")
+    parser.add_argument("--mtgo", action="store_true",
+                        help="generate MTGO style .dek file with tokens (format: count token-name, one per line)")
+    parser.add_argument("--output-dir", default=None,
+                        help="output directory for generated .dek files (default: same as input)")
+    args = parser.parse_args()
+
+    # Check for MTGO mode with directory - not supported
+    if args.mtgo and os.path.isdir(args.decklist):
+        print("Error: --mtgo mode requires a single .dek file, not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    reminder_map = load_reminder_map(args.map)
+    if not reminder_map:
+        print("Error: reminder map is empty or unreadable -- nothing to match.", file=sys.stderr)
+        sys.exit(1)
+
+    db_path = args.cache or os.path.join(HERE, 'scryfall_cache.db')
+    con = open_cache(db_path)
+    if con is None and not args.no_api:
+        print(f"Note: cache '{os.path.basename(db_path)}' not usable; "
+              "using the Scryfall API for every card.", file=sys.stderr)
+
+    # Process decklist(s)
+    all_results, all_unique, dek_files = process_decklist(args.decklist, args, reminder_map, con, db_path)
+
+    # If using directory mode without --tokens, process each file separately
+    if os.path.isdir(args.decklist) and not args.tokens:
+        for dek_path, results, unique in all_results:
+            print_report(dek_path, results, unique, args, reminder_map, con, db_path)
+    else:
+        # Single file mode or --tokens mode
+        dek_path, results, unique = all_results[0]
+        print_report(dek_path, results, unique, args, reminder_map, con, db_path)
+
+        # Handle --tokens with optional --mtgo
+        if args.tokens:
+            # Re-open cache for token analysis
+            token_con = open_cache(db_path) if db_path else None
+            if token_con is None and not args.no_api:
+                print(f"Note: cache not usable; using API for token lookups.", file=sys.stderr)
+
+            tokens_needed = analyze_tokens(results, token_con, args.no_api)
+
+            if token_con is not None:
+                token_con.close()
+
+            # Print token analysis
+            print()
+            print("=== Token Analysis ===")
+            if tokens_needed:
+                print("Tokens needed:")
+                for token_name, cards in sorted(tokens_needed.items()):
+                    print(f"  {token_name}:")
+                    for card_name, card_count in cards:
+                        print(f"    {card_name} (x{card_count})")
+
+                # Generate MTGO format if requested
+                if args.mtgo:
+                    output_path = generate_mtgo_token_dek(dek_path, tokens_needed, args.output_dir)
+                    print()
+                    print(f"MTGO format .dek generated: {output_path}")
+            else:
+                print("No tokens needed.")
+
+    if con is not None:
+        con.close()
 
 
 if __name__ == "__main__":

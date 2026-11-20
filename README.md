@@ -63,7 +63,7 @@ The `--tokens` flag in `deck_reminder_report.py` analyzes a decklist for
 token requirements:
 
 ```bash
-python3 deck_reminder_report.py --tokens decks/mydeck.txt
+python3 deck_reminder_report.py --tokens decks/mydeck.dek
 ```
 
 This scans each card in the decklist, looks up its Scryfall data, and lists
@@ -83,6 +83,45 @@ Tokens needed:
 Tokens are identified from Scryfall's `all_parts` field for cards that have
 `component: token`. Cards that produce tokens are typically spells, abilities,
 or lands that create tokens as part of their effect.
+
+## MTGO style decklists
+
+Combine `--tokens --mtgo` to generate an MTGO-compatible .dek file with tokens
+appended at the end. The format is `<count> <token-name>`, one per line, with
+a `# Tokens needed (MTGO format):` header.
+
+```bash
+python3 deck_reminder_report.py --tokens --mtgo decks/mydeck.dek
+```
+
+This reads `mydeck.dek` and appends the token list to the same file:
+
+```
+# Existing deck content...
+
+# Tokens needed (MTGO format):
+2 Bear
+1 Beast
+1 Copy
+```
+
+### Directory support
+
+Both the input decklist can be a directory (analyzes all `.dek` files in it)
+or a single `.dek` file. When using `--mtgo`, only a single file is supported.
+
+```bash
+python3 deck_reminder_report.py --tokens decks/      # Analyze all .dek files
+python3 deck_reminder_report.py --tokens --mtgo decks/mydeck.dek  # Generate tokens
+```
+
+### Output directory
+
+Use `--output-dir` to write the generated .dek file to a different location:
+
+```bash
+python3 deck_reminder_report.py --tokens --mtgo --output-dir /path/to/output decks/mydeck.dek
+```
 
 ## Auto-fit calibration
 
