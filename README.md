@@ -79,14 +79,21 @@ sets — use `--set-symbol-source hexproof` (which covers them) if you want
 the set symbol on token cards.
 
 Tokens are rendered in their own frame (`--token-frame`, default
-`FullArtNew`, the full-art land frame used by `--full-art-basic-land`)
-instead of the deck's `--frame`: token art is square-to-portrait while the
-standard deck frame's art window is landscape, so the full-art frame's
-portrait window fits the token art far better (and tokens look visually
-distinct from the deck). The deck frame is restored automatically after
-each token. Pass `--token-frame none` to keep tokens in the deck frame.
-Colorless tokens stay in the deck frame (the full-art frame has no
-colorless base asset).
+`seventhTextless` -- the same Textless Seventh frame family that
+`--full-art-basic-land` uses) instead of the deck's `--frame`: token art is
+square-to-portrait while the standard deck frame's art window is landscape,
+so the standard frame crops token art 25-43%.  seventhTextless renders one
+full-card textured border per color (W/U/B/R/G/M/A/L -- colorless tokens
+use the Artifact frame) with a portrait art window (0.768x0.7772, nearly
+square) and no title plaque, so tokens visually match the full-art lands
+and the art fits with minimal cropping.  Because that version is not in
+Card Conjurer's frame dropdown, the token path drives its frame pack
+directly (the deck's text layout is restored automatically for the next
+spell, and its set symbol is blanked -- the textless layout puts
+setSymbolBounds where the P/T box is).  The deck frame is restored
+automatically after each token.  Pass `--token-frame none` to keep tokens
+in the deck frame, or any other frame name (e.g. `FullArtNew`) to use the
+frame-dropdown path instead.
 
 ## Token analysis
 

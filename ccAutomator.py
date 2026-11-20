@@ -103,11 +103,13 @@ def main():
     )
     parser.add_argument(
         '--token-frame',
-        default='FullArtNew',
-        help="Frame to render '# Tokens' cards in. Defaults to 'FullArtNew' (the full-art land frame, whose "
-             "portrait art window fits square/portrait token art instead of cropping it). Pass the same value "
-             "as --frame (e.g. 'Seventh') or 'none' to keep tokens in the deck frame. The deck frame is "
-             "restored automatically after each token."
+        default='seventhTextless',
+        help="Frame to render '# Tokens' cards in. Defaults to 'seventhTextless' -- the same Textless "
+             "Seventh full-card frame family that --full-art-basic-land uses, so tokens visually match "
+             "the full-art lands (portrait art window, no plaque, per-color textured border). Other "
+             "frame names (e.g. 'FullArtNew') go through the #autoFrame dropdown path. Pass the same "
+             "value as --frame (e.g. 'Seventh') or 'none' to keep tokens in the deck frame. The deck "
+             "frame is restored automatically after each token."
     )
 
     # --- START OF MODIFIED ARGUMENTS ---
@@ -741,6 +743,7 @@ def main():
         total_cards = len(all_cards) + len(full_art_lands)
         failed_cards = []
         failed_lines = []  # decklist-format lines for the .missing file
+        failed_categories = []  # parallel category list (token vs deck)
         
         for section, section_cards in cards_by_section.items():
             print(f"\nProcessing section: {section} ({len(section_cards)} cards)")
@@ -788,11 +791,13 @@ def main():
                     else:
                         failed_cards.append(card_name)
                         failed_lines.append(f"{card.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
+                        failed_categories.append(section)
                         print(f"  ✗ {card_name} (generation failed)")
 
                 except Exception as e:
                     failed_cards.append(card_name)
                     failed_lines.append(f"{card.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
+                    failed_categories.append(section)
                     print(f"  ✗ {card_name}: {e}")
         
         # Save output file
@@ -811,7 +816,7 @@ def main():
             # Auto-generate a re-runnable decklist of the failed cards next
             # to the input file (same convention as selenium mode).
             try:
-                missing_path = write_missing_list(args.input_file, failed_lines)
+                missing_path = write_missing_list(args.input_file, failed_lines, failed_categories)
                 print(f"Missing cards written to {missing_path}")
             except OSError as e:
                 print(f"Warning: could not write the missing-cards list: {e}", file=sys.stderr)
@@ -1210,6 +1215,7 @@ def main():
             skipped_count = 0
             error_count = 0
             error_list = []
+            error_categories = []  # parallel category list (token vs deck)
 
             if args.card_builder == 'selenium':
                 from scryfall_cache import ScryfallCache
@@ -1250,10 +1256,12 @@ def main():
                             # Keep the decklist's copy count so the generated
                             # .missing file re-runs the same number of cards.
                             error_list.append(f"{card_data.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
+                            error_categories.append(category)
                     except Exception as e:
                         print(f"   Error processing '{card_name}': {e}", file=sys.stderr)
                         error_count += 1
                         error_list.append(f"{card_data.get('count', 1)} {card_name}{'|' + set_code if set_code else ''}")
+                        error_categories.append(category)
 
             # --- Full-Art Basic Land Generation (Single Session) ---
             # Moved to end of workflow to prevent template masks from affecting main cards
@@ -1394,6 +1402,7 @@ def main():
                                 print(f"   Error capturing {card_name}: {e}")
                                 error_count += 1
                                 error_list.append(f"1 {card_name}|{set_code}")
+                                error_categories.append('land')
                             
                             # Upload if needed
                             if args.upload_path:
@@ -1443,7 +1452,7 @@ def main():
                 # decklist format), so the user does not have to hand-copy
                 # them from this summary.
                 try:
-                    missing_path = write_missing_list(args.input_file, error_list)
+                    missing_path = write_missing_list(args.input_file, error_list, error_categories)
                     print(f"\n--- Missing cards written to {missing_path} ---")
                     print("Fix the names above, then re-run with that file as input: "
                           f"{Path(missing_path).name} is a standard decklist.")

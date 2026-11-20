@@ -213,3 +213,25 @@ class SymbolMixin:
             print(f"      WARNING: set symbol asset for set '{set_code}' failed to "
                   f"load (404 or blocked by CORS). The card will render WITHOUT "
                   f"its set symbol.", file=sys.stderr)
+
+    def clear_set_symbol(self):
+        """Blank the set symbol on the current card.
+
+        The seventhTextless frame layout places setSymbolBounds in the
+        bottom-right corner -- the same spot as the P/T box -- so a fetched
+        symbol collides with '2/2'.  The --full-art-basic-land path blanks
+        the symbol the same way (setSymbolSource -> /img/blank.png); tokens
+        on that frame do the same.  Uses the app's own setSymbolEdited()
+        path so the canvas redraws.
+        """
+        print("   Blanking set symbol (seventhTextless P/T corner collision).")
+        try:
+            self.driver.execute_script(r"""
+                setSymbol.src = blank.src;
+                card.setSymbolSource = blank.src;
+                try { setSymbolEdited(); } catch (e) {}
+                try { drawCard(); } catch (e) {}
+            """)
+            self._wait_for_render()
+        except Exception as e:
+            print(f"      Warning: could not blank set symbol: {e}", file=sys.stderr)

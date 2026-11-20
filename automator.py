@@ -527,11 +527,56 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         if not self._token_frame_active or not self.token_frame or not self.deck_frame:
             return
         self._token_frame_active = False
+        was_textless = self.token_frame == 'seventhTextless'
         print(f"   Restoring deck frame '{self.deck_frame}' (token frame '{self.token_frame}' was applied).")
         try:
             self.set_frame(self.deck_frame, wait=True)
+            if was_textless:
+                # seventhTextless REPLACED the text-box layout (its pack's
+                # loadTextOptions ran with textless geometry: goudymedieval
+                # title, no type box).  set_frame only rebuilds frames; the
+                # deck frame's own text layout must be re-applied too, or
+                # the next spell renders with the token frame's boxes.
+                self._reload_deck_frame_text_layout()
         except Exception as e:
             print(f"   Warning: failed to restore deck frame '{self.deck_frame}': {e}", file=sys.stderr)
+
+    def _reload_deck_frame_text_layout(self):
+        """Re-apply the deck frame's version + text layout after
+        seventhTextless replaced them.
+
+        The #loadFrameVersion onclick always holds the LAST loaded pack's
+        handler -- after a textless token that is packSeventhTextless's, so
+        invoking it as-is would push seventhTextless geometry onto the deck
+        card.  Re-load the deck frame's own pack script first (which
+        rebinds the handler and repopulates the picker), then invoke the
+        handler to restore the deck version's geometry + text boxes.  The
+        frame PIECES were already rebuilt by set_frame()'s dropdown
+        autoFrame(); this only fixes version/geometry/text."""
+        try:
+            self.driver.execute_script(
+                f"loadScript('/js/frames/pack{self.deck_frame}.js');")
+            self._wait_frame_picker_ready(self.deck_frame, timeout=15.0)
+            result = self.driver.execute_async_script(r"""
+                var done = arguments[arguments.length - 1];
+                var btn = document.querySelector('#loadFrameVersion');
+                if (!btn || !btn.onclick) { done('no-handler'); return; }
+                var p = btn.onclick();
+                if (p && typeof p.then === 'function') {
+                    p.then(function () { done('loaded'); },
+                           function (e) { done('error: ' + e); });
+                } else { done('loaded-sync'); }
+            """)
+            if result not in ('loaded', 'loaded-sync'):
+                print(f"   Warning: deck text layout reload returned '{result}'.",
+                      file=sys.stderr)
+            else:
+                print("   Deck frame text layout restored.")
+            if hasattr(self, "_reset_pt_box_state"):
+                self._reset_pt_box_state()
+            self._wait_for_render()
+        except Exception as e:
+            print(f"   Warning: deck text layout reload failed: {e}", file=sys.stderr)
 
     def _warm_frame_fonts(self):
         """Force-load the current card's text-box web fonts.
@@ -1145,32 +1190,62 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 # --- Token Frame ---
                 # Token art is square-to-portrait (0.71-0.95 aspect); the deck
                 # frame's art window is landscape, so it crops the token art
-                # 25-43%.  A dedicated portrait-frame (token_frame, e.g.
-                # FullArtNew -- the --full-art-basic-land frame) fits it, and
-                # tokens being visually distinct from the deck is a bonus
-                # (user ruling).  Colorless tokens keep the deck frame: the
-                # full-art frame has no colorless base asset (fullart/c.png
-                # 404s).  The frame is applied BEFORE set_frame_color so the
-                # color step recolors THIS frame; _restore_deck_frame() puts
-                # the deck frame back at the top of the next card.
-                if self.token_frame and colors:
-                    print(f"   Applying token frame '{self.token_frame}' (color {''.join(colors)}).")
-                    try:
-                        self.set_frame(self.token_frame, wait=True)
-                        self._token_frame_active = True
-                        # Kick the frame's web-font download now (the first
-                        # draw can race it -- see _wait_frame_fonts_loaded).
-                        self._warm_frame_fonts()
-                    except Exception as e:
-                        print(f"   Warning: failed to apply token frame '{self.token_frame}': {e}; keeping deck frame.", file=sys.stderr)
-                elif self.token_frame and not colors:
-                    print(f"   Colorless token '{card_name}': keeping deck frame (no colorless '{self.token_frame}' base asset).")
+                # 25-43%.  token_frame selects a dedicated token frame;
+                # _restore_deck_frame() puts the deck frame back at the top
+                # of the next card.
+                #
+                # 'seventhTextless' is the frame family --full-art-basic-land
+                # uses (one full-card textured frame, portrait art window
+                # 0.768x0.7772 -- nearly square, fits token art with ~1-8%
+                # crop, and tokens visually match the full-art lands).  It is
+                # NOT reachable from the #autoFrame dropdown, so it goes
+                # through apply_seventh_textless_frame() and the color is
+                # chosen HERE (the color thumbs of other packs don't apply to
+                # it).  All eight letters have assets, so colorless tokens
+                # (artifact 'A') work too.
+                #
+                # Dropdown frames (e.g. FullArtNew) go through set_frame() +
+                # set_frame_color() as before.
+                if self.token_frame:
+                    if self.token_frame == 'seventhTextless':
+                        color_code = (''.join(colors) or 'A').strip().upper()
+                        # Multi-color -> gold 'M'; artifact -> 'A'.
+                        if len(color_code) > 1:
+                            color_code = 'M'
+                        elif color_code not in 'WUBRG':
+                            color_code = 'A'
+                        print(f"   Applying token frame 'seventhTextless' (color {color_code}).")
+                        if self.apply_seventh_textless_frame(color_code):
+                            self._token_frame_active = True
+                            self._warm_frame_fonts()
+                            mods_applied = True
+                            # The textless layout puts setSymbolBounds in the
+                            # bottom-right corner -- the same spot as the P/T
+                            # box -- so a set symbol collides with '2/2'.
+                            # The --full-art-basic-land path blanks it
+                            # (blank.png); do the same for tokens.
+                            self.clear_set_symbol()
+                        else:
+                            print("   Warning: token frame not applied; keeping deck frame.", file=sys.stderr)
+                    elif colors:
+                        print(f"   Applying token frame '{self.token_frame}' (color {''.join(colors)}).")
+                        try:
+                            self.set_frame(self.token_frame, wait=True)
+                            self._token_frame_active = True
+                            # Kick the frame's web-font download now (the first
+                            # draw can race it -- see _wait_frame_fonts_loaded).
+                            self._warm_frame_fonts()
+                        except Exception as e:
+                            print(f"   Warning: failed to apply token frame '{self.token_frame}': {e}; keeping deck frame.", file=sys.stderr)
+                    else:
+                        print(f"   Colorless token '{card_name}': keeping deck frame (no colorless '{self.token_frame}' base asset).")
 
-                # --- NEW: Fix Frame Color for Tokens ---
-                # Tokens often default to colorless when mana cost is cleared.
-                # We force the frame color based on Scryfall data.
-                self.set_frame_color(colors, type_line=current_type_line, mana_cost=mana_cost)
-                mods_applied = True
+                if self._token_frame_active and self.token_frame != 'seventhTextless':
+                    # --- NEW: Fix Frame Color for Tokens ---
+                    # Tokens often default to colorless when mana cost is cleared.
+                    # We force the frame color based on Scryfall data.
+                    self.set_frame_color(colors, type_line=current_type_line, mana_cost=mana_cost)
+                    mods_applied = True
 
                 # The color step above rebuilds the frame (re-clicking the
                 # base thumb), which can re-trigger the web-font request

@@ -13,6 +13,10 @@ class CanvasMixin:
     STABILIZE_TIMEOUT = 20
     STABILITY_INTERVAL = 0.1
     STABILITY_CHECKS = 3
+    # Frame value most recently applied via set_frame (None before the first
+    # call).  Lets set_frame_color re-verify the picker pack even when the
+    # caller skipped set_frame (spell cards: set_frame runs at startup only).
+    _last_set_frame = None
     def _get_canvas_data_url(self):
         # Use a cached selector if available to speed up subsequent calls
         if hasattr(self, '_cached_canvas_selector'):
@@ -253,21 +257,98 @@ class CanvasMixin:
                 timeout=cap, probe=True) is None:
             print(f"   Warning: canvas had not settled after {cap:.1f}s; proceeding.", file=sys.stderr)
 
+    # Where each auto-frame pack's picker thumbnails live.  The frame-picker
+    # rebuild race (see _wait_frame_picker_ready) needs a pack-specific
+    # thumbnail src to tell "the new pack's picker is live" from "the old
+    # pack's picker is still up".  Keyed by #autoFrame dropdown value.
+    _FRAME_PACK_THUMB_SRC = {
+        "FullArtNew": "/img/frames/m15/new/fullart/",
+        "Seventh": "/img/frames/seventh/regular/",
+        "seventhTextless": "/img/frames/seventh/textless/",
+        "TokenTextless-1": "/img/frames/token/textless/",
+    }
+
+    def _frame_picker_srcs(self):
+        """Return the list of src attributes currently in #frame-picker."""
+        try:
+            return self.driver.execute_script(
+                "return Array.from(document.querySelectorAll('#frame-picker img'))"
+                ".map(function (i) { return i.getAttribute('src'); }) || [];")
+        except Exception:
+            return []
+
+    def _wait_frame_picker_ready(self, frame_value, timeout=15.0):
+        """Block until #frame-picker shows thumbnails of `frame_value`'s pack.
+
+        WHY: selecting a new value in the app's #autoFrame dropdown fires
+        setAutoFrame() -> autoFrame(), which ends with
+        loadScript('/js/frames/pack<Frame>.js') -- an ASYNC script fetch.
+        Only when that script executes does loadFramePack() rebuild the
+        picker with the new pack's thumbnails (and 'Load Frame Version'
+        re-fit the art).  Until then the picker still shows the PREVIOUS
+        pack's thumbnails.
+
+        Any caller that clicks picker thumbnails right after set_frame()
+        (set_frame_color's color/land/PT thumbs) would therefore race the
+        pack fetch: the selector (e.g. //img[contains(@src, '/bThumb.png')])
+        matches BOTH packs' black thumb, so a slow fetch silently clicks
+        the OLD frame's pieces.  Observed production symptom: tokens
+        rendered Seventh frame graphics under art auto-fit to FullArtNew's
+        portrait window (the loadFrameVersion art refit had landed, the
+        color-thumb clicks had not).
+
+        Wait is bounded; on timeout we proceed (same risk profile as the
+        old blind wait) and report.  Cheap JS poll, no canvas reads.
+        """
+        marker = self._FRAME_PACK_THUMB_SRC.get(frame_value)
+        if not marker:
+            return  # Unknown pack: nothing pack-specific to wait on.
+        start = time.time()
+        while time.time() - start < timeout:
+            srcs = self._frame_picker_srcs()
+            if srcs and any(marker in (s or "") for s in srcs):
+                # Picker rebuilt; give loadFramePack's trailing
+                # '#frame-picker'.children[0].click() + loadFrameVersion
+                # click a beat to finish (they are synchronous with the
+                # pack script's execution, which we have now observed).
+                return True
+            time.sleep(0.1)
+        print(f"   Warning: frame picker did not show '{frame_value}' thumbnails "
+              f"within {timeout:.0f}s; proceeding (color step may race the pack load).",
+              file=sys.stderr)
+        return False
+
     def set_frame(self, frame_value, wait=True):
         try:
             art_tab = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="creator-menu-tabs"]/h3[3]')))
             art_tab.click()
             frame_dropdown = self.wait.until(EC.presence_of_element_located((By.ID, 'autoFrame')))
-            
+
             select = Select(frame_dropdown)
             current_val = select.first_selected_option.get_attribute("value")
-            
-            if current_val == frame_value:
+
+            # A previous seventhTextless token may have left the dropdown at
+            # 'false' (autoFrame neutralized so its debounced timer could not
+            # clobber the textless frame).  Restore selection from the DOM
+            # state, not from _last_set_frame, or this early-return would
+            # skip the rebuild and the next spell would keep token framing.
+            if current_val == 'false':
+                print("   Re-enabling autoFrame after seventhTextless token frame.")
+            elif current_val == frame_value:
                 print(f"   Frame already set to '{frame_value}'. Skipping update.")
                 return
 
             select.select_by_value(frame_value)
             print(f"Successfully set frame by value to '{frame_value}'.")
+            self._last_set_frame = frame_value
+
+            # The dropdown change triggers an ASYNC frame-pack script fetch;
+            # the picker (and the frame version's art refit) only reflect the
+            # new pack once that script executes.  Block on the picker before
+            # any caller clicks picker thumbnails (set_frame_color) or reads
+            # frame-default geometry -- otherwise those clicks can land on the
+            # previous pack's thumbs (see _wait_frame_picker_ready).
+            self._wait_frame_picker_ready(frame_value)
 
             # A different frame can have a different default P/T box, so the
             # cached frame-default geometry (TextMixin._pt_base) and the "box at
@@ -282,6 +363,128 @@ class CanvasMixin:
         except (TimeoutException, NoSuchElementException) as e:
             print(f"Error setting frame: {e}", file=sys.stderr)
             raise
+
+    # Text-box layout of the app's "Textless Seventh" frame version
+    # (packSeventhTextless.js, loadFrameVersion.onclick).  Applying
+    # seventhTextless via JS (see apply_seventh_textless_frame) must mirror
+    # this exactly: the pack's own onclick path is not reachable because
+    # #autoFrame has no seventhTextless entry, so this module drives the
+    # same pack script + version + art/text geometry directly.
+    SEVENTH_TEXTLESS_TEXT = {
+        "mana": {"name": "Mana Cost", "text": "", "x": 0.108, "y": 0.0486,
+                 "width": 0.8147, "height": 72 / 2100, "oneLine": True,
+                 "size": 72 / 1638, "align": "right", "manaCost": True,
+                 "manaSpacing": 0},
+        "title": {"name": "Title", "text": "", "x": 0.108, "y": 0.0448,
+                  "width": 0.784, "height": 0.0405, "oneLine": True,
+                  "font": "goudymedieval", "size": 0.0405, "color": "white",
+                  "shadowX": 0.002, "shadowY": 0.0015},
+        "rules": {"name": "Rules Text", "text": "", "x": 0.128, "y": 0.6429,
+                  "width": 0.744, "height": 0.2381, "size": 0.0358,
+                  "color": "white", "shadowX": 0.0014, "shadowY": 0.001},
+        "pt": {"name": "Power/Toughness", "text": "", "x": 0.8, "y": 0.8981,
+               "width": 0.1367, "height": 0.0453, "size": 0.0453,
+               "oneLine": True, "align": "center", "color": "white",
+               "shadowX": 0.002, "shadowY": 0.0015},
+    }
+
+    def apply_seventh_textless_frame(self, color_code='B'):
+        """Switch the live card to the app's 'Textless Seventh' frame
+        (seventhTextless) in `color_code` (W/U/B/R/G/M/A/L).
+
+        This is the frame family the --full-art-basic-land path uses
+        (version 'seventhTextless', one full-card textured frame asset
+        seventhTextlessFrame{letter}.png, portrait art window 0.768x0.7772,
+        no title plaque / no translucent type bar) -- the look the user
+        wants tokens to match.  #autoFrame has NO seventhTextless entry,
+        so set_frame() cannot select it; instead this drives the pack the
+        way the app's own frame-search + 'Load Frame Version' path does:
+
+          1. loadScript('/js/frames/packSeventhTextless.js') repopulates
+             availableFrames + the picker (loadFramePack()).
+          2. The pack's #loadFrameVersion.onclick is then invoked to set
+             card.version='seventhTextless', reset irregularities, refit
+             art to the portrait window (autoFitArt) and load the frame's
+             text-box layout (loadTextOptions).
+
+        Both steps are asynchronous (script exec + image loads); callers
+        should follow with _wait_frame_picker_ready('seventhTextless')
+        (done here) and the standard canvas stabilization before capture.
+        Returns True on success, False on failure (caller keeps the deck
+        frame).
+        """
+        try:
+            self.driver.execute_script(
+                "loadScript('/js/frames/packSeventhTextless.js');")
+            if not self._wait_frame_picker_ready('seventhTextless', timeout=15.0):
+                print("   Warning: SeventhTextless picker did not load.", file=sys.stderr)
+                return False
+
+            # Disable the dropdown BEFORE installing the textless frame.
+            # Every text edit (mana clear, title/PT mods) schedules the app's
+            # debounced autoFrame() (~500ms), which reads #autoFrame and
+            # REBUILDS card.frames from that frame's builder.  The dropdown
+            # still reads the deck frame here, so a pending timer would fire
+            # mid-apply and paint deck-frame pieces over the textless frame.
+            # 'false' makes autoFrame() a no-op; set_frame(deck_frame) at
+            # restore re-enables it (its value differs -> full re-select).
+            self.driver.execute_script(
+                "document.querySelector('#autoFrame').value = 'false'; setAutoFrame();")
+
+            letter = str(color_code).upper() or 'B'
+            valid = ('W', 'U', 'B', 'R', 'G', 'M', 'A', 'L')
+            if letter not in valid:
+                print(f"   Warning: no SeventhTextless frame for color '{color_code}'; using black.",
+                      file=sys.stderr)
+                letter = 'B'
+            src = f"/img/frames/seventh/textless/seventhTextlessFrame{letter}.png"
+
+            # Invoke the pack's own load handler: sets version, resets
+            # irregularities, autofits art to the portrait bounds and
+            # loads the textless text layout.  done async -> await it.
+            result = self.driver.execute_async_script(r"""
+                var done = arguments[arguments.length - 1];
+                var btn = document.querySelector('#loadFrameVersion');
+                if (!btn || !btn.onclick) { done('no-handler'); return; }
+                // The onclick is async; resolve after it settles.
+                var p = btn.onclick();
+                if (p && typeof p.then === 'function') {
+                    p.then(function () { done('loaded'); },
+                           function (e) { done('error: ' + e); });
+                } else { done('loaded-sync'); }
+            """)
+            if result not in ('loaded', 'loaded-sync'):
+                print(f"   Warning: SeventhTextless load handler returned '{result}'.",
+                      file=sys.stderr)
+                return False
+
+            # The pack's onclick loads the LAND frame ('Land Frame',
+            # seventhTextlessFrameL.png) via loadFramePack()'s first-thumb
+            # click.  Swap the frame stack to the requested color: single
+            # full-card frame entry, no masks (same shape the land JSON
+            # path writes into land.cardconjurer).
+            self.driver.execute_script(r"""
+                var src = arguments[0];
+                var f = {name: 'Color Frame', src: src, masks: []};
+                var img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = drawFrames;
+                img.src = fixUri(src);
+                f.image = img;
+                card.frames = [f];
+                drawFrames();
+            """, src)
+
+            # Text layout was replaced by the pack's loadTextOptions; card.text
+            # is fresh, so the automator's text mods apply to the new boxes.
+            self._last_set_frame = 'seventhTextless'
+            if hasattr(self, "_reset_pt_box_state"):
+                self._reset_pt_box_state()
+            print(f"   SeventhTextless frame applied ({letter}).")
+            return True
+        except Exception as e:
+            print(f"   Warning: apply_seventh_textless_frame failed: {e}", file=sys.stderr)
+            return False
 
     # The app's own "White Border" frame entry (captured from availableFrames):
     # full-card white.png masked to the outer card boundary by border.svg, so it
@@ -494,6 +697,16 @@ class CanvasMixin:
             target_thumb_suffix = color_map.get(colors[0], "cThumb.png")
 
         try:
+            # 0. Verify the picker actually belongs to the current frame pack.
+            #    Thumb srcs like 'bThumb.png' exist in EVERY pack's picker, so
+            #    if a frame-pack fetch (kicked by the #autoFrame dropdown, or
+            #    by the app's own debounced autoFrame() after text edits) is
+            #    still in flight, these clicks would apply the WRONG pack's
+            #    frame pieces.  See _wait_frame_picker_ready.
+            active_frame = getattr(self, "_last_set_frame", None)
+            if active_frame:
+                self._wait_frame_picker_ready(active_frame)
+
             # 1. Find the thumbnail (Base Frame)
             thumb_selector = f"//div[@id='frame-picker']//img[contains(@src, '/{target_thumb_suffix}')]"
             thumb = self.wait.until(EC.element_to_be_clickable((By.XPATH, thumb_selector)))

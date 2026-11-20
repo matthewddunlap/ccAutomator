@@ -197,7 +197,11 @@ def parse_card_file(filepath):
                     continue
 
                 # Use regex to capture the leading count and the rest of the line.
-                match = re.match(r'^(\d+)\s+(.*)', line)
+                # Accepts both '2 Card' and MTGO-style '2x Card' (the .dek
+                # files this repo's deck tooling emits use both forms; a
+                # '<count>x' line previously parsed as the literal name
+                # '2x Card' and failed validation/rendering).
+                match = re.match(r'^(\d+)x?\s+(.*)', line)
                 if match:
                     count = int(match.group(1))
                     full_name = match.group(2).strip()
@@ -224,7 +228,7 @@ def parse_card_file(filepath):
     return cards
 
 
-def write_missing_list(input_file, lines):
+def write_missing_list(input_file, lines, categories=None):
     """
     Writes the run's failed cards as a re-runnable decklist next to the input
     file: '<input_file>.missing' (the same convention as the existing
@@ -232,15 +236,34 @@ def write_missing_list(input_file, lines):
 
     `lines` are standard decklist lines ('<count> <Name>|SET' / '<count>
     <Name>'), one failed card per line, in the order the run reported them.
-    The file is a plain decklist, so after the names are fixed it can be fed
-    straight back in as input_file to re-run ONLY the cards that errored.
-    Overwrites any previous .missing file for the same input.
+    `categories` is an optional parallel list of the failed cards' run
+    categories (None entries for plain deck cards).  When any card carries a
+    non-'deck' category, '# <Category>' headers are interleaved so the file
+    re-runs with the SAME token/plain resolution as the original -- without
+    them, a failed 'Serf' re-runs as a plain deck card, its 'not:token'
+    query finds nothing, and the file that is supposed to fix the run
+    reproduces the failure.  The file is a plain decklist, so after the
+    names are fixed it can be fed straight back in as input_file to re-run
+    ONLY the cards that errored.  Overwrites any previous .missing file for
+    the same input.
 
     Returns the absolute path written.
     """
     out_path = os.path.abspath(str(input_file) + '.missing')
+    cats = list(categories) if categories else None
+    has_categories = bool(cats) and any((c or 'deck').strip().lower() != 'deck'
+                                        for c in cats)
     with open(out_path, 'w', encoding='utf-8') as f:
-        for line in lines:
+        current_cat = None
+        for i, line in enumerate(lines):
+            if has_categories:
+                cat = ((cats[i] if i < len(cats) else None) or 'deck').strip().lower()
+                if cat != current_cat:
+                    if cat != 'deck':
+                        f.write(f"# {cat.title()}\n")
+                    else:
+                        f.write("# Deck\n")
+                    current_cat = cat
             f.write(line.rstrip('\n') + '\n')
     return out_path
 

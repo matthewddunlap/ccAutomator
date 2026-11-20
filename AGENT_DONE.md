@@ -771,3 +771,72 @@ still have the thumbnail (Seventh) keep the original UI path unchanged.
   tofu).
 - `py_compile` clean.
 Commit: 7793e99.
+
+## Tokens in the full-art land frame (seventhTextless)  [2026-11-20]
+**Request (user):** tokens still rendered looking like the Seventh deck frame
+("still rendering on the seventh frame, but with the art sized for the
+FullArtNew"); user then pinned the target with an example render:
+`ccAutomator/13-26/mountain_blb_276_13-26.png` -- "Example of the frame I
+desire for tokens and is used by --full-art-basic-land".
+**Root cause (measured, not guessed):**
+- The committed --token-frame mapped to the app's M15 `FullArtNew` frame.
+  Its creature base assets (m15/new/fullart/{letter}.png) are full-art
+  CREATURE frames with a baked-in silver title plaque and translucent type/
+  rules boxes over the art -- live pixel probes confirmed the token renders
+  were faithful FullArtNew composites; the plaque reads as "Seventh" to the
+  eye.  The mechanics worked; the frame family was wrong for the desired look.
+- The --full-art-basic-land output actually uses version **seventhTextless**
+  (verified from `land.cardconjurer` on the server: version 'seventhTextless',
+  frames = [White Border, {Color} Frame seventhTextlessFrame{W..G}.png],
+  artBounds 0.768x0.7772 portrait -- aspect 0.988, nearly square, minimal
+  token-art crop).  packSeventhTextless.js defines the frame family; #autoFrame
+  has NO seventhTextless entry, so set_frame() cannot select it.
+**Change:**
+- `mixins/canvas_mixin.py`: `apply_seventh_textless_frame(color_code)` --
+  loads packSeventhTextless.js (frame-search path; picker repopulates),
+  NEUTRALIZES the autoFrame dropdown ('false' -- every text edit schedules a
+  debounced autoFrame() that rebuilds card.frames from the dropdown value,
+  which still reads 'Seventh' and would clobber the textless stack mid-apply),
+  invokes the pack's own #loadFrameVersion.onclick (version 'seventhTextless',
+  resetCardIrregularities, autoFitArt to the portrait window, textless text
+  layout), then swaps card.frames to the single full-card color asset
+  (W/U/B/R/G/M/A/L -- colorless tokens work via the Artifact frame, unlike
+  FullArtNew whose 'c' asset 404s).  set_frame() now recovers when the
+  dropdown reads 'false' (skips only on genuine same-value match).
+- `automator.py`: token branch -- 'seventhTextless' goes through the new
+  method (color picked from Scryfall colors: single -> letter, multi -> 'M',
+  none/artifact -> 'A'), blanks the set symbol afterwards (the textless
+  layout puts setSymbolBounds in the P/T corner -- fetched symbols collided
+  with '2/2'; the land path blanks it the same way), and skips
+  set_frame_color (color thumbs don't apply to the pack path).  Dropdown
+  frames (FullArtNew etc.) keep the old path.  `_restore_deck_frame` now
+  reloads the deck frame's pack script and re-invokes its #loadFrameVersion
+  handler after a textless token (the handler slot still holds
+  packSeventhTextless's, and only a Load-Frame-Version restores the deck
+  version's geometry + text boxes; set_frame alone rebuilds frames only).
+- `mixins/symbol_mixin.py`: `clear_set_symbol()` (blank.png via the app's
+  setSymbolEdited path).
+- `automator_utils.py`: (1) parse_card_file accepts MTGO-style '<count>x Name'
+  ('6x Serf' parsed as the literal name '6x Serf' before -- the user's
+  .dek/.missing files use that notation, so the cards failed validation);
+  (2) write_missing_list takes a parallel category list and interleaves
+  '# Tokens'/'# Deck' headers so the file is actually re-runnable (a bare
+  'Serf' re-ran as a deck card, its not:token query found nothing, and the
+  fix-file reproduced the failure); ccAutomator passes categories at all
+  three .missing write sites.
+- ccAutomator.py default --token-frame seventhTextless; custom.conf updated;
+  README rewritten.
+**Verify (live app + production cache + image-server upload mode):**
+- token.txt (2 Serf + 1 Zombie): both captured in seventhTextless -- textured
+  per-color border, top-left title, art filling the card, clean 0/1 / 2/2
+  (zombie corner inspected after set-symbol blanking: no collision).
+- # Tokens + # Deck mixed run (Serf, Zombie, then Dark Ritual): Success 3/0/0;
+  post-token Dark Ritual is an INTACT Seventh render (title/mana/type/parchment
+  rules/set symbol all correct) -- deck restore + text-layout reload verified.
+- The real .missing decklist (user's file, now with '# Tokens' header): the
+  6x Serf + 1x Zombie from the failed teaching run rendered, Success 2/0/0.
+- test_accent_matching.py: 15/15 PASS (write_missing_list plain-format
+  regression caught and fixed during development).
+- py_compile clean (automator, ccAutomator, automator_utils, canvas_mixin,
+  symbol_mixin).
+Commits: this entry (see git log for the fix commit).
