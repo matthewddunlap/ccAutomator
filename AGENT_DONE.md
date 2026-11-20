@@ -840,3 +840,24 @@ desire for tokens and is used by --full-art-basic-land".
 - py_compile clean (automator, ccAutomator, automator_utils, canvas_mixin,
   symbol_mixin).
 Commits: this entry (see git log for the fix commit).
+
+## Type line on textless tokens (bottom-left, opposite P/T)  [2026-11-20]
+**Request (user):** add the Type line ("Token Creature — Serf") at the
+bottom-left, opposite the P/T box, on seventhTextless tokens.
+**Change (mixins/canvas_mixin.py, apply_seventh_textless_frame):** when the
+frame stack is swapped to the color asset, re-add a 'type' text box to
+card.text at x:0.108, y:0.8981 (same row/height as the P/T box), width 0.64,
+oneLine, goudymedieval + white + shadow (matches the title's on-border
+styling).  Content comes from the app's savedTextContents['type'] -- the
+deck frame's Type text (with its {left}/{kerning}/{fontsize} tags) is
+preserved there when the pack's loadTextOptions replaced the layout -- and
+drawTextBuffer() re-bakes the layer.  For the next card, the restore path's
+packSeventh handler + import overwrite type text normally.
+**Verify (live app + image-server upload mode):**
+- Serf + Zombie re-rendered: 'Token Creature — Serf' / 'Token Creature —
+  Zombie' on the bottom border, left-aligned, clear of the 0/1 / 2/2; no
+  clipping at 23 characters.
+- Mixed token+spell run (Serf, Zombie, Dark Ritual): Success 3/0/0; the
+  post-token spell is intact Seventh (title/mana/type/rules/set symbol).
+- py_compile clean.
+Commit: see git log (type-line commit).

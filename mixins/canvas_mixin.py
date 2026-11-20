@@ -462,7 +462,12 @@ class CanvasMixin:
             # seventhTextlessFrameL.png) via loadFramePack()'s first-thumb
             # click.  Swap the frame stack to the requested color: single
             # full-card frame entry, no masks (same shape the land JSON
-            # path writes into land.cardconjurer).
+            # path writes into land.cardconjurer).  Also re-add a Type text
+            # box at the bottom-left (opposite the P/T): the textless layout
+            # has no Type box, but the deck frame's Type text (with its
+            # tags) is preserved in the app's savedTextContents when the
+            # pack's loadTextOptions replaced the layout -- restore it so
+            # e.g. 'Token Creature — Serf' renders on the bottom border.
             self.driver.execute_script(r"""
                 var src = arguments[0];
                 var f = {name: 'Color Frame', src: src, masks: []};
@@ -472,6 +477,19 @@ class CanvasMixin:
                 img.src = fixUri(src);
                 f.image = img;
                 card.frames = [f];
+                // Type line: bottom-left, mirroring the P/T row geometry.
+                // Goudymedieval + white + shadow matches the title's
+                // on-border styling.
+                var savedType = (typeof savedTextContents !== 'undefined'
+                                 && savedTextContents['type'])
+                                ? savedTextContents['type'] : '';
+                card.text.type = {name: 'Type', text: savedType,
+                                  x: 0.108, y: 0.8981, width: 0.64,
+                                  height: 0.0453, oneLine: true,
+                                  font: 'goudymedieval', size: 0.0453,
+                                  color: 'white', shadowX: 0.002,
+                                  shadowY: 0.0015};
+                drawTextBuffer();
                 drawFrames();
             """, src)
 
