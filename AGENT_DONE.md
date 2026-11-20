@@ -688,3 +688,51 @@ Scryfall cache, 2026-11-20):**
   Documented in README.
 - `py_compile` clean.
 Commit: bdfdccb (fix + README).
+
+## Tokens in FullArtNew frame + first-use font tofu fix  [2026-11-20]
+**Request:** token art crops don't match the deck frame's art window;
+brainstorm options; user then ruled: always use the
+--full-art-basic-land frame for tokens ("visually distinct is a bonus").
+**Investigation (measured live from the app, not assumed):**
+- Seventh art window = 1541x1246 (1.236, landscape) via card.artBounds;
+  normal-card art_crop = 1.24-1.37 landscape; token art_crop =
+  0.71-1.20 (mostly square/portrait) -> cover-fit crops tokens 25-43%.
+- The --full-art-basic-land frame is app frame 'FullArtNew'
+  (autoFullArtNewFrame -> makeM15NewFrameByLetter 'fullart', assets
+  /img/frames/m15/new/fullart/{letter}.png). Its art window =
+  1761x2278 (0.773, portrait) -> fits token art with 8-18% crop.
+  Per-color base assets exist for w/u/b/r/g/m/a; colorless 'c' is 404
+  -> colorless tokens keep the deck frame.
+- Set-symbol source hexproof covers token sets (t*); cardconjurer built-in
+  does not (warning already printed + counted; production conf uses hexproof).
+**Change (commits bdfdccb pre-work on search; 55fe679 this feature):**
+- `--token-frame` CLI flag (default FullArtNew, 'none' = deck frame),
+  wired to selenium + combo phase-1 construction; automator.py applies
+  it around the token branch (before set_frame_color so the color picker
+  recolors the token frame; _restore_deck_frame() at the top of the next
+  card's process_and_capture_card puts the deck frame back -- self-
+  healing after a crash mid-token).
+- Font tofu fix: first token in a fresh run rendered 'Ser|25A1'/'Toke|25A1'.
+  Mechanism (creator-23.js): word-final f/h/m/n/k are replaced by PUA
+  glyphs ue006-ue00a that exist only in the frame web font (belerenb);
+  the text layer is pre-baked into a separate textCanvas by the app's
+  debounced async drawText() (~500ms after frame/color rebuild) and
+  drawCard() only blits it.  First bake can land while belerenb is still
+  downloading -> ASCII falls back to system serif (OK) but PUA code
+  points exist in no system font -> tofu boxes.  A plain drawCard()
+  redraw does NOT fix it (verified byte-identical re-capture).
+  _wait_frame_fonts_loaded(): polls document.fonts until every text-box
+  face status == 'loaded' (12s in-page budget), then re-runs the app's
+  own async drawText() to re-bake the layer with the real face, then
+  settles the canvas.  Note: document.fonts.load() resolves when the
+  request is ACCEPTED, not when bytes are in -- must poll status.
+**Verify (live app + production cache + image-server upload mode):**
+- Deterministic repro first (manual sequence w/ preceding full card):
+  tofu, belerenb face 'loading' at PUA draw time, PUA+ASCII checks false.
+- After fix, same sequence: 'Frame font state: loaded' + clean render.
+- Full ccAutomator.py e2e (--token-frame FullArtNew, 1 Dark Ritual +
+  2 Serf + 1 Zombie): Success 3/0/0, exit 0; first-token Serf clean
+  (fetched from image server and eyeballed); post-token Dark Ritual in
+  Seventh intact (frame restore + PUA 'k' ligature in 'Dark' render).
+- py_compile clean.
+Commits: 55fe679 (feature + font fix + README).
