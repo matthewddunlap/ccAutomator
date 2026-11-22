@@ -413,6 +413,38 @@ def main():
     )
 
     parser.add_argument(
+        '--center-text',
+        action='store_true',
+        help="Auto-center the rules text of cards WotC printed centered, as "
+             "recorded by Scryfall's 'centered text' print tag "
+             "(https://tagger.scryfall.com/tags/print/centered-text).  The tag "
+             "list is fetched once from the tagger into an OFFLINE cache "
+             "(centered_text_cache.json) and then matched by card name; "
+             "classic one-line spells (Lightning Bolt, Counterspell, ...), the "
+             "basic lands, and short-text lands are centered.  An explicit "
+             "--text-layout-map entry always wins.  Default: off."
+    )
+
+    parser.add_argument(
+        '--text-layout-map',
+        default=None,
+        help="Path to the card -> text-alignment JSON override map "
+             "(name -> 'center'/'left'/'right').  An entry for a card is ALWAYS "
+             "honored, even against --center-text (e.g. force a card left, or "
+             "center one the tag doesn't cover).  Default: text_layout_map.json "
+             "next to ccAutomator.py (used if present; an empty/missing file "
+             "means override-only is off)."
+    )
+
+    parser.add_argument(
+        '--refresh-centered-cache',
+        action='store_true',
+        help="Force re-fetch of the 'centered text' tag cache from the Scryfall "
+             "Tagger at startup (otherwise it is fetched only when missing or "
+             "older than a week).  Requires --center-text to matter."
+    )
+
+    parser.add_argument(
         '--set-symbol-source',
         choices=['cardconjurer', 'hexproof'],
         default='cardconjurer',
@@ -554,7 +586,19 @@ def main():
     if args.data_dir:
         import scryfall_cache
         scryfall_cache.configure_data_dir(args.data_dir)
+        import centered_text
+        centered_text.configure_data_dir(args.data_dir)
         print(f"Using Scryfall cache directory: {scryfall_cache.DATA_DIR}")
+
+    # --- 'centered text' tag cache: fetch ONCE at startup (offline thereafter).
+    # The per-card render-time lookup is purely local (no network), so the
+    # one-time network cost -- including the tagger's rate-limit backoff -- is
+    # paid here, before any cards are processed, not inside the render loop. ---
+    if args.center_text:
+        import centered_text
+        if args.data_dir:
+            centered_text.configure_data_dir(args.data_dir)
+        centered_text.update_centered_text_cache(force=args.refresh_centered_cache)
 
     # --- Land Generation Mode ---
     if args.generate_lands:
@@ -974,6 +1018,8 @@ def main():
                 hide_reminder_text=args.hide_reminder_text,
                 inject_reminder_text=args.inject_reminder_text,
                 reminder_map_path=args.reminder_map,
+                auto_center_text=args.center_text,
+                text_layout_map_path=args.text_layout_map,
                 set_symbol_source=args.set_symbol_source,
                 token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
                 deck_frame=args.frame,
@@ -1068,6 +1114,8 @@ def main():
                 hide_reminder_text=args.hide_reminder_text,
                 inject_reminder_text=args.inject_reminder_text,
                 reminder_map_path=args.reminder_map,
+                auto_center_text=args.center_text,
+                text_layout_map_path=args.text_layout_map,
                 set_symbol_source=args.set_symbol_source,
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
@@ -1148,6 +1196,8 @@ def main():
             hide_reminder_text=args.hide_reminder_text,
             inject_reminder_text=args.inject_reminder_text,
             reminder_map_path=args.reminder_map,
+            auto_center_text=args.center_text,
+            text_layout_map_path=args.text_layout_map,
             set_symbol_source=args.set_symbol_source,
             token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
             deck_frame=args.frame,

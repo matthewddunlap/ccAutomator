@@ -5,6 +5,17 @@ output/*
 !requirements.txt
 copy*
 
+# Generated / fetched caches (rebuildable; see centered_text.py / scryfall_cache.py).
+# text_layout_map.json is the hand-edited override and IS tracked.
+centered_text_cache.json
+centered_text_cache.json.tmp
+centered_text_cache.lock
+scryfall_cache.db
+scryfall_cache.db.tmp
+scryfall_cache.db-journal
+scryfall_cache.lock
+scryfall_default_cache.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

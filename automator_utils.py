@@ -594,7 +594,7 @@ def validate_decklist(cards, label="decklist", api_delay=0.5):
 
 
 def apply_text_tags(text, fontsize=None, shadow=None, kerning=None,
-                    left=None, up=None, down=None, bold=False):
+                    left=None, up=None, down=None, bold=False, align=None):
     """
     Apply CardConjurer formatting tags to a text field's content with
     REPLACE semantics, the way a re-run must behave:
@@ -608,6 +608,14 @@ def apply_text_tags(text, fontsize=None, shadow=None, kerning=None,
       * {bold} wrapping is idempotent (never double-wrapped; an existing
         {bold}/{/bold} is left alone when bold=False -- the card's own bold
         is not ours to strip);
+      * ``align`` is the BARE alignment tag -- 'left' / 'center' / 'right'
+        (no value) -- which CardConjurer treats as a sticky text-box
+        alignment (it persists across line breaks).  It is distinct from the
+        POSITIONAL {left#}/{up#}/{down#} nudges above: ``align='center'``
+        writes ``{center}``, which must not be confused with ``{left40}``.
+        REPLACE semantics apply here too -- an existing bare alignment tag is
+        swapped in place of being stacked.  ``align=None`` leaves any existing
+        alignment tag untouched;
       * values may be integral or decimal (7, 3.5, -2);
       * if the content is unchanged an equal string is returned
         (== check), so callers can skip the write.
@@ -635,6 +643,23 @@ def apply_text_tags(text, fontsize=None, shadow=None, kerning=None,
         clean = re.sub(pattern, '', text)
         text = clean[:first.start()] + new_tag + clean[first.start():]
 
+    def _set_align(align):
+        nonlocal text
+        if align is None:
+            return
+        align = str(align).strip().lower()
+        if align not in ("left", "center", "right"):
+            return
+        # Strip any existing BARE alignment tag ({left}/{center}/{right} with
+        # no value).  The pattern requires the closing brace immediately after
+        # the word, so the positional nudges {left40}/{up5}/{down8} are never
+        # touched.  Then prepend the requested alignment.  Tag ORDER is
+        # semantically irrelevant to CardConjurer (each tag just sets state
+        # before the following text is drawn), so a leading {center} is
+        # equivalent to one placed among the size/position tags.
+        text = re.sub(r'\{(left|center|right)\}', '', text)
+        text = '{%s}' % align + text
+
     _set("fontsize", fontsize)
     _set("shadow", shadow)
     _set("kerning", kerning)
@@ -643,6 +668,7 @@ def apply_text_tags(text, fontsize=None, shadow=None, kerning=None,
     _set("down", down)
     if bold and '{bold}' not in text:
         text = f"{{bold}}{text}{{/bold}}"
+    _set_align(align)
     return text
 
 # ==============================================================================
@@ -1333,6 +1359,97 @@ def get_cached_reminder_map(holder, path=None):
     if getattr(holder, '_reminder_map_cache', None) is None:
         holder._reminder_map_cache = load_reminder_map(path)
     return holder._reminder_map_cache
+
+# ==============================================================================
+# Per-card rules-text alignment (center / left / right)
+# ==============================================================================
+#
+# Two sources, checked in this order:
+#   1. an explicit per-card override in text_layout_map.json (hand-edited, like
+#      reminder_map.json) -- ALWAYS wins;
+#   2. the Scryfall 'centered text' print tag (offline cache, see
+#      centered_text.py) -- auto-centers the classic one-line spells, basic
+#      lands, and short-text lands WotC printed centered.
+#
+# The winner is a bare CardConjurer alignment tag ({center}/{left}/{right}),
+# applied to the rules text via apply_text_tags(..., align=...).
+
+TEXT_LAYOUT_VALID = ("left", "center", "right")
+
+
+def load_text_layout_map(path=None):
+    """
+    Load the card -> text-alignment override map.
+
+    Defaults to text_layout_map.json next to this file.  Format: a JSON object
+    of card name (matched case-insensitively) -> 'center' | 'left' | 'right'.
+    Keys beginning with '_' are comments.  Returns {} when the file is missing
+    or malformed -- with no overrides, only auto-centering applies.
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'text_layout_map.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"   [TextLayout] Could not load '{path}': {e}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print(f"   [TextLayout] '{path}' must be a JSON object of card name -> "
+              f"alignment ('left'/'center'/'right'); got {type(data).__name__}.", file=sys.stderr)
+        return {}
+    out = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or k.startswith('_') or not isinstance(v, str):
+            continue
+        al = v.strip().lower()
+        if al in TEXT_LAYOUT_VALID:
+            out[k.strip().lower()] = al
+    return out
+
+
+def get_cached_text_layout_map(holder, path=None):
+    """Load the text-layout map into `holder._text_layout_map_cache` (once)."""
+    if getattr(holder, '_text_layout_map_cache', None) is None:
+        holder._text_layout_map_cache = load_text_layout_map(path)
+    return holder._text_layout_map_cache
+
+
+def resolve_text_layout(card_name, layout_map, is_centered=None):
+    """
+    Decide a card's rules-text alignment.  Returns 'center'/'left'/'right', or
+    None for the frame default (left).
+
+    Precedence:
+      1. an explicit override in `layout_map` (always honored -- this is how a
+         user forces a card left, or centers one the tag doesn't cover);
+      2. else 'center' when the `is_centered` predicate (the Scryfall 'centered
+         text' tag) reports the card as printed centered;
+      3. else None.
+
+    `is_centered` is a zero-arg-free callable name -> bool (typically
+    centered_text.is_centered_text with fetch disabled); pass None to disable
+    auto-centering entirely (override-only mode).
+    """
+    if not card_name:
+        return None
+    key = str(card_name).strip().lower()
+    if layout_map:
+        if key in layout_map:
+            return layout_map[key]
+        norm = normalize_card_name(card_name)
+        if norm:
+            for k, v in layout_map.items():
+                if normalize_card_name(k) == norm:
+                    return v
+    if is_centered is not None:
+        try:
+            if is_centered(card_name):
+                return "center"
+        except Exception:
+            # A lookup hiccup must never fail the card; fall through to default.
+            pass
+    return None
 
 REMINDER_SIM_THRESHOLD = 0.4  # min. similarity for a segment to count as a keyword's printed reminder
 

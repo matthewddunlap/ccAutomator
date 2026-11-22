@@ -1,0 +1,5 @@
+{
+  "_comment": "Per-card RULES-TEXT alignment overrides for ccAutomator. Keys are card names, matched case-insensitively (accent/whitespace-insensitive). Values are one of: 'center', 'left', 'right'. An entry here ALWAYS wins over --center-text (the Scryfall 'centered text' auto-centering), so use it to force a card LEFT (e.g. a long-text card the tag centers but you want justified), or to CENTER a card the tag doesn't cover. Keys starting with '_' are ignored (comments). No active entries by default -- add your own below, e.g. \"Serra Angel\": \"center\" or \"The Mending\": \"left\".",
+  "_example_center": "My Custom Token",
+  "_example_left": "A Very Long Text Card"
+}

@@ -68,6 +68,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                   auto_fit_pt=False,
                  hide_reminder_text=False,
                  inject_reminder_text=False, reminder_map_path=None,
+                 auto_center_text=False, text_layout_map_path=None,
                  card_name=None, card_type=None,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
@@ -194,9 +195,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         self.hide_reminder_text = hide_reminder_text
         self.inject_reminder_text = inject_reminder_text
         self.reminder_map_path = reminder_map_path
+        # Per-card rules-text alignment: auto_center_text turns on the Scryfall
+        # 'centered text' tag lookup (offline cache); text_layout_map_path is the
+        # hand-edited per-card override map (like reminder_map.json).
+        self.auto_center_text = auto_center_text
+        self.text_layout_map_path = text_layout_map_path
         self.card_name = card_name
         self.card_type = card_type
         self._reminder_map_cache = None
+        self._text_layout_map_cache = None
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -698,6 +705,33 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         except Exception as e:
             print(f"   Warning: frame-font wait failed: {e}", file=sys.stderr)
 
+    def _resolve_card_text_align(self, card_name):
+        """Rules-text alignment for `card_name`: 'center'/'left'/'right' or None.
+
+        Precedence (see automator_utils.resolve_text_layout):
+          1. an explicit per-card override in text_layout_map.json -- always wins;
+          2. else 'center' when the Scryfall 'centered text' tag (offline cache)
+             reports the card as printed centered;
+          3. else None (the frame default = left).
+
+        The centered-tag lookup is PURELY LOCAL (allow_fetch=False): the network
+        fetch happens once at startup (ccAutomator --center-text), never per card.
+        Never raises -- any lookup failure yields the frame default so a card is
+        never failed over text alignment.
+        """
+        from automator_utils import get_cached_text_layout_map, resolve_text_layout
+        layout_map = get_cached_text_layout_map(self, self.text_layout_map_path)
+        if not layout_map and not self.auto_center_text:
+            return None  # neither an override map nor auto-centering requested
+        is_centered = None
+        if self.auto_center_text:
+            from centered_text import is_centered_text
+            is_centered = lambda name: is_centered_text(name, allow_fetch=False, verbose=False)
+        try:
+            return resolve_text_layout(card_name, layout_map, is_centered)
+        except Exception:
+            return None
+
     def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
         Orchestrates the entire process for a single card.
@@ -1171,7 +1205,6 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 print(f"   [Dual Land] Symbols (fontsize {fit['symbol']}pt) + "
                       f"{len(body_lines)} body line(s) at {fit['text']}pt: {symbols}")
             else:
-                self._apply_text_mods("Rules Text", down=self.rules_down)
                 # Inject reminder text for keyword abilities that this print
                 # doesn't already carry (no-op unless --inject-reminder-text).
                 # Set card_name and card_type for card-specific reminder overrides
@@ -1182,6 +1215,15 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                     subtypes = current_type_line.split(' - ')[1]
                     self.card_type = subtypes.strip().split()[0] if subtypes.strip() else None
                 self.apply_reminder_injection()
+                # Rules-text alignment for this card (center/left/right).  Explicit
+                # per-card override (text_layout_map.json) wins; else the Scryfall
+                # 'centered text' tag auto-centers; else the frame default (left).
+                # Applied LAST so it also covers any reminder text injected above
+                # ({center} is a sticky alignment, so it holds across the block).
+                align = self._resolve_card_text_align(card_name)
+                if align:
+                    print(f"   [TextAlign] '{card_name}' rules text -> {align}")
+                self._apply_text_mods("Rules Text", down=self.rules_down, align=align)
 
 
             if category and 'token' in category.lower():

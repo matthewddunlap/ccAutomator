@@ -16,7 +16,33 @@ hash (user instruction, 2026-09-18). Commit trailer:
 
 ---
 
-## Current status (2026-09-22) — read this first
+## Current status (2026-11-22) — read this first
+
+**LATEST (2026-11-22): Centered rules text — DONE, committed.**
+New feature per user request: auto-center the rules text of cards WotC
+printed centered (Scryfall Tagger print tag "centered text",
+https://tagger.scryfall.com/tags/print/centered-text — 2,302 taggings /
+528 unique cards: classic one-line spells, basic lands, short-text lands),
+plus a per-card override map like reminder_map.json.
+- `centered_text.py` (new): fetches the tag from the tagger's GraphQL
+  endpoint (session + csrf-token, 429/Retry-After backoff) into an offline
+  `centered_text_cache.json` (1-week TTL, flock, atomic swap; seeded and
+  git-ignored). `is_centered_text()` is a pure-local lookup.
+- `automator_utils.py`: `apply_text_tags(..., align=)` adds the bare
+  sticky `{center}`/`{left}`/`{right}` tag (distinct from positional
+  `{left#}`); `load_text_layout_map()` + `resolve_text_layout()` (override
+  map ALWAYS wins over the tag).
+- `automator.py`: `_resolve_card_text_align()` applies it in the normal-card
+  rules-text branch (last, so it covers injected reminders).
+- `ccAutomator.py`: `--center-text`, `--text-layout-map`,
+  `--refresh-centered-cache` (fetch once at startup; never per card).
+- "Sometimes centered, sometimes left" cards (Dark Ritual: 19 centered
+  prints / 38 left prints): resolved at CARD level — any tagged print ⇒
+  centered; `text_layout_map.json` overrides per card.
+- Tests: `test_centered_text.py` 35/35; all prior suites green
+  (34/34, 18/18, 15/15, substitution, flavor). `my.conf` has `--center-text`
+  on. Docs: README "Centered rules text". Details: AGENT_DONE.md
+  "## Centered rules text (...) + per-card override".
 
 Ordered plan (user-specified, 2026-09-20) + user follow-ups:
 

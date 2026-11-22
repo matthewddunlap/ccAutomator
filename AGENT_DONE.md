@@ -861,3 +861,73 @@ packSeventh handler + import overwrite type text normally.
   post-token spell is intact Seventh (title/mana/type/rules/set symbol).
 - py_compile clean.
 Commit: see git log (type-line commit).
+
+## Centered rules text (Scryfall "centered text" tag) + per-card override  [2026-11-22]
+**Request (user):** "Some cards look better with the text centered instead of
+left justified... can these be found by ccAutomator in Scryfall and offline
+cache and then handled in the rendering? Additionally can there be an
+override similar to reminder_map.json to manually set text layout for
+specific cards?"  (link: tagger.scryfall.com/tags/print/centered-text)
+**Data source (non-obvious, reverse-engineered):** the tag is NOT in
+Scryfall's public search API (the `tag:` keyword is unknown there) nor in the
+bulk data.  It lives in the Scryfall Tagger's own Rails/GraphQL backend:
+GET https://tagger.scryfall.com/tags/print/centered-text (mints the session
+cookie + the csrf-token meta tag), then POST /graphql with
+`tagBySlug(type: PRINTING_TAG, slug: "centered-text")` → `taggings(page,
+order: NAME)` (75/page, 2,302 total, 528 unique card names).  The tagger is
+Cloudflare-fronted and rate-limits (429 + Retry-After) — the fetcher honors
+it (up to 8 attempts, capped 120 s).  Full page walk took ~1 min here.
+**Design decisions:**
+- Cache is keyed by CARD NAME (lower-cased), first print kept for provenance:
+  the choice is per-card (same rules text on every print), and
+  `--set-selection all/latest/random` must not flip the same card's alignment
+  between prints.  "Sometimes centered, sometimes left" cards (Dark Ritual:
+  19 of 57 prints tagged centered — 2ed/3ed/5ed, Lea/Leb, Ced/Cei, Me4,
+  Sumn; 38 untagged — 4ed, Ice Age, Mir, Sta, M24…) therefore render
+  CENTERED, overridable per card.
+- Override map `text_layout_map.json` (next to ccAutomator.py, git-tracked,
+  `_`-keys = comments): `{"Dark Ritual": "left", "My Token": "center"}` —
+  checked FIRST, always wins (also centers cards the tag misses).
+- Render path: CardConjurer's `{center}`/`{left}`/`{right}` are BARE STICKY
+  alignment state tags (creator-23.js: `possibleCode == 'center'` →
+  `textAlign='center'`, persists across `{line}`; default `textObject.align||
+  'left'` is re-initialized per draw, so no cross-card leak).  Distinct from
+  the POSITIONAL `{left#}`/`{up#}`/`{down#}` nudges — the tag regex
+  `{\b(left|center|right)\b}` requires the bare form, so `{left40}` is never
+  clobbered.  Applied LAST in the normal-card branch (after
+  apply_reminder_injection) so injected reminders are centered too; basic
+  lands / dual lands already center their mana symbols and are untouched.
+- Fetch is ONCE AT STARTUP (`ccAutomator.py --center-text` →
+  `update_centered_text_cache(force=--refresh-centered-cache)`); the per-card
+  lookup (`is_centered_text(allow_fetch=False)`) is pure local and never
+  raises (missing cache / offline ⇒ no auto-centering, run continues).
+**Files:** NEW `centered_text.py` (fetch + cache + lookup + `--show`/
+`--force` CLI; `configure_data_dir()` honors `--data-dir`), NEW
+`text_layout_map.json` (comment-only by default), NEW
+`test_centered_text.py` (35 checks: tag apply/replace/idempotence, positional
+nudge preservation, map load/validate, resolver precedence incl. override-
+wins + accent-tolerant + raising-predicate safety, offline cache lookups in a
+temp data dir, freshness).  MOD `automator_utils.py` (`apply_text_tags(
+..., align=)` + `load_text_layout_map`/`get_cached_text_layout_map`/
+`resolve_text_layout`), `mixins/text_mixin.py` (`_apply_text_mods` threads
+`align`), `automator.py` (ctor params; `_resolve_card_text_align()`; normal-
+card branch), `ccAutomator.py` (3 flags; startup fetch; all three
+CardConjurerAutomator call sites), `my.conf` (`--center-text` ON + docs),
+README ("Centered rules text" section incl. the Dark Ritual case),
+`.gitignore` (cache files ignored; override map tracked).
+  **NOTE for future agents:** `centered_text_cache.json` is SEEDed in the
+  worktree (git-ignored but present: 528 cards, fetched 2026-11-22).  If it
+  is missing on another box, run `python3 centered_text.py --force` (needs
+  network) once, or just run ccAutomator with `--center-text` while online —
+  the startup fetch builds it.  The tagger data source above is the ONLY way
+  to get the tag (no public API / bulk-data field).
+**Verify:** `test_centered_text.py` 35/35; regression suites all green
+(`test_apply_text_tags.py` 34/34, `test_reminder_injection.py`,
+`test_accent_matching.py` 15/15, `test_substitution.py`, `test_flavor.py`);
+integration: real `CardConjurerAutomator._resolve_card_text_align` on a bare
+mock (auto-on/off, override-wins, graceful no-cache) all correct; fresh-cache
+skip (no network) + missing-cache degradation verified; `py_compile` clean on
+all touched files.  Live render of a centered card (e.g. a Dark Ritual deck
+with `--center-text`) is the remaining end-to-end check for a session with
+the app + browser up.
+Commit: see git log (centered-text feature commit, branch user-agent-ts140).

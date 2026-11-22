@@ -57,6 +57,76 @@ Vampire does).
 - Detection/injection logic is pure and covered by
   `test_reminder_injection.py` (31 checks, run directly or under pytest).
 
+## Centered rules text
+
+Some cards read better with the rules text **centered** instead of left-justified.
+WotC printed exactly those cards that way, and Scryfall's community Tagger records
+them under the *print* tag **"centered text"** —
+[2,302 taggings / ~530 cards](https://tagger.scryfall.com/tags/print/centered-text):
+the classic one-line spells (Lightning Bolt, Counterspell, Wrath of God, Armageddon,
+Dark Ritual, …), the five basic lands, and a handful of short-text lands
+(Ancient Den, Tundra, Bayou, …).
+
+ccAutomator reproduces that look:
+
+### How "sometimes centered, sometimes left" cards are handled (e.g. Dark Ritual)
+
+The tag is per-PRINT, and WotC was inconsistent: some cards were printed
+centered on some runs and left-justified on others. **Dark Ritual** is the
+canonical example — of its 57 known prints, the community has tagged 19 as
+centered (2nd/3rd/5th Edition, Legends, Legacy, Chronicles, Modern Event,
+Starter 2002, …) while the other 38 (4th Edition, Ice Age, Mirrodin,
+Starter 2021, Modern Horizons 2, …) carry left-justified text.
+
+ccAutomator resolves this at the **card** level, not the print level:
+
+- The cache is keyed by card name, and a card counts as "centered" when
+  **any** of its prints is tagged (the aesthetic choice is about the card's
+  look, and every print of the card carries the same rules text).  So Dark
+  Ritual renders **centered** regardless of which print's art/set-symbol the
+  run selected, and a left-justified-looking reprint never un-centers it.
+- The one-card decision is made by
+  `centered_text.is_centered_text(name)` (pure local lookup against
+  `centered_text_cache.json`), then applied as a sticky `{center}` tag in
+  `automator.py` (`_resolve_card_text_align` → `apply_text_tags(..., align=)`).
+- If you disagree with the auto-decision for a specific card, the override
+  map below wins: `"Dark Ritual": "left"` in `text_layout_map.json` forces
+  left-justified; `"My Token": "center"` forces centered.  The map is checked
+  **first**, so it also centers cards the tag doesn't cover.
+- If you'd rather mirror a *specific* print's layout (e.g. keep Dark Ritual
+  left when printing a 4ed-style deck), use the override — the tool
+  deliberately does not switch alignment per selected print, because
+  `--set-selection all/latest/random` would then produce the same card
+  centered on one print and left on the next.
+
+### Flags
+
+- `--center-text` (default: **off**) auto-centers the rules text of any card the
+  tag covers.  The tag list is fetched **once** from the tagger into an **offline
+  cache** (`centered_text_cache.json`, alongside `scryfall_cache.db`) at startup,
+  then matched by card name — no per-card network calls, and an offline run still
+  centers off the last good cache (it just won't *re-fetch*).  The tag is
+  per-PRINT, but the choice is per-CARD: if any print of a card is centered, the
+  card is centered.
+- `--text-layout-map PATH` (default: `text_layout_map.json` next to `ccAutomator.py`)
+  is a per-card **override** map, shaped like `reminder_map.json`:
+  `{"Lightning Bolt": "left", "My Token": "center"}`.  An entry is **always**
+  honored and **wins** over `--center-text` — use it to force a card left (long
+  text you don't want centered) or to center one the tag doesn't cover.  Values
+  are `center` / `left` / `right`; keys are case- and accent-insensitive; keys
+  starting with `_` are comments.
+- `--refresh-centered-cache` forces a re-fetch of the tag list at startup
+  (otherwise it refreshes only when the cache is missing or older than a week).
+  The tagger is rate-limited, so the fetch backs off automatically.
+- Refresh the cache any time with `python3 centered_text.py --force`, or check a
+  single card with `python3 centered_text.py --show "Lightning Bolt"`.
+- Under the hood this prepends Card Conjurer's sticky alignment tag — `{center}` /
+  `{left}` / `{right}` (distinct from the positional `{left40}` nudge) — to the
+  rules text, via `apply_text_tags(..., align=...)`.  Basic lands and dual lands
+  already center their mana symbols and are unaffected.
+- Detection/override logic is pure and covered by `test_centered_text.py`
+  (35 checks, run directly).
+
 ## Tokens in decklists
 
 Lines after a `# Tokens` header in the input decklist are searched as token

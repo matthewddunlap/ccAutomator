@@ -58,7 +58,7 @@ class TextMixin:
         except Exception as e:
             print(f"      An error occurred while applying flavor text mods: {e}", file=sys.stderr)
 
-    def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None, down=None):
+    def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None, down=None, align=None):
         """
         Generic method to apply modifications to a specific text field (e.g., Title, Type).
 
@@ -69,11 +69,14 @@ class TextMixin:
         instead of skipping (stale value survives) or prepending a second tag
         set (silent wrong output), and a re-run with the SAME values is a
         no-op that leaves the field untouched.
+
+        ``align`` ('left'/'center'/'right') applies the bare alignment tag
+        ({center} etc.) -- see apply_text_tags.
         """
         from automator_utils import apply_text_tags
 
         # If no modifications are specified for this field, do nothing.
-        if all(arg is None for arg in [font_size, shadow, kerning, left, up, down]) and not bold:
+        if all(arg is None for arg in [font_size, shadow, kerning, left, up, down, align]) and not bold:
             return
 
         print(f"   Applying text modifications to '{field_name}'...")
@@ -119,7 +122,7 @@ class TextMixin:
                     new_text = apply_text_tags(
                         current_text,
                         fontsize=font_size, shadow=shadow, kerning=kerning,
-                        left=left, up=up, down=down, bold=bold)
+                        left=left, up=up, down=down, bold=bold, align=align)
 
                     if new_text == current_text:
                         # Already exactly as requested (e.g. same values

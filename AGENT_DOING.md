@@ -1,7 +1,25 @@
 # AGENT DOING — current work item
 
-**NEXT SESSION, START HERE (2026-11-18):**
-**ACCENTED NAMES + AUTO MISSING-LIST DONE (2026-11-18)** — sanitized
+**NEXT SESSION, START HERE (2026-11-22):**
+**CENTERED RULES TEXT DONE (2026-11-22, committed)** — user-requested
+feature: auto-center the rules text of cards WotC printed centered (Scryfall
+Tagger print tag "centered text" — 2,302 taggings / 528 unique cards) + a
+per-card override map (`text_layout_map.json`, like `reminder_map.json`;
+override ALWAYS wins). New `centered_text.py` (tagger GraphQL fetch →
+offline `centered_text_cache.json`, seeded; 1-week TTL + flock;
+`is_centered_text()` pure-local; `--show`/`--force` CLI). `apply_text_tags`
+gains `align=` (bare sticky `{center}`/`{left}`/`{right}`, distinct from
+positional `{left#}`). `automator.py:_resolve_card_text_align()` applies it in
+the normal-card branch (after reminder injection). `ccAutomator.py`:
+`--center-text` (ON in my.conf), `--text-layout-map`, `--refresh-centered-
+cache` (fetch once at startup, 429-aware; never per card). "Sometimes
+centered, sometimes left" cards (Dark Ritual: 19 centered / 38 left prints)
+resolve at CARD level: any tagged print ⇒ centered; override per card.
+Tests: `test_centered_text.py` 35/35 + all prior suites green. Full record:
+AGENT_DONE.md "## Centered rules text (Scryfall 'centered text' tag) +
+per-card override".
+
+(Prior 2026-11-18) **ACCENTED NAMES + AUTO MISSING-LIST DONE** — sanitized
 decklist names ('Ghazban Ogre', 'Ifh-Biff Efreet') now match the accented
 Scryfall/CC spellings ('Ghazbán Ogre', 'Ifh-Bíff Efreet'): shared
 `normalize_card_name()` helper (NFKD accent fold) in
