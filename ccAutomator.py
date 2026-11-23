@@ -318,6 +318,19 @@ def main():
 
 
     parser.add_argument(
+        '--rules-font-size',
+        type=int,
+        metavar='NUM',
+        help="Prepend a {fontsize#} tag (relative px) to the Rules text BODY: it "
+             "renders at frame-base + NUM and the renderer scales it DOWN only "
+             "if it overflows the box, so short text stays large (classic/"
+             "Unlimited look) and long text still fits.  The --flavor-font "
+             "step-down stays relative to it.  Lands size themselves and are "
+             "unaffected.  Per-card override: --rules-font-map.  (Seventh "
+             "frame, measured: +35 ~= Unlimited Edition, +8 ~= 3ed, +4 ~= 4ed.)"
+    )
+
+    parser.add_argument(
         '--rules-down',
         type=int,
         metavar='NUM',
@@ -434,6 +447,17 @@ def main():
              "center one the tag doesn't cover).  Default: text_layout_map.json "
              "next to ccAutomator.py (used if present; an empty/missing file "
              "means override-only is off)."
+    )
+
+    parser.add_argument(
+        '--rules-font-map',
+        default=None,
+        help="Path to the card -> rules-text {fontsize} offset JSON override map "
+             "(name -> relative px, like text_layout_map.json).  An entry for a "
+             "card is ALWAYS honored -- it wins over --rules-font-size, and "
+             "works even when --rules-font-size is not set.  Default: "
+             "rules_font_map.json next to ccAutomator.py (used if present; an "
+             "empty/missing file means override-only is off)."
     )
 
     parser.add_argument(
@@ -688,6 +712,8 @@ def main():
 
             flavor_font=args.flavor_font,
             rules_down=args.rules_down,
+            rules_font_size=args.rules_font_size,
+            rules_font_map_path=args.rules_font_map,
             white_border=args.white_border,
             black_border=args.black_border,
             auto_fit_type=args.auto_fit_type,
@@ -1020,6 +1046,8 @@ def main():
                 reminder_map_path=args.reminder_map,
                 auto_center_text=args.center_text,
                 text_layout_map_path=args.text_layout_map,
+                rules_font_size=args.rules_font_size,
+                rules_font_map_path=args.rules_font_map,
                 set_symbol_source=args.set_symbol_source,
                 token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
                 deck_frame=args.frame,
@@ -1116,6 +1144,8 @@ def main():
                 reminder_map_path=args.reminder_map,
                 auto_center_text=args.center_text,
                 text_layout_map_path=args.text_layout_map,
+                rules_font_size=args.rules_font_size,
+                rules_font_map_path=args.rules_font_map,
                 set_symbol_source=args.set_symbol_source,
                 overwrite=args.overwrite,
                 overwrite_older_than=args.overwrite_older_than,
@@ -1198,6 +1228,8 @@ def main():
             reminder_map_path=args.reminder_map,
             auto_center_text=args.center_text,
             text_layout_map_path=args.text_layout_map,
+            rules_font_size=args.rules_font_size,
+            rules_font_map_path=args.rules_font_map,
             set_symbol_source=args.set_symbol_source,
             token_frame=None if args.token_frame.lower() == 'none' else args.token_frame,
             deck_frame=args.frame,

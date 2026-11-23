@@ -1,0 +1,5 @@
+{
+  "_comment": "Per-card RULES-TEXT BODY font-size overrides for ccAutomator. Keys are card names, matched case-insensitively (accent/whitespace-insensitive). Values are relative px offsets in the same units as --rules-font-size (35 means {fontsize35}; the renderer raises the base and only shrinks the text if it overflows the box). An entry here ALWAYS wins over --rules-font-size, and is honored even when --rules-font-size is not set. Keys starting with '_' are ignored (comments). No active entries by default -- add your own below, e.g. \"Dark Ritual\": 45 or \"Serra Angel\": 20.",
+  "_example_larger": 45,
+  "_example_smaller": 20
+}

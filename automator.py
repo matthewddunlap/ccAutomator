@@ -69,6 +69,7 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                  hide_reminder_text=False,
                  inject_reminder_text=False, reminder_map_path=None,
                  auto_center_text=False, text_layout_map_path=None,
+                 rules_font_size=None, rules_font_map_path=None,
                  card_name=None, card_type=None,
                  image_server=None, image_server_path=None, art_path='/art/', autofit_art=False,
                  upscale_art=False, ilaria_url=None, upscaler_model=DEFAULT_UPSCALER_MODEL, upscaler_factor=4,
@@ -200,10 +201,18 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         # hand-edited per-card override map (like reminder_map.json).
         self.auto_center_text = auto_center_text
         self.text_layout_map_path = text_layout_map_path
+        # Rules-text BODY font size: rules_font_size is the global
+        # --rules-font-size (relative px offset, written as a {fontsize#} tag
+        # BEFORE {flavor}); rules_font_map_path is the per-card override map
+        # (like text_layout_map.json) whose entries always win.  Neither set
+        # = frame default (no tag).
+        self.rules_font_size = rules_font_size
+        self.rules_font_map_path = rules_font_map_path
         self.card_name = card_name
         self.card_type = card_type
         self._reminder_map_cache = None
         self._text_layout_map_cache = None
+        self._rules_font_map_cache = None
 
         self.type_font_size = type_font_size
         self.type_shadow = type_shadow
@@ -732,6 +741,28 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
         except Exception:
             return None
 
+    def _resolve_card_rules_font_size(self, card_name):
+        """Rules-text body {fontsize} offset for `card_name` (relative px) or
+        None (the frame default -- no tag).
+
+        Precedence (see automator_utils.resolve_rules_font_size):
+          1. an explicit per-card override in rules_font_map.json -- always wins
+             (even when the global is not set), like the text-layout map;
+          2. else the global --rules-font-size;
+          3. else None.
+
+        Never raises -- any lookup failure yields the global default so a card
+        is never failed over text sizing.
+        """
+        from automator_utils import get_cached_rules_font_map, resolve_rules_font_size
+        font_map = get_cached_rules_font_map(self, self.rules_font_map_path)
+        if not font_map and self.rules_font_size is None:
+            return None
+        try:
+            return resolve_rules_font_size(card_name, font_map, default=self.rules_font_size)
+        except Exception:
+            return self.rules_font_size
+
     def process_and_capture_card(self, card_name, category=None, prepare_only=False, is_priming=False, set_code=None):
         """
         Orchestrates the entire process for a single card.
@@ -1223,6 +1254,17 @@ class CardConjurerAutomator(CanvasMixin, TextMixin, ImageMixin, PrintMixin, Coll
                 align = self._resolve_card_text_align(card_name)
                 if align:
                     print(f"   [TextAlign] '{card_name}' rules text -> {align}")
+                # Rules-text BODY font size: per-card map entry wins, else the
+                # global --rules-font-size (else None = frame default).  A
+                # RELATIVE {fontsize#} tag raises the renderer's base, and the
+                # renderer only shrinks the text if it overflows the box, so
+                # short text stays large (classic/Unlimited look) and long text
+                # still fits.  Scoped before {flavor} so the --flavor-font
+                # step-down tag is preserved.
+                rules_fs = self._resolve_card_rules_font_size(card_name)
+                if rules_fs is not None:
+                    print(f"   [RulesFont] '{card_name}' rules body -> {{fontsize{rules_fs}}}")
+                    self._apply_rules_font_size(rules_fs)
                 self._apply_text_mods("Rules Text", down=self.rules_down, align=align)
 
 

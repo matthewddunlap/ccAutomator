@@ -5,7 +5,10 @@ import re
 import sys
 import math
 
-from automator_utils import autofit_title, autofit_type, apply_text_tags
+from automator_utils import (
+    autofit_title, autofit_type, apply_text_tags,
+    apply_rules_body_font_size, load_rules_font_map, resolve_rules_font_size,
+)
 
 # Basic land types
 BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes']
@@ -51,7 +54,9 @@ class CcFileEditor:
                     pt_font_size=None, pt_kerning=None, pt_up=None, pt_left=None, pt_bold=False, pt_shadow=None,
                     title_font_size=None, title_shadow=None, title_kerning=None, title_left=None, title_up=None,
                     type_font_size=None, type_shadow=None, type_kerning=None, type_left=None,
-                    flavor_font=None, rules_down=None, auto_fit_type=False, auto_fit_title=False):
+                    flavor_font=None, rules_down=None,
+                    rules_font_size=None, rules_font_map_path=None,
+                    auto_fit_type=False, auto_fit_title=False):
         """
         Applies the specified edits to all cards in the project.
         """
@@ -64,6 +69,12 @@ class CcFileEditor:
         if not isinstance(cards, list):
             print("Error: JSON root is not a list of cards or does not contain a 'cards' key with a list. Expected a list of card objects.", file=sys.stderr)
             return
+
+        # Rules-text BODY font size: per-card map entry wins over the global
+        # (same precedence as the live Selenium path; see
+        # automator_utils.resolve_rules_font_size).  Loaded once here; a
+        # missing/empty map simply means "global only".
+        rules_font_map = load_rules_font_map(rules_font_map_path)
 
         print(f"Applied edits to {len(cards)} cards.")
         
@@ -213,7 +224,17 @@ class CcFileEditor:
                     t_obj = text_dict['rules']
                     original_text = t_obj.get('text', '')
                     new_text = original_text
-                    
+
+                    # Rules body font size: per-card map entry wins over the
+                    # global (see resolve_rules_font_size).  Scoped BEFORE
+                    # {flavor} so the --flavor-font step-down tag survives
+                    # (apply_rules_body_font_size); the renderer then raises
+                    # the base and shrinks only on overflow.
+                    rules_fs = resolve_rules_font_size(
+                        clean_card_name, rules_font_map, default=rules_font_size)
+                    if rules_fs is not None:
+                        new_text = apply_rules_body_font_size(new_text, rules_fs)
+
                     # Rules Down (Global for rules text)
                     if rules_down is not None:
                         new_text = self._update_tag(new_text, 'down', rules_down)

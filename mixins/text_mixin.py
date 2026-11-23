@@ -58,6 +58,62 @@ class TextMixin:
         except Exception as e:
             print(f"      An error occurred while applying flavor text mods: {e}", file=sys.stderr)
 
+    def _apply_rules_font_size(self, size):
+        """
+        Set the rules-text BODY font size for the current card (the part before
+        {flavor}).
+
+        Writes a RELATIVE {fontsize#} tag at the front of the body, via the
+        shared apply_rules_body_font_size helper, which scopes the tag to the
+        pre-flavor part so the flavor's own --flavor-font step-down tag is
+        untouched (the shared apply_text_tags would otherwise converge all of
+        the box's {fontsize} tags to one and eat it).  The renderer raises
+        its base to frame-base + # and only shrinks the text if it overflows
+        the box, so short text stays large (classic/Unlimited look) and long
+        text still fits.  REPLACE semantics: a re-run overwrites the previous
+        body tag; a re-run with the same value skips the write.
+        Returns True if the box was changed.
+        """
+        if size is None:
+            return False
+
+        print(f"   Setting rules-text body font offset to {size}px...")
+        try:
+            self.text_tab.click()
+
+            field_button_selector = "//h4[text()='Rules Text']"
+            text_editor_id = "text-editor"
+
+            field_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, field_button_selector)))
+            field_button.click()
+
+            time.sleep(0.5)
+
+            text_input = self.wait.until(EC.presence_of_element_located((By.ID, text_editor_id)))
+            current_text = text_input.get_attribute('value') or ""
+            if not current_text.strip():
+                print("      Rules text is empty. Skipping.")
+                return False
+
+            from automator_utils import apply_rules_body_font_size
+            new_text = apply_rules_body_font_size(current_text, size)
+
+            if new_text == current_text:
+                print(f"      Rules body already has the {size}px offset. Skipping.")
+                return False
+
+            self.driver.execute_script("arguments[0].value = arguments[1];", text_input, new_text)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", text_input)
+            self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", text_input)
+            print(f"      Rules body changed from '{current_text}' to '{new_text}'.")
+
+            self._wait_for_render()
+            return True
+
+        except Exception as e:
+            print(f"      An error occurred while setting the rules body font size: {e}", file=sys.stderr)
+            return False
+
     def _apply_text_mods(self, field_name, font_size=None, shadow=None, kerning=None, left=None, bold=False, up=None, down=None, align=None):
         """
         Generic method to apply modifications to a specific text field (e.g., Title, Type).

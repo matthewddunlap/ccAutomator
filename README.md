@@ -127,6 +127,29 @@ ccAutomator resolves this at the **card** level, not the print level:
 - Detection/override logic is pure and covered by `test_centered_text.py`
   (35 checks, run directly).
 
+## Rules-text body size (classic/Unlimited look)
+
+CardConjurer renders the rules text at the frame's base size and only ever
+scales it DOWN to fit the box (creator.js shrink loop), so short text looks
+smaller than classic printings.  Two options control the BODY size (the
+flavor text keeps its own `--flavor-font` step-down, which stays relative to
+the body size):
+
+- `--rules-font-size NUM` (relative px, e.g. `35`) prepends a `{fontsizeNUM}`
+  tag to the rules text: it renders at frame-base + NUM, and the renderer
+  shrinks it only if it overflows the box — short text stays large (the
+  Unlimited-Edition look), long text still fits.  Measured against the
+  Seventh frame: **+35 ≈ Unlimited Edition**, +8 ≈ 3rd Edition,
+  +4 ≈ 4th Edition, unset ≈ 4th or a hair smaller.
+- `--rules-font-map PATH` (default `rules_font_map.json`) is a per-card
+  override map (`{"Dark Ritual": 45}`) whose entry ALWAYS wins over
+  `--rules-font-size` — and is honored even when the global is not set —
+  exactly like `--text-layout-map`.
+
+Lands are unaffected (basic/dual lands set their own absolute sizes).  The
+tag scoping (body tag before `{flavor}`, flavor step-down preserved) is pure
+and covered by `test_rules_font_size.py`.
+
 ## Tokens in decklists
 
 Lines after a `# Tokens` header in the input decklist are searched as token

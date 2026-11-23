@@ -1451,6 +1451,112 @@ def resolve_text_layout(card_name, layout_map, is_centered=None):
             pass
     return None
 
+# ==============================================================================
+# Rules-text BODY font size (global option + per-card override map)
+# ==============================================================================
+#
+# The renderer (CardConjurer creator.js) draws each field at a base size and
+# only ever SHRINKS it (1px per retry) until it fits the box.  A RELATIVE
+# {fontsize#} tag raises that base, so "frame base + #" renders whenever the
+# text fits and the renderer scales it down when it does not -- the
+# classic-printing look (short text large, long text shrunk).  An ABSOLUTE
+# {fontsize#pt} tag would instead defeat the shrink loop (it re-asserts its
+# size on every retry), so the body size is always applied as a RELATIVE tag.
+#
+# A per-card override map (rules_font_map.json, like text_layout_map.json)
+# wins over the global value; an entry is honored even when the global is not
+# set.  Units: relative px, the same as every other --*-font-size option.
+
+def apply_rules_body_font_size(text, size):
+    """
+    Set the rules-text BODY {fontsize} tag -- scoped to the part BEFORE
+    {flavor}.
+
+    The shared apply_text_tags converges ALL {fontsize} tags of a field to
+    one, so applying it to the whole box would destroy the flavor's own
+    {fontsize#} step-down tag (the --flavor-font one).  Scoping to the
+    pre-flavor part keeps that tag untouched; the two compose, because the
+    flavor offset is RELATIVE to the body size (its step-down is preserved).
+
+    REPLACE semantics within the body part, as usual: a re-run with a changed
+    value overwrites the previous body tag; a re-run with the same value
+    returns an equal string (callers can skip the write).  Pure function:
+    no I/O, no globals.
+    """
+    if size is None:
+        return text
+    if '{flavor}' in text:
+        pre, post = text.split('{flavor}', 1)
+        return apply_text_tags(pre, fontsize=size) + '{flavor}' + post
+    return apply_text_tags(text, fontsize=size)
+
+
+def load_rules_font_map(path=None):
+    """
+    Load the card -> rules-text body {fontsize} offset override map.
+
+    Defaults to rules_font_map.json next to this file.  Format: a JSON object
+    of card name (matched case-insensitively, with the same accent-tolerant
+    fallback as the other maps) -> numeric offset in the same units as
+    --rules-font-size (relative px; 45 means {fontsize45}).  Keys beginning
+    with '_' are comments; non-numeric values are dropped with a warning.
+    Returns {} when the file is missing or malformed -- then only the global
+    --rules-font-size applies.
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rules_font_map.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"   [RulesFont] Could not load '{path}': {e}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print(f"   [RulesFont] '{path}' must be a JSON object of card name -> "
+              f"fontsize offset (relative px); got {type(data).__name__}.", file=sys.stderr)
+        return {}
+    out = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or k.startswith('_'):
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            print(f"   [RulesFont] Dropping '{k}': offset must be a number "
+                  f"(got {type(v).__name__}).", file=sys.stderr)
+            continue
+        v = int(v) if float(v).is_integer() else float(v)
+        out[k.strip().lower()] = v
+    return out
+
+
+def get_cached_rules_font_map(holder, path=None):
+    """Load the rules-font map into `holder._rules_font_map_cache` (once)."""
+    if getattr(holder, '_rules_font_map_cache', None) is None:
+        holder._rules_font_map_cache = load_rules_font_map(path)
+    return holder._rules_font_map_cache
+
+
+def resolve_rules_font_size(card_name, font_map, default=None):
+    """
+    Decide a card's rules-text body {fontsize} offset (int/float px) or None
+    (the frame default -- no tag).
+
+    Precedence:
+      1. an explicit override in `font_map` -- always honored (even when
+         `default` is None), like the text-layout map;
+      2. else `default` (the global --rules-font-size);
+      3. else None.
+    """
+    if card_name and font_map:
+        key = str(card_name).strip().lower()
+        if key in font_map:
+            return font_map[key]
+        norm = normalize_card_name(card_name)
+        if norm:
+            for k, v in font_map.items():
+                if normalize_card_name(k) == norm:
+                    return v
+    return default
+
 REMINDER_SIM_THRESHOLD = 0.4  # min. similarity for a segment to count as a keyword's printed reminder
 
 def _reminder_similarity(a, b):
